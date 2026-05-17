@@ -40,7 +40,7 @@ axiom/
 ### From source
 
 ```bash
-git clone https://github.com/yourusername/axiom
+git clone https://github.com/Rutytoi220/Axiom.git
 cd axiom
 pip install -e .
 ```
