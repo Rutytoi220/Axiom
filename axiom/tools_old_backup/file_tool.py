@@ -34,6 +34,11 @@ class FileTool(BaseTool):
             raise ValueError(f"Base directory does not exist: {base_dir}")
     
     @property
+    def tool_id(self) -> str:
+        """Return tool identifier."""
+        return "file"
+    
+    @property
     def name(self) -> str:
         """Return tool name."""
         return "file"

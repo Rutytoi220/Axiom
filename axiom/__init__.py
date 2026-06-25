@@ -11,8 +11,11 @@ from axiom.agents import BaseAgent, AgentResult, OrchestratorAgent, ShellAgent
 from axiom.tools import (
     BaseTool,
     ToolResult,
+    EchoTool,
     ShellTool,
-    FileTool
+    FileReadTool,
+    FileWriteTool,
+    SystemInfoTool
 )
 from axiom.plugins import BasePlugin, NXBTPlugin, AutomationPlugin
 from axiom.config import AxiomConfig, get_config, set_config
@@ -43,8 +46,11 @@ __all__ = [
     # Tools
     "BaseTool",
     "ToolResult",
+    "EchoTool",
     "ShellTool",
-    "FileTool",
+    "FileReadTool",
+    "FileWriteTool",
+    "SystemInfoTool",
     # Plugins
     "BasePlugin",
     "NXBTPlugin",

@@ -50,6 +50,11 @@ class ShellTool(BaseTool):
         self._allow_dangerous = allow_dangerous
     
     @property
+    def tool_id(self) -> str:
+        """Return tool identifier."""
+        return "shell"
+    
+    @property
     def name(self) -> str:
         """Return tool name."""
         return "shell"

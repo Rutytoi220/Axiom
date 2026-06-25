@@ -51,6 +51,11 @@ class BaseAgent(ABC):
         self._tool_registry = tool_registry
     
     @property
+    def agent_id(self) -> str:
+        """Return agent identifier."""
+        return self._name
+    
+    @property
     def name(self) -> str:
         """Return agent name."""
         return self._name
@@ -108,3 +113,16 @@ class BaseAgent(ABC):
         """
         steps.append(step_description)
         logger.debug(f"[{self.name}] Step: {step_description}")
+    
+    def set_engine_refs(self, event_bus, tool_registry=None) -> None:
+        """
+        Set references to engine components.
+        
+        Args:
+            event_bus: EventBus instance for emitting events
+            tool_registry: Registry instance for accessing tools (optional)
+        """
+        self._event_bus = event_bus
+        if tool_registry is not None:
+            self._tool_registry = tool_registry
+        logger.debug(f"Set engine refs for agent '{self.name}'")

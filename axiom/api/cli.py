@@ -1,16 +1,20 @@
 """AXIOM Command-line interface."""
 
+import asyncio
 import cmd
 import json
 import logging
 from typing import Optional
 from axiom.core import Engine
-from axiom.memory import MemoryManager
+from axiom.memory import MemoryManager, SyncMemoryStore
 from axiom.llm import OllamaClient, OllamaConfig
 from axiom.agents import OrchestratorAgent
 from axiom.tools import (
+    EchoTool,
     ShellTool,
-    FileTool
+    FileReadTool,
+    FileWriteTool,
+    SystemInfoTool
 )
 from axiom.plugins import NXBTPlugin, AutomationPlugin
 
@@ -36,11 +40,47 @@ class CLI(cmd.Cmd):
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.engine = Engine()
+        # Create memory store first
+        self.memory_store = SyncMemoryStore(":memory:")
+        # Pass memory store to engine
+        self.engine = Engine(memory=self.memory_store)
         self.memory = MemoryManager()
-        self.ollama = OllamaClient()
-        self.orchestrator = OrchestratorAgent()
+        self.ollama = OllamaClient(OllamaConfig(model="qwen2.5:14b"))
+        self.orchestrator = OrchestratorAgent(self.engine.registry, self.engine.event_bus, self.memory_store, llm=self.ollama)
+        self._event_log = []
+        self._subscribe_events()
         self._init_system()
+    
+    def _subscribe_events(self) -> None:
+        """Capture events via pub/sub instead of monkey-patching the event bus."""
+        bus = self.engine.event_bus
+        if hasattr(bus, "subscribe"):
+            try:
+                bus.subscribe("*", self._on_event)
+            except Exception:
+                logger.debug("Unable to subscribe CLI event listener", exc_info=True)
+
+    def _on_event(self, event) -> None:
+        try:
+            name = getattr(event, "name", getattr(event, "event_type", "unknown"))
+            payload = getattr(event, "payload", getattr(event, "data", None))
+            self._event_log.append({"event": name, "payload": payload})
+            self._event_log = self._event_log[-200:]
+        except Exception:
+            logger.debug("CLI event handler failed", exc_info=True)
+
+    def _run_async(self, coro):
+        """Helper to run async code in synchronous context."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If loop is running, create a new one
+                return asyncio.run(coro)
+            else:
+                return loop.run_until_complete(coro)
+        except RuntimeError:
+            # No event loop in thread, create a new one
+            return asyncio.run(coro)
     
     def _init_system(self) -> None:
         """Initialize the AXIOM system."""
@@ -48,7 +88,6 @@ class CLI(cmd.Cmd):
         
         # Initialize engine
         self.engine.initialize()
-        self.orchestrator.set_engine_refs(self.engine.event_bus, self.engine.registry)
         
         # Register tools
         self._register_tools()
@@ -67,8 +106,11 @@ class CLI(cmd.Cmd):
     def _register_tools(self) -> None:
         """Register system tools."""
         tools = [
+            EchoTool(),
             ShellTool(),
-            FileTool(".")
+            FileReadTool("."),
+            FileWriteTool("."),
+            SystemInfoTool()
         ]
         
         for tool in tools:
@@ -78,8 +120,15 @@ class CLI(cmd.Cmd):
     
     def _register_agents(self) -> None:
         """Register agents."""
-        self.engine.registry.register_agent(self.orchestrator.agent_id, self.orchestrator)
-        logger.info("Registered orchestrator agent")
+        # Register the orchestrator itself
+        self.engine.registry.register_agent(self.orchestrator.name, self.orchestrator)
+        
+        # Register specialized agents with the orchestrator
+        from axiom.agents import EchoAgent
+        echo_agent = EchoAgent("echo_agent", self.engine.registry, self.engine.event_bus, self.memory_store)
+        self.orchestrator.register_agent(echo_agent)
+        
+        logger.info("Registered orchestrator agent with echo_agent")
     
     def _init_plugins(self) -> None:
         """Initialize plugins."""
@@ -103,17 +152,42 @@ class CLI(cmd.Cmd):
         
         print(f"\n[Processing: {arg[:50]}...]")
         
-        # Process through orchestrator
-        response = self.orchestrator(arg)
-        
-        # Store in memory
-        self.memory.add_message("user", arg)
-        self.memory.add_message("assistant", response.output or "")
-        
-        # Display response
-        print("\n" + "="*60)
-        print(response.output)
-        print("="*60 + "\n")
+        try:
+            # Process through orchestrator (OrchestratorAgent is synchronous)
+            response = self.orchestrator.run(arg)
+            
+            # Convert output for display
+            output_str = ""
+            if response.output:
+                if isinstance(response.output, dict):
+                    # Agentic loop output
+                    output_str = response.output.get("response", "")
+                    tool_results = response.output.get("tool_results", [])
+                    if tool_results:
+                        output_str += "\n\n--- Tool calls ---"
+                        for tr in tool_results:
+                            output_str += f"\n  ▸ {tr['tool']}({json.dumps(tr['arguments'], default=str)[:80]})"
+                elif isinstance(response.output, str):
+                    output_str = response.output
+                else:
+                    output_str = json.dumps(response.output, indent=2, default=str)
+            
+            # Store in memory
+            self.memory.add_message("user", arg)
+            self.memory.add_message("assistant", output_str)
+            
+            # Display response
+            print("\n" + "="*60)
+            if output_str:
+                print(output_str)
+            elif response.error:
+                print(f"Error: {response.error}")
+            else:
+                print("(No output)")
+            print("="*60 + "\n")
+        except Exception as e:
+            print(f"\nError processing request: {e}\n")
+            logger.exception(f"Error in do_ask: {e}")
     
     def do_tools(self, arg: str) -> None:
         """List all registered tools"""
@@ -228,6 +302,20 @@ class CLI(cmd.Cmd):
             print(f"\n{role}: {content}")
         print("\n")
     
+
+    def do_resume(self, arg: str) -> None:
+        """Resume a conversation by ID: resume <conversation_id>"""
+        conversation_id = arg.strip()
+        if not conversation_id:
+            print("Usage: resume <conversation_id>")
+            return
+        try:
+            history = self.memory.restore_conversation(conversation_id)
+            print(f"Resumed conversation {conversation_id} ({len(history)} messages)")
+        except Exception as e:
+            print(f"Unable to resume conversation: {e}")
+            logger.exception("Conversation resume failed")
+
     def do_clear_history(self, arg: str) -> None:
         """Clear conversation history"""
         if self.memory.get_conversation():
@@ -235,6 +323,36 @@ class CLI(cmd.Cmd):
             print("History cleared")
         else:
             print("No active conversation")
+    
+    def do_memory_log(self, arg: str) -> None:
+        """Show memory event log: memory-log [--limit N]"""
+        limit = 20
+        if arg:
+            try:
+                if arg.startswith("--limit"):
+                    limit = int(arg.split()[-1])
+            except (ValueError, IndexError):
+                print("Usage: memory-log [--limit N]")
+                return
+        
+        events = self.engine.memory.get_events(limit=limit)
+        
+        if not events:
+            print("No events recorded.")
+            return
+        
+        print("\nMemory Event Log:")
+        print("="*80)
+        print(f"{'Timestamp':<20} | {'Event Name':<30} | {'Data':<25}")
+        print("-"*80)
+        
+        for event in events:
+            timestamp = str(event['timestamp'])[:10]  # Format timestamp
+            event_name = event['event_name'][:28]
+            data = json.dumps(event['data'])[:23] if event['data'] else "None"
+            print(f"{timestamp:<20} | {event_name:<30} | {data:<25}")
+        
+        print("="*80 + "\n")
     
     def do_quit(self, arg: str) -> None:
         """Exit AXIOM"""
@@ -259,6 +377,8 @@ class CLI(cmd.Cmd):
   status             - Show system status
   history            - Show conversation history
   clear_history      - Clear conversation history
+  resume <id>        - Resume conversation/session by ID
+  memory_log         - Show memory event log
   exit/quit          - Exit AXIOM
   help               - Show this help message
             """)

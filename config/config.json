@@ -1,0 +1,76 @@
+{
+  "ollama": {
+    "url": "http://127.0.0.1:11434",
+    "model": "qwen2.5:14b",
+    "timeout": 60
+  },
+
+  "system_prompt": "You are AXIOM, a local Linux assistant.\n\nRespond ONLY using one of these formats:\n\n[INSTRUCTION] action params [/INSTRUCTION]\n[MESSAGE] text [/MESSAGE]\n[NO_ACTION]\n\nRules:\n- Use INSTRUCTION for actions\n- Use MESSAGE for explanations\n- Use NO_ACTION if nothing to do\n- Be concise and deterministic\n- Do NOT output anything outside these tags\n- For folders: System automatically searches and finds ANY folder by name\n- Works with any folder name: \"downloads\", \"documents\", \"my_project\", etc.\n- Paths can be: folder names (auto-searched), ~/.../paths, $HOME/paths, or /absolute/paths\n- System searches entire filesystem, so any user folder can be found and opened\n\nExamples:\nOpen any folder → [INSTRUCTION]open_folder path=\"downloads\"[/INSTRUCTION]\nOpen custom folder → [INSTRUCTION]open_folder path=\"my_projects\"[/INSTRUCTION]\nOpen by path → [INSTRUCTION]open_folder path=\"~/Documents\"[/INSTRUCTION]\nOpen app → [INSTRUCTION]open_app name=\"firefox\"[/INSTRUCTION]\nRun command → [INSTRUCTION]run_command cmd=\"date\"[/INSTRUCTION]\nCopy text → [INSTRUCTION]copy_to_clipboard text=\"hello\"[/INSTRUCTION]",
+
+  "agent": {
+    "multi_action": true,
+    "stop_on_error": true,
+    "max_actions_per_request": 5,
+    "enable_context_memory": true
+  },
+
+  "security": {
+    "allow_any_app": false,
+    "require_confirmation_for_commands": false,
+    "sandbox_mode": false
+  },
+
+  "allowed_apps": {
+    "code": "code",
+    "firefox": "firefox",
+    "opera": "opera",
+    "nautilus": "nautilus",
+    "thunar": "thunar",
+    "gnome-terminal": "gnome-terminal"
+  },
+
+  "allowed_folder_bases": [
+    "~",
+    "/tmp"
+  ],
+
+  "allowed_commands": [
+    "echo",
+    "pwd",
+    "ls",
+    "whoami",
+    "date"
+  ],
+
+  "clipboard_tools": [
+    "wl-copy",
+    "xclip",
+    "xsel"
+  ],
+
+  "context": {
+    "track_running_apps": true,
+    "track_last_folder": true,
+    "track_last_command": true
+  },
+
+  "logging": {
+    "level": "INFO",
+    "file": "axiom.log",
+    "log_actions": true,
+    "log_errors": true
+  },
+
+  "storage": {
+    "db_path": "data/axiom.db"
+  },
+
+  "observer": {
+    "enabled": true,
+    "lookback": 50,
+    "frequency_threshold": 3,
+    "frequency_window_hours": 24,
+    "temporal_min_days": 2,
+    "temporal_tolerance_minutes": 30
+  }
+}

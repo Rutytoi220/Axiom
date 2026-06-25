@@ -1,0 +1,158 @@
+"""Desktop control actions: screenshot, click, type, move mouse."""
+
+import os
+import base64
+import time
+from typing import Tuple, Optional
+from PIL import ImageGrab
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+try:
+    import pyautogui
+    pyautogui.FAILSAFE = True  # Move mouse to corner to abort
+    PYAUTOGUI_AVAILABLE = True
+except ImportError:
+    PYAUTOGUI_AVAILABLE = False
+    logger.warning("pyautogui not installed, desktop control disabled")
+
+
+def take_screenshot(encode_base64: bool = True) -> Tuple[bool, str]:
+    """Take a screenshot of the current desktop.
+    
+    Args:
+        encode_base64: If True, return base64-encoded PNG. If False, return file path.
+    
+    Returns:
+        (success, base64_string or file_path)
+    """
+    try:
+        screenshot = ImageGrab.grab()
+        
+        if encode_base64:
+            # Convert to base64 for LLM analysis
+            import io
+            buffer = io.BytesIO()
+            screenshot.save(buffer, format='PNG')
+            img_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+            logger.debug("Screenshot captured and encoded to base64 (%d bytes)", len(img_base64))
+            return True, img_base64
+        else:
+            # Save to file
+            screenshot_path = '/tmp/axiom_screenshot.png'
+            screenshot.save(screenshot_path)
+            logger.info("Screenshot saved to %s", screenshot_path)
+            return True, screenshot_path
+            
+    except Exception as e:
+        logger.exception("Failed to take screenshot")
+        return False, f"Screenshot failed: {e}"
+
+
+def click_mouse(x: int, y: int, button: str = 'left', clicks: int = 1) -> Tuple[bool, str]:
+    """Click the mouse at specified coordinates.
+    
+    Args:
+        x: X coordinate
+        y: Y coordinate
+        button: 'left', 'right', or 'middle'
+        clicks: Number of clicks
+    
+    Returns:
+        (success, message)
+    """
+    if not PYAUTOGUI_AVAILABLE:
+        return False, "pyautogui not available"
+    
+    try:
+        x, y = int(x), int(y)
+        pyautogui.click(x, y, clicks=clicks, button=button)
+        logger.info("Clicked at (%d, %d) with button '%s'", x, y, button)
+        return True, f"Clicked at ({x}, {y})"
+    except Exception as e:
+        logger.exception("Failed to click mouse")
+        return False, f"Click failed: {e}"
+
+
+def type_text(text: str, interval: float = 0.05) -> Tuple[bool, str]:
+    """Type text at current cursor position.
+    
+    Args:
+        text: Text to type
+        interval: Delay between keystrokes (seconds)
+    
+    Returns:
+        (success, message)
+    """
+    if not PYAUTOGUI_AVAILABLE:
+        return False, "pyautogui not available"
+    
+    try:
+        pyautogui.typewrite(text, interval=interval)
+        logger.info("Typed: %s", text[:50])
+        return True, f"Typed: {text[:50]}"
+    except Exception as e:
+        logger.exception("Failed to type text")
+        return False, f"Type failed: {e}"
+
+
+def press_keys(keys: str) -> Tuple[bool, str]:
+    """Press keyboard keys.
+    
+    Args:
+        keys: Key names separated by '+' (e.g., 'ctrl+c', 'alt+tab', 'enter')
+    
+    Returns:
+        (success, message)
+    """
+    if not PYAUTOGUI_AVAILABLE:
+        return False, "pyautogui not available"
+    
+    try:
+        key_list = [k.strip().lower() for k in keys.split('+')]
+        pyautogui.hotkey(*key_list)
+        logger.info("Pressed keys: %s", keys)
+        return True, f"Pressed: {keys}"
+    except Exception as e:
+        logger.exception("Failed to press keys")
+        return False, f"Key press failed: {e}"
+
+
+def move_mouse(x: int, y: int, duration: float = 0.5) -> Tuple[bool, str]:
+    """Move mouse to specified coordinates.
+    
+    Args:
+        x: X coordinate
+        y: Y coordinate
+        duration: Time to move (seconds)
+    
+    Returns:
+        (success, message)
+    """
+    if not PYAUTOGUI_AVAILABLE:
+        return False, "pyautogui not available"
+    
+    try:
+        x, y = int(x), int(y)
+        pyautogui.moveTo(x, y, duration=duration)
+        logger.info("Moved mouse to (%d, %d)", x, y)
+        return True, f"Moved mouse to ({x}, {y})"
+    except Exception as e:
+        logger.exception("Failed to move mouse")
+        return False, f"Move failed: {e}"
+
+
+def get_screen_size() -> Tuple[bool, str]:
+    """Get screen resolution.
+    
+    Returns:
+        (success, "WIDTHxHEIGHT")
+    """
+    try:
+        size = ImageGrab.grab().size
+        logger.info("Screen size: %dx%d", size[0], size[1])
+        return True, f"{size[0]}x{size[1]}"
+    except Exception as e:
+        logger.exception("Failed to get screen size")
+        return False, f"Failed to get screen size: {e}"

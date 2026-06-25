@@ -2,6 +2,7 @@
 
 from typing import Optional, Any, Dict
 import logging
+import time
 from axiom.core.events import EventBus, Event
 from axiom.core.registry import Registry
 from axiom.core.context import ExecutionContext
@@ -12,11 +13,21 @@ logger = logging.getLogger(__name__)
 class Engine:
     """Main AXIOM orchestration engine."""
     
-    def __init__(self):
-        self.event_bus = EventBus()
-        self.registry = Registry()
+    def __init__(self, bus=None, registry=None, memory=None):
+        self.event_bus = bus or EventBus()
+        self.registry = registry or Registry()
         self.context: Optional[ExecutionContext] = None
         self._running = False
+        self.started_at = None
+        
+        # Setup memory (use MemoryStore if not provided)
+        if memory is None:
+            from axiom.memory import SyncMemoryStore
+
+            self.memory = SyncMemoryStore(":memory:")
+        else:
+            self.memory = memory
+        
         self._setup_internal_handlers()
     
     def _setup_internal_handlers(self) -> None:
@@ -37,6 +48,10 @@ class Engine:
         """Initialize the engine."""
         logger.info("Initializing AXIOM Engine")
         self._running = True
+        self.started_at = time.time()
+        
+        # Log engine started event
+        self.memory.log_event("engine.started", data={"started_at": self.started_at}, source="Engine")
         
         # Publish initialization event
         init_event = Event(
@@ -78,6 +93,9 @@ class Engine:
     
     def shutdown(self) -> None:
         """Shutdown the engine."""
+        # Log engine stopped event
+        self.memory.log_event("engine.stopped", data={"stopped_at": time.time()}, source="Engine")
+        
         shutdown_event = Event(
             event_type="system.shutdown",
             source="Engine"
@@ -87,3 +105,12 @@ class Engine:
     def is_running(self) -> bool:
         """Check if engine is running."""
         return self._running
+
+    def status(self) -> Dict[str, Any]:
+        """Get engine status."""
+        return {
+            "running": self._running,
+            "started_at": self.started_at,
+            "event_count": len(self.memory.get_events())
+        }
+
