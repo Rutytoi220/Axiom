@@ -238,8 +238,16 @@ class OllamaClient:
         self.config.model = model
     
     def close(self) -> None:
-        """Close the session."""
-        self._session.close()
+        """Release client resources.
+
+        This client uses ``urllib.request`` per-call (no persistent
+        connection/session object), so there is nothing to release today.
+        The method exists so callers can unconditionally treat OllamaClient
+        like other AXIOM resources with a close() lifecycle, and so a future
+        implementation backed by a persistent session can add real cleanup
+        here without changing the public interface.
+        """
+        return None
 
 
 class PromptBuilder:

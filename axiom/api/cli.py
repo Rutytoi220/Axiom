@@ -363,13 +363,14 @@ class CLI(cmd.Cmd):
         return True
 
     def close(self) -> None:
-        """Release engine and memory resources exactly once."""
+        """Release engine, memory, and LLM client resources exactly once."""
         if self._closed:
             return
         self._closed = True
         self.engine.shutdown()
         self.memory.close()
         self.memory_store.close()
+        self.ollama.close()
 
     def postloop(self) -> None:
         """Ensure resources are released when the command loop exits."""
