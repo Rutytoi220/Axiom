@@ -21,6 +21,17 @@ The foundation is an event bus pattern that enables loose coupling between compo
 - Components register themselves in `Registry`
 - `ExecutionContext` maintains state during task execution
 
+> **Note on parallel implementations:** `axiom/engine/`, top-level
+> `axiom/events.py`, and top-level `axiom/registry.py` provide a second,
+> independently tested `Engine`/`EventBus`/`Registry` stack used by
+> `axiom.engine.CoreEngine` and covered by `tests/test_core_engine.py`,
+> `tests/test_event_bus.py`, and `tests/test_registry.py`. Both stacks are
+> live and intentionally kept separate rather than merged, since unifying
+> them would require a broader migration outside the scope of incidental
+> changes. Confirmed genuinely dead code (`axiom/cli.py`, and the
+> `_old_backup`/`_backup`/`_impl` module variants left over from an earlier
+> refactor, two of which had broken imports) has been removed.
+
 ### 2. **LLM Layer** (`axiom/llm/`)
 
 Local LLM support with Ollama-compatible client.
@@ -81,7 +92,7 @@ SQLite-backed memory consumers expose explicit, idempotent `close()` methods.
 The CLI calls these on normal exit, interrupts, and command-loop termination so
 local database workers do not keep one-shot AXIOM processes alive.
 
-### 5. **Tool System** (`axiom/tools/`)
+### 6. **Tool System** (`axiom/tools/`)
 
 Extensible tool registry with built-in system tools.
 
@@ -95,7 +106,41 @@ Extensible tool registry with built-in system tools.
 - `write_file` - Write to files
 - `python_exec` - Execute Python code safely
 
-### 6. **Plugin System** (`axiom/plugins/`)
+### 7. **Tool Registry** (`axiom/tool_registry.py`)
+
+A focused, type-safe registry and invocation surface for `axiom.tools`
+implementations, independent of the generic component registries in
+`axiom.registry` and `axiom.core.registry`.
+
+**Why it exists:** `axiom.tools` implementations use two calling
+conventions — an async, single-dict-parameter family (`ShellTool`,
+`FileReadTool`, `FileWriteTool`, `EchoTool`, `SystemInfoTool`, `FileTool`) and
+a legacy synchronous keyword-argument family (`ShellCommandTool`,
+`ReadFileTool`, `WriteFileTool`, `PythonExecTool`). Callers that invoke
+`tool.execute(...)` directly must know which convention a given tool uses.
+
+**`ToolRegistry` provides:**
+- `register(tool)` / `register_tool(tool_id, tool)` — validated against the
+  real `axiom.tools.BaseTool` (rejecting anything else), with duplicate-ID
+  and empty-ID protection.
+- `get_tool`, `list_tools`, `unregister_tool`, `__contains__`, `__len__` —
+  mirroring `axiom.core.registry.Registry`'s tool-storage API so it is a
+  drop-in replacement wherever only tool storage is needed.
+- `get_schemas()` — OpenAI-compatible function-calling schemas for every
+  registered tool, for LLM tool-calling loops such as `OrchestratorAgent`.
+- `execute(tool_id, **kwargs)` — a single, safe invocation path that works
+  for both tool calling conventions and captures tool exceptions as a failed
+  `ToolResult` instead of raising.
+
+This also motivated a correctness fix in `BaseTool.__call__`: the
+single-dict-parameter adaptation previously applied only when `execute` was
+a coroutine function, so synchronous dict-parameter tools (e.g. `EchoTool`)
+were not correctly invokable via `tool(**kwargs)`. The adaptation is now
+determined purely from the `execute` signature and applies to sync and
+async implementations alike; the coroutine bridge is applied afterward only
+if `execute` actually returned a coroutine.
+
+### 8. **Plugin System** (`axiom/plugins/`)
 
 Extensible plugins for additional functionality.
 
@@ -109,7 +154,7 @@ Extensible plugins for additional functionality.
 - Configuration management
 - Event subscription
 
-### 7. **API & CLI** (`axiom/api/`)
+### 9. **API & CLI** (`axiom/api/`)
 
 User-facing command-line interface.
 

@@ -24,6 +24,7 @@ from axiom.tools import (
     WriteFileTool,
     PythonExecTool
 )
+from axiom.tool_registry import ToolRegistry, ToolRegistryError
 from axiom.plugins import BasePlugin, NXBTPlugin, AutomationPlugin
 from axiom.config import AxiomConfig, get_config, set_config
 from axiom.api import CLI
@@ -69,6 +70,8 @@ __all__ = [
     "ReadFileTool",
     "WriteFileTool",
     "PythonExecTool",
+    "ToolRegistry",
+    "ToolRegistryError",
     # Plugins
     "BasePlugin",
     "NXBTPlugin",

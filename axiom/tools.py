@@ -120,8 +120,17 @@ class BaseTool(ABC):
         return True
 
     def __call__(self, *args, **kwargs) -> ToolResult:
+        """Invoke the tool, adapting kwargs to whichever calling convention
+        ``execute`` uses (a single ``params``/``arguments`` dict, or explicit
+        keyword arguments), and bridging async ``execute`` implementations
+        onto a synchronous return value.
+
+        The single-dict-parameter adaptation is determined purely from the
+        ``execute`` signature and applies whether ``execute`` is sync or
+        async, so callers do not need to know a tool's implementation style.
+        """
         self._execution_count += 1
-        
+
         if hasattr(self, "parameters") and self.parameters:
             if not self.validate_parameters(**kwargs):
                 return ToolResult(
@@ -133,34 +142,35 @@ class BaseTool(ABC):
         import inspect
         import asyncio
 
-        if inspect.iscoroutinefunction(self.execute):
-            sig = inspect.signature(self.execute)
-            params_list = list(sig.parameters.values())
-            if len(params_list) == 1 and (params_list[0].annotation == Dict[str, Any] or params_list[0].name in ("params", "arguments", "kwargs")):
-                if args:
-                    execute_args = args
-                else:
-                    execute_args = (kwargs,)
-                execute_kwargs = {}
-            else:
-                execute_args = args
-                execute_kwargs = kwargs
-
-            coro = self.execute(*execute_args, **execute_kwargs)
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    new_loop = asyncio.new_event_loop()
-                    try:
-                        return new_loop.run_until_complete(coro)
-                    finally:
-                        new_loop.close()
-                else:
-                    return loop.run_until_complete(coro)
-            except RuntimeError:
-                return asyncio.run(coro)
+        sig = inspect.signature(self.execute)
+        params_list = list(sig.parameters.values())
+        single_dict_param = len(params_list) == 1 and (
+            params_list[0].annotation == Dict[str, Any]
+            or params_list[0].name in ("params", "arguments", "kwargs")
+        )
+        if single_dict_param:
+            execute_args = args if args else (kwargs,)
+            execute_kwargs = {}
         else:
-            return self.execute(*args, **kwargs)
+            execute_args = args
+            execute_kwargs = kwargs
+
+        result = self.execute(*execute_args, **execute_kwargs)
+        if not asyncio.iscoroutine(result):
+            return result
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                new_loop = asyncio.new_event_loop()
+                try:
+                    return new_loop.run_until_complete(result)
+                finally:
+                    new_loop.close()
+            else:
+                return loop.run_until_complete(result)
+        except RuntimeError:
+            return asyncio.run(result)
 
     def execute(self, *args, **kwargs) -> ToolResult:
         """Execute the tool implementation."""
