@@ -47,17 +47,32 @@ Local LLM support with Ollama-compatible client.
 
 ### 3. **Memory Layer** (`axiom/memory/`)
 
-SQLite-based persistent storage.
+SQLite-based persistent storage, async at the core with a synchronous
+adapter for non-async consumers (CLI, engine, agents).
 
 **Files:**
-- `db.py` - SQLite database wrapper
-- `memory_manager.py` - High-level memory API
+- `protocol.py` - `MemoryBackend` abstract interface for pluggable backends
+- `memory_async.py` - `MemoryStore`, the async SQLite-backed implementation
+- `memory_sync.py` - `SyncMemoryStore`, a synchronous adapter over `MemoryStore`
+- `memory_manager.py` - `MemoryManager`, conversation-focused high-level API
+- `semantic.py` - `SemanticIndex`, embedding storage and cosine-similarity search
 
 **Storage:**
+- Key-value entries with tags and TTL expiry
 - Conversations (with message history)
-- Tool execution results
-- Agent state
-- System state
+- Conversation summaries
+- Embeddings for semantic search
+- Tool execution results and agent session tracking
+- System/event log
+
+**Semantic search:** `MemoryManager` accepts an optional `embedding_provider`
+(anything satisfying `axiom.memory.EmbeddingProvider`, e.g. `OllamaClient`).
+When supplied, `add_message()` best-effort embeds each message via
+`SemanticIndex`, and `search_semantic(query)` returns messages ranked by
+cosine similarity. Without a provider, behavior is unchanged: messages are
+stored without embeddings and only the existing keyword-based
+`search_relevant()` is available. Embedding failures are logged and
+swallowed — they never cause message storage or search to raise.
 
 ### 4. **Agent System** (`axiom/agents/`)
 
@@ -477,13 +492,32 @@ CMD ["axiom"]
 - [ ] Web API (Flask/FastAPI)
 - [ ] Streaming responses
 - [ ] Multi-agent collaboration
-- [ ] Advanced memory retrieval
+- [x] Advanced memory retrieval (semantic search via `MemoryManager.search_semantic`)
 - [ ] Tool result caching
 - [ ] Distributed execution
 - [ ] Model fine-tuning
 - [ ] Vector database integration
 - [ ] Docker containerization
 - [ ] Kubernetes support
+
+## Relationship to the Legacy `brain/`/`actions/` Stack
+
+The repository root also contains `main.py`, `brain/`, `actions/`, `core/`
+(top-level, distinct from `axiom/core/`), `security/`, `ui/`, and `utils/` —
+a separate, self-contained local AI assistant (~5,300 lines) with its own
+intent parsing (`brain/intent_parser.py`), action registry
+(`brain/action_registry.py`), desktop control (`actions/desktop.py`,
+gracefully degrading when `pyautogui` is absent), vision (`brain/vision.py`),
+and a CLI/GUI (`ui/cli.py`, `ui/gui.py`), run via `python main.py`.
+
+This stack has **zero imports to or from the `axiom` package** and no test
+coverage. It predates the `axiom/` package (matching this repository's
+original name, ChienGPT) and was not folded into the `axiom-ai` rewrite.
+It is left untouched here rather than merged or removed: integrating or
+retiring it is a significant, high-risk architectural decision (it already
+implements meaningful pieces of the "Desktop automation" and "Vision"
+roadmap items) that deserves an explicit, deliberate migration plan rather
+than an incidental change alongside unrelated work.
 
 ## Conclusion
 
