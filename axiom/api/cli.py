@@ -8,7 +8,7 @@ from typing import Optional
 from axiom.core import Engine
 from axiom.memory import MemoryManager, SyncMemoryStore
 from axiom.llm import OllamaClient, OllamaConfig
-from axiom.agents import OrchestratorAgent
+from axiom.agents.orchestrator_agent import OrchestratorAgent
 from axiom.tools import (
     EchoTool,
     ShellTool,
@@ -48,6 +48,7 @@ class CLI(cmd.Cmd):
         self.ollama = OllamaClient(OllamaConfig(model="qwen2.5:14b"))
         self.orchestrator = OrchestratorAgent(self.engine.registry, self.engine.event_bus, self.memory_store, llm=self.ollama)
         self._event_log = []
+        self._closed = False
         self._subscribe_events()
         self._init_system()
     
@@ -357,9 +358,22 @@ class CLI(cmd.Cmd):
     def do_quit(self, arg: str) -> None:
         """Exit AXIOM"""
         print("\nShutting down AXIOM...")
-        self.engine.shutdown()
+        self.close()
         print("Goodbye!")
         return True
+
+    def close(self) -> None:
+        """Release engine and memory resources exactly once."""
+        if self._closed:
+            return
+        self._closed = True
+        self.engine.shutdown()
+        self.memory.close()
+        self.memory_store.close()
+
+    def postloop(self) -> None:
+        """Ensure resources are released when the command loop exits."""
+        self.close()
     
     def do_help(self, arg: str) -> None:
         """Show help information"""
@@ -396,7 +410,10 @@ def run_cli() -> None:
         cli.cmdloop()
     except KeyboardInterrupt:
         print("\n\nInterrupted. Shutting down...")
-        cli.engine.shutdown()
+        cli.close()
     except Exception as e:
         logger.error(f"CLI error: {e}", exc_info=True)
         print(f"Error: {e}")
+        cli.close()
+    else:
+        cli.close()

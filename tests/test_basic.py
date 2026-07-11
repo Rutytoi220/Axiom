@@ -68,25 +68,26 @@ class TestMemoryStore(unittest.TestCase):
         """Test that updated_at changes when key is updated."""
         self.mem.set("timekey", "value1")
         time.sleep(0.01)  # Small delay to ensure timestamp difference
-        
-        # Get the created_at from the database
-        import sqlite3
-        cursor = self.mem._conn.execute(
-            "SELECT created_at, updated_at FROM memories WHERE key = ?",
-            ("timekey",),
-        )
-        row = cursor.fetchone()
+
+        # Query via the underlying async store
+        import asyncio
+
+        async def _query():
+            db = self.mem._store._conn()
+            cursor = await db.execute(
+                "SELECT created_at, updated_at FROM memories WHERE key = ?",
+                ("timekey",),
+            )
+            return await cursor.fetchone()
+
+        row = asyncio.run(_query())
         created_at_1 = row["created_at"]
         updated_at_1 = row["updated_at"]
-        
+
         # Update the key
         self.mem.set("timekey", "value2")
-        
-        cursor = self.mem._conn.execute(
-            "SELECT created_at, updated_at FROM memories WHERE key = ?",
-            ("timekey",),
-        )
-        row = cursor.fetchone()
+
+        row = asyncio.run(_query())
         created_at_2 = row["created_at"]
         updated_at_2 = row["updated_at"]
         

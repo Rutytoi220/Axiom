@@ -1,14 +1,26 @@
-# Axiom
+# AXIOM
 
-A simple project repository for Axiom.
+AXIOM is a local-first AI execution system for coordinating tools, agents,
+memory, and desktop automation without requiring a cloud control plane.
 
-## Description
+## Core capabilities
 
-This repository contains code and resources for Axiom.
+- Event-driven execution and component registries
+- Local Ollama integration
+- Persistent local memory
+- Sandboxed file and shell tooling
+- Deterministic execution plans with dependency tracking and confirmation gates
 
-## Usage
+## Development
 
-1. Install ollama and download the Axiom folder.
-2. Launch the "axiom_cli.py" file.
-3. Enjoy it!
-4. Please make feedback 
+Run the tests with:
+
+```bash
+python -m pytest
+```
+
+Build a distribution with:
+
+```bash
+python -m pip wheel --no-deps --no-build-isolation .
+```

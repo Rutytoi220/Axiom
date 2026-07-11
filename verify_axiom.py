@@ -24,7 +24,7 @@ def test_imports():
         from axiom import OllamaClient
         print("✓ LLM module")
         
-        from axiom import Database, MemoryManager
+        from axiom import MemoryManager
         print("✓ Memory module")
         
         from axiom import BaseAgent, OrchestratorAgent

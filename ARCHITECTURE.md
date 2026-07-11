@@ -62,6 +62,25 @@ Multi-agent framework with event-based communication.
 - Event subscription
 - Tool access via registry
 
+### 5. **Execution Planning** (`axiom/planning/`)
+
+The planning layer is deterministic and independent of LLMs, agents, and
+tools. `ExecutionPlan` models explicit dependency graphs and serializable step
+state, while `TaskPlanner` constructs validated plans from explicit steps.
+
+- Cyclic, self-referential, missing, and duplicate dependencies are rejected.
+- Steps move through pending, running, completed, failed, or skipped states.
+- Confirmation-gated steps cannot start until an executor explicitly confirms
+  them, providing a safety boundary for destructive capabilities.
+- Plans and results are JSON-compatible so a memory implementation can persist
+  and resume them without coupling to an executor.
+
+### Resource Lifecycle
+
+SQLite-backed memory consumers expose explicit, idempotent `close()` methods.
+The CLI calls these on normal exit, interrupts, and command-loop termination so
+local database workers do not keep one-shot AXIOM processes alive.
+
 ### 5. **Tool System** (`axiom/tools/`)
 
 Extensible tool registry with built-in system tools.

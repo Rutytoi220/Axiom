@@ -21,40 +21,44 @@ def run_task(task: str, use_tools: bool = True, session_id: Optional[str] = None
 
     from axiom.api.cli import CLI
     cli = CLI()
-    
-    # If session_id provided, load or switch
-    if session_id:
-        cli.memory.set_conversation(session_id)
-        # Pull history from memory manager into orchestrator history
-        history = cli.memory.get_conversation_history()
-        for msg in history:
-            # Reconstruct history for orchestrator (basic roles)
-            if msg["role"] in ["user", "assistant", "system", "tool"]:
-                cli.orchestrator._chat_history.append({"role": msg["role"], "content": msg["content"]})
-    
-    # Add orchestrator message capture logic to save to memory manager
-    def _memory_capture(event_name, payload):
-        if event_name == "orchestrator.task.received":
-            cli.memory.add_message("user", payload.get("task", ""))
-        elif event_name == "orchestrator.task.completed":
-            cli.memory.add_message("assistant", "Task completed.")
+    try:
+        # If session_id provided, load or switch
+        if session_id:
+            cli.memory.set_conversation(session_id)
+            # Pull history from memory manager into orchestrator history
+            history = cli.memory.get_conversation_history()
+            for msg in history:
+                # Reconstruct history for orchestrator (basic roles)
+                if msg["role"] in ["user", "assistant", "system", "tool"]:
+                    cli.orchestrator._chat_history.append(
+                        {"role": msg["role"], "content": msg["content"]}
+                    )
 
-    cli.orchestrator.bus = type('BusMock', (), {'publish': _memory_capture})()
+        # Add orchestrator message capture logic to save to memory manager
+        def _memory_capture(event_name, payload):
+            if event_name == "orchestrator.task.received":
+                cli.memory.add_message("user", payload.get("task", ""))
+            elif event_name == "orchestrator.task.completed":
+                cli.memory.add_message("assistant", "Task completed.")
 
-    result = cli.orchestrator.run(task, use_tools=use_tools, session_id=session_id)
+        cli.orchestrator.bus = type("BusMock", (), {"publish": _memory_capture})()
 
-    # Save final structured result to memory
-    if result.success and isinstance(result.output, dict):
-        response = result.output.get("response", "")
-        cli.memory.add_message("assistant", response)
+        result = cli.orchestrator.run(task, use_tools=use_tools, session_id=session_id)
 
-    return {
-        "success": result.success,
-        "output": result.output,
-        "error": result.error,
-        "steps": result.steps_taken,
-        "metadata": result.metadata,
-    }
+        # Save final structured result to memory
+        if result.success and isinstance(result.output, dict):
+            response = result.output.get("response", "")
+            cli.memory.add_message("assistant", response)
+
+        return {
+            "success": result.success,
+            "output": result.output,
+            "error": result.error,
+            "steps": result.steps_taken,
+            "metadata": result.metadata,
+        }
+    finally:
+        cli.close()
 
 
 def main():

@@ -6,7 +6,8 @@ and support for agents, tools, and plugins.
 
 from axiom.core import Engine, EventBus, Event, Registry, ExecutionContext
 from axiom.llm import OllamaClient, OllamaConfig
-from axiom.memory import Database, MemoryManager
+from axiom.memory import MemoryManager
+from axiom.planning import ExecutionPlan, PlanError, PlanStep, StepStatus, TaskPlanner
 from axiom.agents import BaseAgent, AgentResult, OrchestratorAgent, ShellAgent
 from axiom.tools import (
     BaseTool,
@@ -15,7 +16,13 @@ from axiom.tools import (
     ShellTool,
     FileReadTool,
     FileWriteTool,
-    SystemInfoTool
+    SystemInfoTool,
+    ToolParameter,
+    FileTool,
+    ShellCommandTool,
+    ReadFileTool,
+    WriteFileTool,
+    PythonExecTool
 )
 from axiom.plugins import BasePlugin, NXBTPlugin, AutomationPlugin
 from axiom.config import AxiomConfig, get_config, set_config
@@ -36,8 +43,13 @@ __all__ = [
     "OllamaClient",
     "OllamaConfig",
     # Memory
-    "Database",
     "MemoryManager",
+    # Planning
+    "ExecutionPlan",
+    "PlanError",
+    "PlanStep",
+    "StepStatus",
+    "TaskPlanner",
     # Agents
     "BaseAgent",
     "AgentResult",
@@ -51,6 +63,12 @@ __all__ = [
     "FileReadTool",
     "FileWriteTool",
     "SystemInfoTool",
+    "ToolParameter",
+    "FileTool",
+    "ShellCommandTool",
+    "ReadFileTool",
+    "WriteFileTool",
+    "PythonExecTool",
     # Plugins
     "BasePlugin",
     "NXBTPlugin",
