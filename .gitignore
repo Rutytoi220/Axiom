@@ -121,10 +121,15 @@ dmypy.json
 # AXIOM-specific
 axiom.db
 *.db
+*.db-shm
+*.db-wal
 .axiom/
 logs/
 *.pyc
 .DS_Store
+
+# Multi-agent experimentation sandbox (qwen3 8b <-> qwen3-coder)
+INFINITE POWER/
 
 # IDE
 .vscode/
