@@ -49,6 +49,12 @@ class OrchestratorAgent(SimpleBaseAgent):
         self._agents = {}
         self._llm = llm
         self._chat_history: List[Dict[str, str]] = []
+        self._state = "idle"
+
+    @property
+    def description(self) -> str:
+        """Human-readable summary for introspection (e.g. the CLI's `agents` command)."""
+        return "LLM-driven orchestrator agent that plans, calls tools, and synthesizes a final answer."
 
     def set_llm(self, llm) -> None:
         self._llm = llm
@@ -65,11 +71,16 @@ class OrchestratorAgent(SimpleBaseAgent):
         return sorted(self._agents.keys())
 
     def run(self, task: str, use_tools: bool = True, session_id: Optional[str] = None) -> AgentResult:
-        self._emit("orchestrator.task.received", {"task": task, "session_id": session_id})
-        steps: List[str] = []
-        if self._llm is None:
-            return self._prefix_route(task, steps)
-        return self._agentic_loop(task, steps, use_tools=use_tools, session_id=session_id)
+        self._execution_count += 1
+        self._state = "running"
+        try:
+            self._emit("orchestrator.task.received", {"task": task, "session_id": session_id})
+            steps: List[str] = []
+            if self._llm is None:
+                return self._prefix_route(task, steps)
+            return self._agentic_loop(task, steps, use_tools=use_tools, session_id=session_id)
+        finally:
+            self._state = "idle"
 
     def _agentic_loop(self, task: str, steps: List[str], use_tools: bool = True, session_id: Optional[str] = None) -> AgentResult:
         session_id = str(session_id or uuid.uuid4())

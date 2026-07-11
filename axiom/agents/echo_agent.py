@@ -20,10 +20,26 @@ class SimpleBaseAgent:
         self.registry = registry
         self.bus = bus
         self.memory = memory
+        self._execution_count = 0
 
     def run(self, task: str) -> AgentResult:
         """Execute a task. Must be overridden by subclasses."""
         raise NotImplementedError(f"{self.__class__.__name__} must implement run()")
+
+    def get_info(self) -> Dict[str, Any]:
+        """Return agent metadata for introspection (e.g. the CLI's `agents` command).
+
+        Subclasses may override ``description`` (property or attribute) and
+        ``_state`` for more specific reporting; both fall back to sensible
+        defaults here so every ``SimpleBaseAgent`` subclass is introspectable
+        without requiring an explicit override.
+        """
+        return {
+            "name": self.name,
+            "description": getattr(self, "description", f"{self.__class__.__name__} agent"),
+            "state": getattr(self, "_state", "idle"),
+            "execution_count": self._execution_count,
+        }
 
     def _emit(self, event: str, data: Dict[str, Any]) -> None:
         """Emit an event via the event bus (if available and callable)."""
@@ -50,6 +66,7 @@ class EchoAgent(SimpleBaseAgent):
         Returns:
             AgentResult with task as output
         """
+        self._execution_count += 1
         self._emit("agent.started", {"agent": self.name, "task": task})
         steps = []
         self._log(f"Received task: {task}", steps)

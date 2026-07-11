@@ -320,6 +320,7 @@ class FileReadTool(BaseTool):
     """Tool for reading file contents and directory listings."""
     
     def __init__(self, base_dir: str = "."):
+        super().__init__()
         self._base_dir = Path(base_dir).resolve()
         if not self._base_dir.exists():
             raise ValueError(f"Base directory does not exist: {base_dir}")
@@ -386,6 +387,7 @@ class FileWriteTool(BaseTool):
     """Tool for writing, appending, or deleting files."""
     
     def __init__(self, base_dir: str = "."):
+        super().__init__()
         self._base_dir = Path(base_dir).resolve()
         if not self._base_dir.exists():
             raise ValueError(f"Base directory does not exist: {base_dir}")

@@ -350,7 +350,7 @@ class CLI(cmd.Cmd):
         for event in events:
             timestamp = str(event['timestamp'])[:10]  # Format timestamp
             event_name = event['event_name'][:28]
-            data = json.dumps(event['data'])[:23] if event['data'] else "None"
+            data = json.dumps(event['payload'])[:23] if event['payload'] else "None"
             print(f"{timestamp:<20} | {event_name:<30} | {data:<25}")
         
         print("="*80 + "\n")
