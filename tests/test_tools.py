@@ -599,3 +599,117 @@ class TestFileTool:
             
             assert result.success is True
             assert "café" in result.output
+
+
+class TestScreenCaptureTool:
+    """Test ScreenCaptureTool implementation."""
+    
+    def test_screen_capture_tool_properties(self):
+        """Test properties of ScreenCaptureTool."""
+        from axiom.tools import ScreenCaptureTool
+        tool = ScreenCaptureTool()
+        assert tool.name == "screen_capture"
+        assert "screenshot" in tool.description.lower()
+        
+    def test_screen_capture_tool_schema(self):
+        """Test schema of ScreenCaptureTool."""
+        from axiom.tools import ScreenCaptureTool
+        tool = ScreenCaptureTool()
+        schema = tool.schema
+        assert schema["type"] == "object"
+        assert "filename" in schema["properties"]
+        
+    @pytest.mark.asyncio
+    async def test_screen_capture_success(self):
+        """Test successful screen capture."""
+        from axiom.tools import ScreenCaptureTool
+        import sys
+        from unittest.mock import MagicMock
+        
+        mock_pyautogui = MagicMock()
+        mock_img = MagicMock()
+        mock_img.width = 800
+        mock_img.height = 600
+        
+        def fake_save(filepath):
+            with open(filepath, 'w') as f:
+                f.write('fake')
+        mock_img.save.side_effect = fake_save
+        mock_pyautogui.screenshot.return_value = mock_img
+        
+        real_pyautogui = sys.modules.get("pyautogui")
+        sys.modules["pyautogui"] = mock_pyautogui
+        
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tool = ScreenCaptureTool(capture_dir=tmpdir)
+                result = await tool.execute({"filename": "test_shot"})
+                
+                assert result.success is True
+                assert "test_shot.png" in result.output["path"]
+                assert Path(result.output["path"]).exists()
+                assert result.metadata["width"] == 800
+                assert result.metadata["height"] == 600
+                mock_pyautogui.screenshot.assert_called_once()
+        finally:
+            if real_pyautogui is not None:
+                sys.modules["pyautogui"] = real_pyautogui
+            else:
+                del sys.modules["pyautogui"]
+            
+    @pytest.mark.asyncio
+    async def test_screen_capture_default_filename(self):
+        """Test screen capture with default filename."""
+        from axiom.tools import ScreenCaptureTool
+        import sys
+        from unittest.mock import MagicMock
+        
+        mock_pyautogui = MagicMock()
+        mock_img = MagicMock()
+        mock_img.width = 800
+        mock_img.height = 600
+        
+        def fake_save(filepath):
+            with open(filepath, 'w') as f:
+                f.write('fake')
+        mock_img.save.side_effect = fake_save
+        mock_pyautogui.screenshot.return_value = mock_img
+        
+        real_pyautogui = sys.modules.get("pyautogui")
+        sys.modules["pyautogui"] = mock_pyautogui
+        
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tool = ScreenCaptureTool(capture_dir=tmpdir)
+                result = await tool.execute({})
+                
+                assert result.success is True
+                assert "screenshot_" in result.output["path"]
+                assert Path(result.output["path"]).exists()
+        finally:
+            if real_pyautogui is not None:
+                sys.modules["pyautogui"] = real_pyautogui
+            else:
+                del sys.modules["pyautogui"]
+            
+    @pytest.mark.asyncio
+    async def test_screen_capture_no_pyautogui(self):
+        """Test graceful degradation when pyautogui is missing."""
+        from axiom.tools import ScreenCaptureTool
+        import sys
+        
+        real_pyautogui = sys.modules.get("pyautogui")
+        sys.modules["pyautogui"] = None
+        
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tool = ScreenCaptureTool(capture_dir=tmpdir)
+                result = await tool.execute({})
+                
+                assert result.success is False
+                assert "not installed" in result.error
+        finally:
+            if real_pyautogui is not None:
+                sys.modules["pyautogui"] = real_pyautogui
+            else:
+                del sys.modules["pyautogui"]

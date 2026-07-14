@@ -15,7 +15,7 @@
   },
 
   "security": {
-    "allow_any_app": false,
+    "allow_any_app": true,
     "require_confirmation_for_commands": false,
     "sandbox_mode": false
   },
@@ -39,7 +39,12 @@
     "pwd",
     "ls",
     "whoami",
-    "date"
+    "date",
+    "tailscale",
+    "ip",
+    "cat", 
+    "nano", 
+    "cd"
   ],
 
   "clipboard_tools": [

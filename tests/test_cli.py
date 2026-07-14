@@ -216,3 +216,28 @@ def test_emptyline_produces_no_output(cli, capsys):
 
     captured = capsys.readouterr()
     assert captured.out == ""
+
+
+def test_cli_agent_events_reach_bus_subscribers(cli):
+    """Regression: CLI wires core EventBus into agents that emit via publish_sync.
+
+    SimpleBaseAgent._emit only calls bus.publish_sync(). The core EventBus
+    used by axiom.core.Engine has no publish_sync, so agent lifecycle events
+    are silently dropped and never reach wildcard subscribers.
+    """
+    received = []
+
+    def on_event(event):
+        name = getattr(event, "name", getattr(event, "event_type", "unknown"))
+        received.append(name)
+
+    bus = cli.engine.event_bus
+    assert not hasattr(bus, "publish_sync"), "precondition: core bus lacks publish_sync"
+    bus.subscribe("*", on_event)
+
+    echo_agent = cli.orchestrator._agents["echo_agent"]
+    result = echo_agent.run("integration probe")
+    assert result.success is True
+
+    assert "agent.started" in received
+    assert "agent.completed" in received

@@ -64,75 +64,69 @@ engine.registry.register_tool(scraper.tool_id, scraper)
 
 # Creating Custom Agents
 
-Agents extend `BaseAgent` and implement the `process` method.
+Agents extend `BaseAgent` and implement the `run` method, returning an
+`AgentResult`.
 
 ## Example: Database Query Agent
 
 ```python
-from axiom import BaseAgent, AgentResponse, AgentState
-from typing import Optional, Dict, Any
+from axiom import BaseAgent, AgentResult
+from typing import Optional, List
 import sqlite3
 
 
 class DatabaseAgent(BaseAgent):
-    """Execute database queries."""
-    
-    def __init__(self, db_path: str):
-        super().__init__(
-            agent_id="database",
-            name="Database Agent",
-            description="Execute SQL queries safely"
-        )
+    """Execute read-only database queries."""
+
+    def __init__(self, db_path: str, registry=None, bus=None, memory=None):
+        super().__init__(name="database", registry=registry, bus=bus, memory=memory)
         self.db_path = db_path
         self.allowed_tables = ["users", "products"]  # Whitelist
-    
-    def process(self, input_text: str, context: Optional[Dict] = None) -> AgentResponse:
-        """Process query request."""
-        
-        # Validate query
-        if not self._is_safe_query(input_text):
-            return AgentResponse(
-                agent_id=self.agent_id,
+
+    def run(self, task: str) -> AgentResult:
+        """Execute a query request. `task` is the raw SQL to run."""
+        steps: List[str] = []
+        self._log(f"Received query: {task}", steps)
+        self._emit("agent.started", {"agent": self.name, "task": task})
+
+        if not self._is_safe_query(task):
+            return AgentResult(
                 success=False,
-                output=None,
-                error="Query not allowed for security reasons"
+                error="Query not allowed for security reasons",
+                steps_taken=steps,
             )
-        
+
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            
-            cursor.execute(input_text)
+            cursor.execute(task)
             results = cursor.fetchall()
-            
             conn.close()
-            
-            return AgentResponse(
-                agent_id=self.agent_id,
+
+            self._log(f"Query returned {len(results)} rows", steps)
+            self._emit("agent.completed", {"agent": self.name, "success": True})
+
+            return AgentResult(
                 success=True,
                 output={"rows": results, "count": len(results)},
-                reasoning="Query executed successfully"
+                steps_taken=steps,
             )
         except Exception as e:
-            return AgentResponse(
-                agent_id=self.agent_id,
-                success=False,
-                output=None,
-                error=str(e)
-            )
-    
+            self._emit("agent.error", {"agent": self.name, "error": str(e)})
+            return AgentResult(success=False, error=str(e), steps_taken=steps)
+
     def _is_safe_query(self, query: str) -> bool:
         """Validate query for safety."""
         # Only allow SELECT on whitelisted tables
         query_upper = query.upper().strip()
-        
+
         if not query_upper.startswith("SELECT"):
             return False
-        
+
         for table in self.allowed_tables:
-            if table in query_upper:
+            if table.upper() in query_upper:
                 return True
-        
+
         return False
 ```
 

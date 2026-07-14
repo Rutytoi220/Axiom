@@ -1083,3 +1083,74 @@ class PythonExecTool(BaseTool):
                 output=None,
                 error=str(e)
             )
+
+
+class ScreenCaptureTool(BaseTool):
+    """Tool for capturing screenshots."""
+    
+    def __init__(self, capture_dir: str = "./captures/"):
+        super().__init__()
+        self._capture_dir = Path(capture_dir).resolve()
+    
+    @property
+    def tool_id(self) -> str:
+        return "screen_capture"
+    
+    @property
+    def name(self) -> str:
+        return "screen_capture"
+    
+    @property
+    def description(self) -> str:
+        return "Capture a screenshot of the primary display."
+    
+    @property
+    def schema(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string",
+                    "description": "Optional filename (without extension). If not provided, a timestamp will be used."
+                }
+            }
+        }
+    
+    async def execute(self, params: Dict[str, Any]) -> ToolResult:
+        try:
+            import pyautogui
+        except ImportError:
+            logger.warning("pyautogui is not installed. Screen capture is disabled.")
+            return ToolResult(
+                success=False,
+                error="pyautogui is not installed. Screen capture is not available."
+            )
+            
+        try:
+            import datetime
+            self._capture_dir.mkdir(parents=True, exist_ok=True)
+            
+            filename = params.get("filename")
+            if not filename:
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"screenshot_{timestamp}"
+                
+            if not filename.endswith(".png"):
+                filename += ".png"
+                
+            filepath = self._capture_dir / filename
+            
+            # Take screenshot
+            screenshot = pyautogui.screenshot()
+            screenshot.save(filepath)
+            
+            return ToolResult(
+                success=True,
+                output={"path": str(filepath)},
+                metadata={"width": screenshot.width, "height": screenshot.height}
+            )
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error=f"Screen capture failed: {str(e)}"
+            )
