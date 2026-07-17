@@ -4,21 +4,10 @@ Provides a sync interface for consumers that cannot use async/await
 (OrchestratorAgent, Engine, CLI). Delegates all work to MemoryStore.
 """
 
-import asyncio
 from typing import Any, Dict, List, Optional
 
+from axiom.core.async_bridge import run_sync as _run
 from axiom.memory.memory_async import MemoryStore
-
-
-def _run(coro):
-    """Run an async coroutine from synchronous code."""
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            return asyncio.run(coro)
-        return loop.run_until_complete(coro)
-    except RuntimeError:
-        return asyncio.run(coro)
 
 
 class SyncMemoryStore:
