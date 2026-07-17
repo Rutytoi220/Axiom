@@ -11,8 +11,9 @@ from dataclasses import dataclass, field, asdict
 from enum import Enum
 from typing import Dict, Any, List, Optional
 
-from axiom.agents.echo_agent import SimpleBaseAgent
+from axiom.agents.simple_base import SimpleBaseAgent
 from axiom.agents.base import AgentResult
+from axiom.memory.context_manager import ContextManager, estimate_messages_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +45,13 @@ class Plan:
 class OrchestratorAgent(SimpleBaseAgent):
     """AI agent that uses an LLM + registered tools to accomplish tasks."""
 
-    def __init__(self, registry=None, bus=None, memory=None, llm=None):
+    def __init__(self, registry=None, bus=None, memory=None, llm=None, context_manager=None):
         super().__init__(name="orchestrator", registry=registry, bus=bus, memory=memory)
         self._agents = {}
         self._llm = llm
         self._chat_history: List[Dict[str, str]] = []
         self._state = "idle"
+        self._context_manager = context_manager or ContextManager()
 
     @property
     def description(self) -> str:
@@ -61,11 +63,11 @@ class OrchestratorAgent(SimpleBaseAgent):
 
     def register_agent(self, agent) -> None:
         self._agents[agent.name] = agent
-        if self.registry is not None:
-            if hasattr(self.registry, 'register_agent'):
-                self.registry.register_agent(f"agent.{agent.name}", agent)
-            elif hasattr(self.registry, 'register'):
-                self.registry.register(f"agent.{agent.name}", agent)
+        # Register with the engine registry if it supports agent registration.
+        # ToolRegistry (a tools-only adapter) does not support agent registration,
+        # so we skip it to avoid TypeErrors.
+        if self.registry is not None and hasattr(self.registry, 'register_agent'):
+            self.registry.register_agent(f"agent.{agent.name}", agent)
 
     def list_agents(self) -> List[str]:
         return sorted(self._agents.keys())
@@ -152,17 +154,29 @@ class OrchestratorAgent(SimpleBaseAgent):
         if not final_response:
             final_response = "Task processing reached maximum rounds. Review tool results for partial progress."
         self._chat_history = (self._chat_history + [{"role": "user", "content": task}, {"role": "assistant", "content": final_response}])[-20:]
+
+        # Persist a summary of older turns when history grows large.
+        if self._context_manager.should_summarize(self._chat_history):
+            self._persist_summary(session_id, self._chat_history)
+
         self._persist_step(session_id, "assistant", {"response": final_response})
         self._emit("orchestrator.task.completed", {"task": task, "success": True, "rounds": rounds, "session_id": session_id})
         return AgentResult(True, output={"response": final_response, "tool_results": observations, "rounds": rounds, "session_id": session_id, "plan": asdict(plan)}, steps_taken=steps)
 
     def _build_messages(self, task: str, plan: Plan, observations: List[Dict[str, Any]], session_id: str) -> List[Dict[str, Any]]:
         memories = self._retrieve_relevant_memory(task, session_id, top_k=6)
-        return [
+        persisted_summaries = self._retrieve_summaries(session_id)
+        system_messages = [
             {"role": "system", "content": "You are AXIOM, a local-first autonomous agent. Operate on the plan. Use tools only when needed. Return a final answer when complete."},
-            {"role": "system", "content": json.dumps({"plan": asdict(plan), "relevant_memory": memories, "recent_observations": observations[-5:]}, default=str)},
-            {"role": "user", "content": task},
+            {"role": "system", "content": json.dumps({"plan": asdict(plan), "relevant_memory": memories, "persisted_summaries": persisted_summaries}, default=str)},
         ]
+        return self._context_manager.build_context_window(
+            system_messages=system_messages,
+            chat_history=self._chat_history,
+            current_task=task,
+            retrieved_memories=None,
+            observations=observations,
+        )
 
     def _call_llm(self, messages: List[Dict[str, Any]], tool_schemas: List[Dict[str, Any]]) -> Dict[str, Any]:
         last_exc = None
@@ -216,6 +230,10 @@ class OrchestratorAgent(SimpleBaseAgent):
         return {"complete": False, "reason": "Continue plan"}
 
     def _get_tool_schemas(self) -> List[Dict[str, Any]]:
+        # Delegate to ToolRegistry when available for consistent schema generation.
+        if self.registry and hasattr(self.registry, "get_schemas"):
+            return self.registry.get_schemas()
+        # Fallback: build schemas directly from the raw core registry.
         schemas: List[Dict[str, Any]] = []
         tools = self.registry.list_tools() if self.registry and hasattr(self.registry, "list_tools") else {}
         for tool_id, tool in tools.items():
@@ -225,6 +243,13 @@ class OrchestratorAgent(SimpleBaseAgent):
         return schemas
 
     def _execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        # Delegate to ToolRegistry.execute() when available for safe dispatch.
+        if self.registry and hasattr(self.registry, "execute"):
+            tool_result = self.registry.execute(tool_name, **arguments)
+            payload = {"output": getattr(tool_result, "output", None), "error": getattr(tool_result, "error", None)}
+            return self._structured_tool_result(tool_name, arguments, payload, bool(getattr(tool_result, "success", False)))
+
+        # Fallback: direct tool lookup and execution against raw core registry.
         tools = self.registry.list_tools() if self.registry and hasattr(self.registry, "list_tools") else {}
         tool = tools.get(tool_name) or next((t for t in tools.values() if getattr(t, "name", None) == tool_name), None)
         if not tool:
@@ -244,17 +269,8 @@ class OrchestratorAgent(SimpleBaseAgent):
         return {"tool": tool, "arguments": arguments if isinstance(arguments, dict) else {"input": arguments}, "result": result if isinstance(result, dict) else {"output": result}, "success": bool(success)}
 
     def _run_coro_sync(self, coro):
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                new_loop = asyncio.new_event_loop()
-                try:
-                    return new_loop.run_until_complete(coro)
-                finally:
-                    new_loop.close()
-            return loop.run_until_complete(coro)
-        except RuntimeError:
-            return asyncio.run(coro)
+        from axiom.core.async_bridge import run_sync
+        return run_sync(coro)
 
     def _persist_step(self, session_id: str, kind: str, payload: Any) -> None:
         if not self.memory:
@@ -267,6 +283,38 @@ class OrchestratorAgent(SimpleBaseAgent):
                 self.memory.log_event(f"orchestrator.{kind}", {"session_id": session_id, "payload": payload}, source="orchestrator")
         except Exception as exc:
             logger.debug("Failed to persist step: %s", exc)
+
+    def _persist_summary(self, session_id: str, chat_history: List[Dict[str, Any]]) -> None:
+        """Persist a summary of older conversation turns to memory."""
+        if not self.memory:
+            return
+        older_turns = self._context_manager.get_turns_for_summary(chat_history)
+        if not older_turns:
+            return
+        summary = self._context_manager._summarize_turns(older_turns)
+        if not summary:
+            return
+        try:
+            key = f"session:{session_id}:summary:{time.time_ns()}"
+            if hasattr(self.memory, "set"):
+                self.memory.set(key, {"summary": summary["content"], "turns_covered": len(older_turns)}, tags=["session", session_id, "summary"])
+        except Exception as exc:
+            logger.debug("Failed to persist summary: %s", exc)
+
+    def _retrieve_summaries(self, session_id: str, limit: int = 3) -> List[str]:
+        """Retrieve persisted conversation summaries for this session."""
+        if not self.memory or not hasattr(self.memory, "search"):
+            return []
+        try:
+            rows = self.memory.search([session_id, "summary"])
+            summaries = []
+            for row in rows:
+                value = row.get("value", {})
+                if isinstance(value, dict) and "summary" in value:
+                    summaries.append(value["summary"])
+            return summaries[-limit:]
+        except Exception:
+            return []
 
     def _retrieve_relevant_memory(self, task: str, session_id: str, top_k: int = 5) -> List[Dict[str, Any]]:
         if not self.memory or not hasattr(self.memory, "search"):

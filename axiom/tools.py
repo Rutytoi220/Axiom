@@ -159,18 +159,8 @@ class BaseTool(ABC):
         if not asyncio.iscoroutine(result):
             return result
 
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                new_loop = asyncio.new_event_loop()
-                try:
-                    return new_loop.run_until_complete(result)
-                finally:
-                    new_loop.close()
-            else:
-                return loop.run_until_complete(result)
-        except RuntimeError:
-            return asyncio.run(result)
+        from axiom.core.async_bridge import run_sync
+        return run_sync(result)
 
     def execute(self, *args, **kwargs) -> ToolResult:
         """Execute the tool implementation."""
