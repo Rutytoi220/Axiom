@@ -24,3 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Out of memory protection with default `llama3:8b` fallback.
 - CLI interrupts gracefully handling ghost tasks in the async bridge.
 - Packaging dependencies (`aiosqlite`, `psutil`, etc.).
+
+### Changed
+- Standardized packaging exclusively around `pyproject.toml`, removing legacy `setup.py`.
+- Restructured codebase, moving starter templates to `examples/` and verifiers to `scripts/`.

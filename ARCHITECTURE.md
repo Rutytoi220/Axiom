@@ -4,6 +4,56 @@
 
 AXIOM is a complete, production-ready local-first AI orchestration framework implemented in Python 3.12+. It provides a modular, event-driven architecture for building intelligent systems without external API dependencies.
 
+### System Architecture Diagram
+
+```mermaid
+graph TD
+    %% Define styles
+    classDef core fill:#f9f,stroke:#333,stroke-width:2px
+    classDef memory fill:#bbf,stroke:#333,stroke-width:2px
+    classDef llm fill:#bfb,stroke:#333,stroke-width:2px
+    classDef agent fill:#fbb,stroke:#333,stroke-width:2px
+
+    %% Components
+    CLI([CLI / User Input])
+    
+    subgraph Core
+        Engine[Orchestration Engine]:::core
+        EventBus[Event Bus]:::core
+        Registry[Component Registry]:::core
+    end
+    
+    subgraph Memory Layer
+        SyncMem[SyncMemoryStore]:::memory
+        AsyncMem[MemoryStore (aiosqlite)]:::memory
+        Semantic[SemanticIndex (numpy)]:::memory
+    end
+    
+    subgraph LLM Layer
+        Ollama[Ollama Client / Handler]:::llm
+    end
+    
+    subgraph Agent Layer
+        OrchestratorAgent[OrchestratorAgent]:::agent
+        Tools[Tool Executors]:::agent
+    end
+
+    %% Relationships
+    CLI -->|Command| Engine
+    Engine -->|Manage| OrchestratorAgent
+    Engine -.->|Publish/Subscribe| EventBus
+    
+    OrchestratorAgent -->|Chat & Tools| Ollama
+    OrchestratorAgent -->|Query Tools| Registry
+    Registry -->|Execute| Tools
+    
+    OrchestratorAgent -->|Read/Write| SyncMem
+    SyncMem -->|Async Bridge| AsyncMem
+    AsyncMem -->|Cosine Sim| Semantic
+    
+    Ollama -.->|Generate Embeddings| Semantic
+```
+
 ## Core Architecture
 
 ### 1. **Event-Driven Core** (`axiom/core/`)

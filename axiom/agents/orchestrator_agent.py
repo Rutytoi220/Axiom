@@ -14,6 +14,7 @@ from typing import Dict, Any, List, Optional
 from axiom.agents.simple_base import SimpleBaseAgent
 from axiom.agents.base import AgentResult
 from axiom.memory.context_manager import ContextManager, estimate_messages_tokens
+from axiom.core.transaction import WorkspaceTransactionManager, StagingCapExceeded
 
 logger = logging.getLogger(__name__)
 
@@ -94,12 +95,22 @@ class OrchestratorAgent(SimpleBaseAgent):
         rounds = 0
         timeout = timeout if timeout is not None else 120.0
         deadline = time.time() + timeout
+        self._tool_call_history = []
+        override_prompt = None
+
+        # --- Transactional filesystem safety ---
+        txn = WorkspaceTransactionManager(
+            bus=self._bus if hasattr(self, "_bus") else getattr(self, "bus", None),
+            verbose=True,
+        )
+        txn.begin()
 
         self._persist_step(session_id, "user", {"task": task})
         self._log(f"Session {session_id}: starting state machine", steps)
 
         try:
             if hasattr(self._llm, "is_available") and not self._llm.is_available():
+                txn.rollback()
                 return AgentResult(False, error="Ollama is not running. Start it with: ollama serve", steps_taken=steps)
         except Exception as exc:
             self._log(f"LLM availability check failed, continuing: {exc}", steps)
@@ -108,14 +119,18 @@ class OrchestratorAgent(SimpleBaseAgent):
             if deadline and time.time() > deadline:
                 final_response = "Task processing timed out."
                 self._log("Task timed out before completion.", steps)
+                self._emit("plan.failed", {"reason": "timeout", "step": rounds, "total_steps": MAX_TOOL_ROUNDS})
+                txn.rollback()
                 break
                 
             rounds += 1
+            round_start_time = time.perf_counter()
             self._persist_step(session_id, "state", {"state": state.value, "plan": asdict(plan), "round": rounds})
 
             if state == AgentState.THINK:
                 self._log(f"THINK round {rounds}: {plan.current()}", steps)
-                messages = self._build_messages(task, plan, observations, session_id)
+                messages = self._build_messages(task, plan, observations, session_id, override_prompt)
+                override_prompt = None
                 time_left = max(1.0, deadline - time.time()) if deadline else 60.0 # Default 60s max per generation round
                 response_msg = self._call_llm(messages, tool_schemas, timeout=time_left)
                 self._persist_step(session_id, "reasoning", response_msg)
@@ -137,8 +152,31 @@ class OrchestratorAgent(SimpleBaseAgent):
                         tool_name = tc.get("function", {}).get("name") or tc.get("name") or "unknown"
                         observations.append(self._structured_tool_result(tool_name, tc, {"error": f"Malformed tool arguments JSON: {exc}. Please fix the syntax."}, False))
                         continue
-                        
+
                     sig = tc_id or hashlib.md5(f"{tool_name}:{json.dumps(arguments, sort_keys=True, default=str)}".encode()).hexdigest()
+                    self._tool_call_history.append(sig)
+
+                    if self._tool_call_history.count(sig) >= 3:
+                        override_prompt = "You are repeating yourself. Abort current strategy and re-evaluate."
+
+                    # --- Snapshot filesystem targets before mutation ---
+                    if txn.should_snapshot(tool_name):
+                        for arg_key in ("path", "file", "filename", "dest", "destination"):
+                            target_path = arguments.get(arg_key)
+                            if target_path:
+                                try:
+                                    txn.snapshot(target_path)
+                                except StagingCapExceeded as cap_err:
+                                    observations.append(self._structured_tool_result(
+                                        tool_name, arguments,
+                                        {"error": f"Transaction staging cap exceeded: {cap_err}"},
+                                        False
+                                    ))
+                                    self._log(f"ACT {tool_name}: staging cap exceeded, skipping tool.", steps)
+                                    break
+                                except Exception as snap_err:
+                                    logger.warning("Snapshot failed for %s arg '%s': %s", tool_name, arg_key, snap_err)
+
                     if sig in executed_tool_ids_this_round:
                         result = self._structured_tool_result(tool_name, arguments, {"error": "Duplicate tool call skipped for this inference step."}, False)
                     else:
@@ -165,8 +203,22 @@ class OrchestratorAgent(SimpleBaseAgent):
                     state = AgentState.THINK
                 self._save_plan(session_id, plan)
 
+            round_duration_ms = (time.perf_counter() - round_start_time) * 1000
+            self._emit("loop.cycle", {
+                "session_id": session_id,
+                "round": rounds,
+                "state": state.value if hasattr(state, 'value') else str(state),
+                "duration_ms": round_duration_ms,
+                "queue_depth": len(pending_calls) if state == AgentState.ACT else 0
+            })
+
         if not final_response:
             final_response = "Task processing reached maximum rounds. Review tool results for partial progress."
+            self._emit("plan.failed", {"reason": "max_rounds", "step": rounds, "total_steps": MAX_TOOL_ROUNDS})
+            txn.rollback()
+        else:
+            txn.commit()
+
         self._chat_history = (self._chat_history + [{"role": "user", "content": task}, {"role": "assistant", "content": final_response}])[-20:]
 
         # Persist a summary of older turns when history grows large.
@@ -177,20 +229,51 @@ class OrchestratorAgent(SimpleBaseAgent):
         self._emit("orchestrator.task.completed", {"task": task, "success": True, "rounds": rounds, "session_id": session_id})
         return AgentResult(True, output={"response": final_response, "tool_results": observations, "rounds": rounds, "session_id": session_id, "plan": asdict(plan)}, steps_taken=steps)
 
-    def _build_messages(self, task: str, plan: Plan, observations: List[Dict[str, Any]], session_id: str) -> List[Dict[str, Any]]:
+    def _build_messages(self, task: str, plan: Plan, observations: List[Dict[str, Any]], session_id: str, override_prompt: Optional[str] = None) -> List[Dict[str, Any]]:
+        mem_start_time = time.perf_counter()
         memories = self._retrieve_relevant_memory(task, session_id, top_k=6)
         persisted_summaries = self._retrieve_summaries(session_id)
+        mem_duration_ms = (time.perf_counter() - mem_start_time) * 1000
+        self._emit("memory.retrieved", {
+            "session_id": session_id,
+            "latency_ms": mem_duration_ms,
+            "results_count": len(memories) + len(persisted_summaries)
+        })
+
         system_messages = [
             {"role": "system", "content": "You are AXIOM, a local-first autonomous agent. Operate on the plan. Use tools only when needed. Return a final answer when complete."},
-            {"role": "system", "content": json.dumps({"plan": asdict(plan), "relevant_memory": memories, "persisted_summaries": persisted_summaries}, default=str)},
+            {"role": "system", "content": json.dumps({"plan": asdict(plan), "persisted_summaries": persisted_summaries}, default=str)},
         ]
-        return self._context_manager.build_context_window(
+        if override_prompt:
+            system_messages.append({"role": "system", "content": override_prompt})
+            
+        messages = self._context_manager.build_context_window(
             system_messages=system_messages,
             chat_history=self._chat_history,
             current_task=task,
-            retrieved_memories=None,
+            retrieved_memories=memories,
             observations=observations,
         )
+        
+        # Adaptive Context Summarizer
+        budget = self._context_manager.max_tokens
+        used_tokens = estimate_messages_tokens(messages)
+        if used_tokens > 0.85 * budget:
+            self._log("Context > 85% utilized. Forcing adaptive memory compression.", [])
+            self._persist_summary(session_id, self._chat_history)
+            # Retruncate observations if still heavy
+            obs_tokens = estimate_messages_tokens([{"role": "system", "content": json.dumps(observations, default=str)}])
+            if obs_tokens > 0.5 * budget:
+                observations = [{"error": "Output truncated due to context limits. Too much data returned."}]
+                messages = self._context_manager.build_context_window(
+                    system_messages=system_messages,
+                    chat_history=self._chat_history,
+                    current_task=task,
+                    retrieved_memories=memories,
+                    observations=observations,
+                )
+                
+        return messages
 
     def _call_llm(self, messages: List[Dict[str, Any]], tool_schemas: List[Dict[str, Any]], timeout: Optional[float] = None) -> Dict[str, Any]:
         last_exc = None
@@ -264,27 +347,40 @@ class OrchestratorAgent(SimpleBaseAgent):
         return schemas
 
     def _execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        start_time = time.perf_counter()
         # Delegate to ToolRegistry.execute() when available for safe dispatch.
         if self.registry and hasattr(self.registry, "execute"):
             tool_result = self.registry.execute(tool_name, **arguments)
             payload = {"output": getattr(tool_result, "output", None), "error": getattr(tool_result, "error", None)}
-            return self._structured_tool_result(tool_name, arguments, payload, bool(getattr(tool_result, "success", False)))
-
-        # Fallback: direct tool lookup and execution against raw core registry.
-        tools = self.registry.list_tools() if self.registry and hasattr(self.registry, "list_tools") else {}
-        tool = tools.get(tool_name) or next((t for t in tools.values() if getattr(t, "name", None) == tool_name), None)
-        if not tool:
-            return self._structured_tool_result(tool_name, arguments, {"error": f"Tool not found: {tool_name}"}, False)
-        try:
-            result = tool.execute(arguments)
-            if asyncio.iscoroutine(result):
-                result = self._run_coro_sync(result)
-            if isinstance(result, dict) and {"tool", "arguments", "result", "success"}.issubset(result.keys()):
-                return result
-            payload = {"output": getattr(result, "output", result), "error": getattr(result, "error", None)}
-            return self._structured_tool_result(tool_name, arguments, payload, bool(getattr(result, "success", True)))
-        except Exception as exc:
-            return self._structured_tool_result(tool_name, arguments, {"error": str(exc)}, False)
+            result_dict = self._structured_tool_result(tool_name, arguments, payload, bool(getattr(tool_result, "success", False)))
+        else:
+            # Fallback: direct tool lookup and execution against raw core registry.
+            tools = self.registry.list_tools() if self.registry and hasattr(self.registry, "list_tools") else {}
+            tool = tools.get(tool_name) or next((t for t in tools.values() if getattr(t, "name", None) == tool_name), None)
+            if not tool:
+                result_dict = self._structured_tool_result(tool_name, arguments, {"error": f"Tool not found: {tool_name}"}, False)
+            else:
+                try:
+                    result = tool.execute(arguments)
+                    if asyncio.iscoroutine(result):
+                        result = self._run_coro_sync(result)
+                    if isinstance(result, dict) and {"tool", "arguments", "result", "success"}.issubset(result.keys()):
+                        result_dict = result
+                    else:
+                        payload = {"output": getattr(result, "output", result), "error": getattr(result, "error", None)}
+                        result_dict = self._structured_tool_result(tool_name, arguments, payload, bool(getattr(result, "success", True)))
+                except Exception as exc:
+                    result_dict = self._structured_tool_result(tool_name, arguments, {"error": str(exc)}, False)
+        
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        self._emit("tool.executed", {
+            "tool_name": tool_name,
+            "arguments": arguments,
+            "duration_ms": duration_ms,
+            "success": result_dict.get("success", False),
+            "error": result_dict.get("result", {}).get("error", None)
+        })
+        return result_dict
 
     def _structured_tool_result(self, tool: str, arguments: Dict[str, Any], result: Dict[str, Any], success: bool) -> Dict[str, Any]:
         return {"tool": tool, "arguments": arguments if isinstance(arguments, dict) else {"input": arguments}, "result": result if isinstance(result, dict) else {"output": result}, "success": bool(success)}

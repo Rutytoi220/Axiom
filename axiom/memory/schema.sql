@@ -23,7 +23,9 @@ CREATE TABLE IF NOT EXISTS memories (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     ttl_seconds INTEGER DEFAULT NULL,
-    expires_at DATETIME DEFAULT NULL
+    expires_at DATETIME DEFAULT NULL,
+    retrieval_count INTEGER DEFAULT 0,
+    confidence_weight REAL DEFAULT 1.0
 );
 
 CREATE INDEX IF NOT EXISTS idx_memories_key ON memories(key);

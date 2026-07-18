@@ -399,7 +399,8 @@ class TestSemanticIndex:
                     "CREATE TABLE embeddings ("
                     "id INTEGER PRIMARY KEY AUTOINCREMENT,"
                     "owner_id TEXT, owner_type TEXT,"
-                    "embedding_json TEXT, model TEXT)"
+                    "embedding_json TEXT, model TEXT, "
+                    "created_at DATETIME DEFAULT CURRENT_TIMESTAMP)"
                 )
                 await conn.commit()
 
@@ -425,7 +426,8 @@ class TestSemanticIndex:
                     "CREATE TABLE embeddings ("
                     "id INTEGER PRIMARY KEY AUTOINCREMENT,"
                     "owner_id TEXT, owner_type TEXT,"
-                    "embedding_json TEXT, model TEXT)"
+                    "embedding_json TEXT, model TEXT, "
+                    "created_at DATETIME DEFAULT CURRENT_TIMESTAMP)"
                 )
                 await conn.execute(
                     "INSERT INTO embeddings (owner_id, owner_type, embedding_json, model) "
@@ -455,7 +457,8 @@ class TestSemanticIndex:
                     "CREATE TABLE embeddings ("
                     "id INTEGER PRIMARY KEY AUTOINCREMENT,"
                     "owner_id TEXT, owner_type TEXT,"
-                    "embedding_json TEXT, model TEXT)"
+                    "embedding_json TEXT, model TEXT, "
+                    "created_at DATETIME DEFAULT CURRENT_TIMESTAMP)"
                 )
                 await conn.commit()
 

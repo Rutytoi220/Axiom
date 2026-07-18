@@ -76,15 +76,15 @@
 
 ### Examples
 
-- `example_library.py` - Basic library usage example
-- `example_custom_tool.py` - Custom tool creation example
-- `example_custom_agent.py` - Custom agent creation example
+- `examples/example_library.py` - Basic library usage example
+- `examples/example_custom_tool.py` - Custom tool creation example
+- `examples/example_custom_agent.py` - Custom agent creation example
 
 ### Testing
 
 - `tests/__init__.py` - Test package initialization
 - `tests/test_core.py` - Core functionality tests
-- `verify_axiom.py` - System verification script
+- `scripts/verify_axiom.py` - System verification script
 
 ## What's Implemented
 
@@ -295,9 +295,9 @@ All 10 system verification tests pass:
 
 Three complete, working examples:
 
-1. **example_library.py** - Using AXIOM as a library
-2. **example_custom_tool.py** - Creating custom tools
-3. **example_custom_agent.py** - Creating custom agents
+1. **examples/example_library.py** - Using AXIOM as a library
+2. **examples/example_custom_tool.py** - Creating custom tools
+3. **examples/example_custom_agent.py** - Creating custom agents
 
 ## Installation
 
@@ -357,10 +357,12 @@ ChienGPT/
 │   ├── __init__.py
 │   └── test_core.py
 │
-├── examples/                       (3 files, ~150 lines)
+├── examples/
 │   ├── example_library.py
 │   ├── example_custom_tool.py
 │   └── example_custom_agent.py
+├── scripts/
+│   └── verify_axiom.py                 (~300 lines)
 │
 ├── docs/                           (4 files, ~1,500 lines)
 │   ├── README.md
@@ -369,7 +371,6 @@ ChienGPT/
 │   └── ARCHITECTURE.md
 │
 ├── axiom_cli.py                    (12 lines)
-├── verify_axiom.py                 (~300 lines)
 ├── setup.py
 ├── pyproject.toml
 ├── requirements.txt

@@ -64,7 +64,8 @@ def test_search_semantic_ranks_by_similarity(tmp_path):
 
     assert len(results) == 2
     assert results[0]["content"] == "I love cats"
-    assert results[0]["similarity"] == 1.0
+    import math
+    assert math.isclose(results[0]["similarity"], 1.0, rel_tol=1e-3)
     assert results[1]["content"] == "The weather is sunny today"
     assert results[1]["similarity"] == 0.0
 

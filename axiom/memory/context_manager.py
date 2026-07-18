@@ -142,6 +142,14 @@ class ContextManager:
         # --- Build candidate sections ---
         sections: List[tuple[int, List[Dict[str, Any]]]] = []
 
+        # Recent observations (High priority, so they don't get starved)
+        if observations:
+            recent_obs = observations[-3:] if len(observations) > 3 else observations
+            obs_content = json.dumps(recent_obs, default=str, indent=1)
+            obs_msg = {"role": "system", "content": f"Recent tool results:\n{obs_content}"}
+            obs_tokens = estimate_messages_tokens([obs_msg])
+            sections.append((obs_tokens, [obs_msg]))
+
         # Recent chat history
         recent_turns = self._get_recent_turns(chat_history)
         if recent_turns:
@@ -161,14 +169,6 @@ class ContextManager:
             mem_msg = {"role": "system", "content": f"Relevant memories:\n{mem_content}"}
             mem_tokens = estimate_messages_tokens([mem_msg])
             sections.append((mem_tokens, [mem_msg]))
-
-        # Recent observations
-        if observations:
-            recent_obs = observations[-3:] if len(observations) > 3 else observations
-            obs_content = json.dumps(recent_obs, default=str, indent=1)
-            obs_msg = {"role": "system", "content": f"Recent tool results:\n{obs_content}"}
-            obs_tokens = estimate_messages_tokens([obs_msg])
-            sections.append((obs_tokens, [obs_msg]))
 
         # --- Fit sections into remaining budget ---
         for tokens, msgs in sections:

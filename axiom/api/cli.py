@@ -20,6 +20,7 @@ from axiom.tools import (
 )
 from axiom.legacy_wrapper import create_legacy_tools
 from axiom.plugins import NXBTPlugin, AutomationPlugin
+from axiom.memory.sleep_cycle import SleepCycleDaemon
 
 logging.basicConfig(
     level=logging.INFO,
@@ -63,6 +64,10 @@ class CLI(cmd.Cmd):
         self._closed = False
         self._subscribe_events()
         self._init_system()
+        
+        # Start Sleep Cycle Daemon
+        self.sleep_daemon = SleepCycleDaemon(self.engine.event_bus, self.memory)
+        self.sleep_daemon.start()
     
     def _subscribe_events(self) -> None:
         """Capture events via pub/sub instead of monkey-patching the event bus."""
@@ -346,13 +351,13 @@ class CLI(cmd.Cmd):
             except (ValueError, IndexError):
                 print("Usage: memory-log [--limit N]")
                 return
-        
+                
         events = self.engine.memory.get_events(limit=limit)
         
         if not events:
             print("No events recorded.")
             return
-        
+            
         print("\nMemory Event Log:")
         print("="*80)
         print(f"{'Timestamp':<20} | {'Event Name':<30} | {'Data':<25}")
@@ -365,7 +370,109 @@ class CLI(cmd.Cmd):
             print(f"{timestamp:<20} | {event_name:<30} | {data:<25}")
         
         print("="*80 + "\n")
+        
+    def do_memory(self, arg: str) -> None:
+        """Memory management commands: memory --compact"""
+        if arg.strip() == "--compact":
+            print("Running memory compaction sweep...")
+            try:
+                from axiom.core.async_bridge import run_sync
+                from axiom.memory.compactor import MemoryCompactor
+                db = self.memory.store._conn()
+                compactor = MemoryCompactor(db)
+                result = run_sync(compactor.run_compaction())
+                print(f"Compaction complete. Scanned: {result['scanned']}, Merged: {result['merged']}, Deleted: {result['deleted']}")
+            except Exception as e:
+                print(f"Error during memory compaction: {e}")
+                logger.exception("Memory compaction failed")
+        else:
+            print("Usage: memory --compact")
     
+    def do_daemon(self, arg: str) -> None:
+        """Manage the headless background daemon: daemon [start|stop|status]"""
+        cmd = arg.strip().lower()
+        if cmd == "start":
+            print("Starting AXIOM Daemon...")
+            try:
+                from axiom.core.ipc_server import AxiomDaemon
+                import asyncio
+                
+                # We need to run the asyncio loop forever in the main thread for the daemon.
+                async def run_daemon():
+                    daemon = AxiomDaemon(self)
+                    await daemon.start()
+                    print(f"Daemon running. Token: {daemon.token}")
+                    try:
+                        # Block forever
+                        await asyncio.Event().wait()
+                    except asyncio.CancelledError:
+                        pass
+                    finally:
+                        await daemon.stop()
+                        
+                # Start the loop
+                asyncio.run(run_daemon())
+                
+            except KeyboardInterrupt:
+                print("\nDaemon stopped by user.")
+            except Exception as e:
+                print(f"Failed to start daemon: {e}")
+                logger.exception("Daemon start failed")
+                
+        elif cmd == "stop":
+            print("Stopping AXIOM Daemon...")
+            # We connect via UDS and send stop command
+            try:
+                import socket
+                sock_path = Path.home() / ".axiom" / "axiom.sock"
+                if not sock_path.exists():
+                    print("Daemon is not running (socket not found).")
+                    return
+                
+                if os.name != 'nt':
+                    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                    sock.connect(str(sock_path))
+                    msg = json.dumps({"jsonrpc": "2.0", "method": "axiom.stop", "id": 1})
+                    sock.sendall(msg.encode("utf-8") + b"\n")
+                    response = sock.recv(4096)
+                    print(f"Response: {response.decode('utf-8').strip()}")
+                    sock.close()
+                else:
+                    print("Stop via UDS not supported on Windows yet. Press Ctrl+C in daemon window.")
+            except Exception as e:
+                print(f"Failed to stop daemon: {e}")
+                
+        elif cmd == "status":
+            # Check if UDS exists and connects
+            sock_path = Path.home() / ".axiom" / "axiom.sock"
+            if not sock_path.exists():
+                print("Daemon is offline.")
+                return
+                
+            try:
+                import socket
+                if os.name != 'nt':
+                    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                    sock.connect(str(sock_path))
+                    msg = json.dumps({"jsonrpc": "2.0", "method": "axiom.status", "id": 1})
+                    sock.sendall(msg.encode("utf-8") + b"\n")
+                    response = json.loads(sock.recv(4096).decode("utf-8").strip())
+                    sock.close()
+                    if response.get("result"):
+                        print("Daemon is ONLINE.")
+                        print(json.dumps(response["result"], indent=2))
+                    else:
+                        print("Daemon returned error.")
+                else:
+                    print("Daemon might be running (UDS check skipped on Windows).")
+            except ConnectionRefusedError:
+                print("Daemon is offline (stale socket).")
+            except Exception as e:
+                print(f"Failed to check status: {e}")
+                
+        else:
+            print("Usage: daemon [start|stop|status]")
+            
     def do_quit(self, arg: str) -> None:
         """Exit AXIOM"""
         print("\nShutting down AXIOM...")
@@ -378,6 +485,8 @@ class CLI(cmd.Cmd):
         if self._closed:
             return
         self._closed = True
+        if hasattr(self, 'sleep_daemon'):
+            self.sleep_daemon.stop()
         self.engine.shutdown()
         self.memory.close()
         self.ollama.close()
@@ -405,6 +514,7 @@ class CLI(cmd.Cmd):
   clear_history      - Clear conversation history
   resume <id>        - Resume conversation/session by ID
   memory_log         - Show memory event log
+  trace --last       - Replay telemetry from the last execution
   exit/quit          - Exit AXIOM
   help               - Show this help message
             """)
@@ -413,6 +523,61 @@ class CLI(cmd.Cmd):
     def emptyline(self) -> None:
         """Handle empty line input."""
         pass
+
+    def do_trace(self, arg: str) -> None:
+        """Trace telemetry: trace --last"""
+        trace_file = Path.home() / ".axiom" / "traces" / "flight_recorder.jsonl"
+        if not trace_file.exists():
+            print("No traces found. Run a task first.")
+            return
+            
+        print("\n=== FLIGHT RECORDER TELEMETRY ===")
+        events = []
+        try:
+            with open(trace_file, "r") as f:
+                for line in f:
+                    if line.strip():
+                        events.append(json.loads(line))
+        except Exception as e:
+            print(f"Error reading trace file: {e}")
+            return
+            
+        if not events:
+            print("Trace file is empty.")
+            return
+            
+        # If --last, find the last session_id
+        session_id = None
+        for evt in reversed(events):
+            if evt.get("event_type") == "orchestrator.task.received":
+                data = evt.get("data") or {}
+                # The payload might be nested under 'payload' due to bus.published meta-event wrapping
+                if "payload" in data and "session_id" in data["payload"]:
+                    session_id = data["payload"]["session_id"]
+                    break
+        
+        filtered = events[-50:] if not session_id else [e for e in events if e.get("data", {}).get("session_id") == session_id or e.get("data", {}).get("payload", {}).get("session_id") == session_id]
+        
+        for evt in filtered:
+            etype = evt.get("event_type")
+            ts = evt.get("timestamp")
+            data = evt.get("data", {})
+            if "payload" in data:
+                data = data["payload"]
+            
+            if etype == "loop.cycle":
+                print(f"[{ts}] LOOP CYCLE (Round {data.get('round')}): {data.get('duration_ms', 0):.2f}ms | Queue Depth: {data.get('queue_depth')}")
+            elif etype == "tool.executed":
+                print(f"[{ts}] TOOL EXECUTED ({data.get('tool_name')}): {data.get('duration_ms', 0):.2f}ms | Success: {data.get('success')}")
+            elif etype == "memory.retrieved":
+                print(f"[{ts}] MEMORY LATENCY: {data.get('latency_ms', 0):.2f}ms | Results: {data.get('results_count')}")
+            elif etype in ("orchestrator.task.received", "orchestrator.task.completed"):
+                print(f"\n[{ts}] {etype.upper()}: {data.get('task')}")
+        print("=================================\n")
+
+    def do_replay(self, arg: str) -> None:
+        """Alias for trace --last"""
+        self.do_trace("--last")
 
 
 def run_cli() -> None:

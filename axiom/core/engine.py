@@ -6,6 +6,7 @@ import time
 from axiom.core.events import EventBus, Event
 from axiom.core.registry import Registry
 from axiom.core.context import ExecutionContext
+from axiom.core.recorder import FlightRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,8 @@ class Engine:
         self.context: Optional[ExecutionContext] = None
         self._running = False
         self.started_at = None
+        
+        self.recorder = FlightRecorder(bus=self.event_bus)
         
         # Setup memory (use MemoryStore if not provided)
         if memory is None:
@@ -49,6 +52,8 @@ class Engine:
         logger.info("Initializing AXIOM Engine")
         self._running = True
         self.started_at = time.time()
+        
+        self.recorder.start()
         
         # Log engine started event
         self.memory.log_event("engine.started", data={"started_at": self.started_at}, source="Engine")
@@ -101,6 +106,8 @@ class Engine:
             source="Engine"
         )
         self.event_bus.publish(shutdown_event)
+        
+        self.recorder.stop()
     
     def is_running(self) -> bool:
         """Check if engine is running."""

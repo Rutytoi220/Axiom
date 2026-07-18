@@ -71,10 +71,18 @@ class MemoryStore(MemoryBackend):
             
         if current_version == 0:
             await self._db.executescript(_SCHEMA)
-            await self._db.execute("PRAGMA user_version = 1")
+            await self._db.execute("PRAGMA user_version = 2")
             await self._db.commit()
-        elif current_version > 1:
-            raise sqlite3.DatabaseError(f"Database version {current_version} is higher than supported version 1. Please upgrade AXIOM.")
+        elif current_version == 1:
+            try:
+                await self._db.execute("ALTER TABLE memories ADD COLUMN retrieval_count INTEGER DEFAULT 0")
+                await self._db.execute("ALTER TABLE memories ADD COLUMN confidence_weight REAL DEFAULT 1.0")
+            except sqlite3.OperationalError:
+                pass # Columns might already exist if partially migrated
+            await self._db.execute("PRAGMA user_version = 2")
+            await self._db.commit()
+        elif current_version > 2:
+            raise sqlite3.DatabaseError(f"Database version {current_version} is higher than supported version 2. Please upgrade AXIOM.")
             
         self._initialized = True
 
@@ -123,6 +131,11 @@ class MemoryStore(MemoryBackend):
         row = await cursor.fetchone()
         if row is None:
             return None
+        
+        # Increment retrieval count
+        await db.execute("UPDATE memories SET retrieval_count = retrieval_count + 1 WHERE key = ?", (key,))
+        await db.commit()
+        
         return json.loads(row["value_json"])
 
     async def delete(self, key: str) -> bool:

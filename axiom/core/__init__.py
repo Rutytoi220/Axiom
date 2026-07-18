@@ -5,6 +5,7 @@ from axiom.core.events import Event, EventBus
 from axiom.core.registry import Registry
 from axiom.core.context import ExecutionContext
 from axiom.core.async_bridge import run_sync, shutdown_bridge
+from axiom.core.transaction import WorkspaceTransactionManager, StagingCapExceeded
 
 __all__ = [
     "Engine",
@@ -14,4 +15,6 @@ __all__ = [
     "ExecutionContext",
     "run_sync",
     "shutdown_bridge",
+    "WorkspaceTransactionManager",
+    "StagingCapExceeded",
 ]
