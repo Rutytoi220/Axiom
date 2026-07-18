@@ -11,6 +11,11 @@ class AxiomConfig:
     # System
     debug: bool = False
     log_level: str = "INFO"
+    proactive_kernel: bool = False
+    allow_cloud_fallback: bool = False
+    # RFC-003 Phase 2 — OS Perception taps (all OFF by default for privacy)
+    monitor_window_focus: bool = False
+    monitor_clipboard: bool = False
     
     # LLM
     ollama_base_url: str = "http://localhost:11434"
@@ -40,6 +45,7 @@ class AxiomConfig:
         return {
             "debug": self.debug,
             "log_level": self.log_level,
+            "proactive_kernel": self.proactive_kernel,
             "ollama_base_url": self.ollama_base_url,
             "ollama_model": self.ollama_model,
             "ollama_temperature": self.ollama_temperature,
@@ -50,6 +56,9 @@ class AxiomConfig:
             "event_history_limit": self.event_history_limit,
             "sandbox_mode": self.sandbox_mode,
             "allow_system_tools": self.allow_system_tools,
+            "allow_cloud_fallback": self.allow_cloud_fallback,
+            "monitor_window_focus": self.monitor_window_focus,
+            "monitor_clipboard": self.monitor_clipboard,
         }
 
 

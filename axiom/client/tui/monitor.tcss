@@ -1,0 +1,60 @@
+Screen {
+    layout: grid;
+    grid-size: 2 2;
+    grid-rows: 1fr 2fr;
+    grid-columns: 1fr 1fr;
+    background: #0d1117;
+}
+
+TelemetryPanel {
+    row-span: 1;
+    column-span: 2;
+    background: #161b22;
+    border: round #58a6ff;
+    padding: 1;
+    margin: 1;
+}
+
+SwarmDebatePanel {
+    row-span: 1;
+    column-span: 1;
+    background: #161b22;
+    border: round #3fb950;
+    padding: 1;
+    margin: 1;
+}
+
+FlightRecorderLog {
+    row-span: 1;
+    column-span: 1;
+    background: #161b22;
+    border: round #d2a8ff;
+    padding: 1;
+    margin: 1;
+}
+
+.panel-title {
+    text-align: center;
+    text-style: bold;
+    color: #e6edf3;
+    margin-bottom: 1;
+}
+
+.tier-badge {
+    color: #0d1117;
+    background: #58a6ff;
+    text-style: bold;
+    padding: 0 1;
+}
+
+.debate-proposed {
+    color: #d2a8ff;
+}
+
+.debate-approved {
+    color: #3fb950;
+}
+
+.debate-rejected {
+    color: #f85149;
+}

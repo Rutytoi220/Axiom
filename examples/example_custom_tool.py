@@ -1,78 +1,64 @@
-"""Example: Creating a custom tool."""
+"""Example: Loading a plugin using the AXIOM v2 Plugin Ecosystem (RFC-001).
 
-from axiom import BaseTool, ToolResult, ToolParameter
-from axiom import Engine
+This script supersedes the v1 ``example_custom_tool.py`` (which registered a
+raw ``BaseTool`` directly).  It shows how to load a manifest-driven,
+sandboxed plugin via ``PluginManager`` and call its tools.
 
+The v1 API still works for backward compatibility — this just demonstrates
+the recommended v2 pattern.
+"""
 
-class CalculatorTool(BaseTool):
-    """Simple calculator tool."""
-    
-    def __init__(self):
-        super().__init__(
-            tool_id="calculator",
-            name="Calculator",
-            description="Perform basic arithmetic calculations"
-        )
-        self.add_parameter(ToolParameter(
-            name="expression",
-            type="string",
-            description="Mathematical expression (e.g., '2+2')",
-            required=True
-        ))
-    
-    def execute(self, expression: str, **kwargs) -> ToolResult:
-        """Execute calculator."""
-        try:
-            # Safe evaluation for math expressions
-            result = eval(expression, {"__builtins__": {}})
-            return ToolResult(
-                success=True,
-                output={
-                    "expression": expression,
-                    "result": result
-                }
-            )
-        except Exception as e:
-            return ToolResult(
-                success=False,
-                output=None,
-                error=f"Invalid expression: {e}"
-            )
+from pathlib import Path
+
+from axiom.core.engine import Engine
+from axiom.plugins.manager import PluginManager
+
+PLUGIN_DIR = Path(__file__).parent / "example_plugin"
 
 
-def main():
-    """Register and test custom tool."""
-    
+def main() -> None:
+    """Load the sandboxed calculator plugin and execute it."""
     engine = Engine()
     engine.initialize()
-    
-    # Create and register custom tool
-    calc = CalculatorTool()
-    engine.registry.register_tool(calc.tool_id, calc)
-    
-    print("Custom Tool Example")
+
+    # Create the PluginManager and point it at our example plugin directory.
+    # In production this would scan ~/.axiom/plugins/ automatically.
+    manager = PluginManager(
+        registry=engine.registry,
+        event_bus=engine.event_bus,
+        plugin_root=PLUGIN_DIR.parent,  # scans examples/
+    )
+
+    # Load only the example plugin for this demo
+    success = manager.load_from_path(PLUGIN_DIR)
+
+    print("AXIOM v2 Plugin Example")
     print("=" * 60)
-    
-    # List registered tools
+
+    if not success:
+        print("ERROR: Plugin failed to load. See logs above.")
+        engine.shutdown()
+        return
+
+    print(f"\nLoaded plugins : {manager.loaded_plugins}")
+
     tools = engine.registry.list_tools()
-    print(f"\nRegistered {len(tools)} tool(s):")
+    print(f"Registered tools ({len(tools)}):")
     for tool_id, tool in tools.items():
-        print(f"  - {tool.name} ({tool_id})")
-    
-    # Execute the tool
-    print("\nTesting calculator tool:")
-    result = calc(expression="2 + 2 * 3")
-    print(f"  Input: 2 + 2 * 3")
-    print(f"  Result: {result.output}")
-    
-    # Get tool info
-    print("\nTool Info:")
-    info = calc.get_info()
-    print(f"  Name: {info['name']}")
-    print(f"  Description: {info['description']}")
-    print(f"  Parameters: {len(info['parameters'])}")
-    print(f"  Executions: {info['execution_count']}")
-    
+        print(f"  - {tool.name} [{tool_id}]")
+
+    # Call the sandboxed tool — runs in an isolated child process.
+    print("\nTesting sandboxed 'calculate' tool:")
+    tool = engine.registry.get_tool("axiom-calculator::calculate")
+    if tool:
+        result = tool(expression="2 + sqrt(16)")
+        print(f"  2 + sqrt(16) = {result.output}")
+
+        result2 = tool(expression="pi * 5 ** 2")
+        print(f"  pi * 5²      = {result2.output}")
+    else:
+        print("  Tool not found in registry.")
+
     engine.shutdown()
     print("\nExample complete!")
 

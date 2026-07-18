@@ -15,6 +15,8 @@ from axiom.agents.simple_base import SimpleBaseAgent
 from axiom.agents.base import AgentResult
 from axiom.memory.context_manager import ContextManager, estimate_messages_tokens
 from axiom.core.transaction import WorkspaceTransactionManager, StagingCapExceeded
+from axiom.engine.telemetry import HardwareTelemetryDaemon
+from axiom.engine.router import InferenceRouter
 
 logger = logging.getLogger(__name__)
 
@@ -49,10 +51,20 @@ class OrchestratorAgent(SimpleBaseAgent):
     def __init__(self, registry=None, bus=None, memory=None, llm=None, context_manager=None):
         super().__init__(name="orchestrator", registry=registry, bus=bus, memory=memory)
         self._agents = {}
-        self._llm = llm
         self._chat_history: List[Dict[str, str]] = []
         self._state = "idle"
         self._context_manager = context_manager or ContextManager()
+        
+        # Hardware Telemetry and Router integration
+        self.telemetry_daemon = None
+        if bus:
+            self.telemetry_daemon = HardwareTelemetryDaemon(event_bus=bus)
+            self.telemetry_daemon.start()
+            
+        if llm is not None:
+            self._llm = InferenceRouter(llm, self.telemetry_daemon)
+        else:
+            self._llm = None
 
     @property
     def description(self) -> str:
@@ -60,7 +72,7 @@ class OrchestratorAgent(SimpleBaseAgent):
         return "LLM-driven orchestrator agent that plans, calls tools, and synthesizes a final answer."
 
     def set_llm(self, llm) -> None:
-        self._llm = llm
+        self._llm = InferenceRouter(llm, self.telemetry_daemon)
 
     def register_agent(self, agent) -> None:
         self._agents[agent.name] = agent

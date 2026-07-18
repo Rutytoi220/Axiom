@@ -205,6 +205,47 @@ class CLI(cmd.Cmd):
         except Exception as e:
             print(f"\nError processing request: {e}\n")
             logger.exception(f"Error in do_ask: {e}")
+
+    def do_eval(self, arg: str) -> None:
+        """Run the Autonomous SWE-Bench Evaluation Harness: eval --run-suite"""
+        if "--run-suite" not in arg:
+            print("Usage: eval --run-suite")
+            return
+            
+        print("\n[Starting SWE-Bench Autonomous Evaluation...]")
+        
+        try:
+            from axiom.evals.swe_harness import SWEBenchHarness
+            harness = SWEBenchHarness(self.engine)
+            report = self._run_async(harness.run_suite())
+            
+            # Save the report
+            eval_dir = Path.cwd() / "eval_reports"
+            eval_dir.mkdir(exist_ok=True)
+            report_path = eval_dir / "swe_bench_scorecard.md"
+            report_path.write_text(report)
+            
+            print("\n" + "="*60)
+            print(report)
+            print("="*60)
+            print(f"\nScorecard saved to: {report_path}\n")
+            
+        except Exception as e:
+            print(f"\nError running evaluation: {e}\n")
+            logger.exception(f"Error in do_eval: {e}")
+
+    def do_monitor(self, arg: str) -> None:
+        """Launch the Interactive Textual TUI System Monitor: monitor"""
+        try:
+            from axiom.client.tui import AxiomMonitorApp
+            app = AxiomMonitorApp()
+            # Run the TUI (this is a blocking call that takes over the terminal)
+            app.run()
+        except ImportError:
+            print("Error: Required dependencies for monitor not found. Please install textual.")
+        except Exception as e:
+            print(f"Error launching monitor: {e}")
+            logger.exception(f"Error in do_monitor: {e}")
     
     def do_tools(self, arg: str) -> None:
         """List all registered tools"""

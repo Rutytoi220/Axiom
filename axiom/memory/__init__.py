@@ -5,8 +5,10 @@ from axiom.memory.memory_sync import SyncMemoryStore
 from axiom.memory.protocol import MemoryBackend
 from axiom.memory.semantic import EmbeddingProvider, SemanticIndex
 from axiom.memory.context_manager import ContextManager
+from axiom.memory.blackboard import BlackboardStore
 
 __all__ = [
+    "BlackboardStore",
     "ContextManager",
     "EmbeddingProvider",
     "MemoryBackend",

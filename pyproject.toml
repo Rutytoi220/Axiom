@@ -3,14 +3,14 @@ requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "axiom-ai"
+name = "local-axiom-agent"
 version = "1.0.0"
 description = "A local-first AI orchestration framework"
 readme = "README.md"
 requires-python = ">=3.12"
 license = {text = "MIT"}
 authors = [
-    {name = "AXIOM Team", email = "team@axiom.local"}
+    {name = "rutytoi", email = "charlesbbm@outlook.fr"}
 ]
 keywords = ["ai", "llm", "orchestration", "agents", "tools", "local-first"]
 classifiers = [
@@ -32,6 +32,8 @@ dependencies = [
     "pillow>=10.1.0",
     "opencv-python>=4.8.0",
     "websockets>=12.0",
+    "watchdog>=3.0.0",
+    "textual>=0.40.0",
 ]
 
 [project.optional-dependencies]

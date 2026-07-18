@@ -7,6 +7,8 @@ from axiom.core.events import EventBus, Event
 from axiom.core.registry import Registry
 from axiom.core.context import ExecutionContext
 from axiom.core.recorder import FlightRecorder
+import os
+from axiom.perception.watcher import ProactiveWatcher
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +32,10 @@ class Engine:
             self.memory = SyncMemoryStore(":memory:")
         else:
             self.memory = memory
+            
+        # Proactive Kernel
+        workspaces = [os.getcwd()]
+        self.proactive_watcher = ProactiveWatcher(self.event_bus, workspaces)
         
         self._setup_internal_handlers()
     
@@ -54,6 +60,9 @@ class Engine:
         self.started_at = time.time()
         
         self.recorder.start()
+        
+        # Start proactive watcher (respects config.proactive_kernel internally)
+        self.proactive_watcher.start()
         
         # Log engine started event
         self.memory.log_event("engine.started", data={"started_at": self.started_at}, source="Engine")

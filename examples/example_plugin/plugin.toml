@@ -1,0 +1,18 @@
+[plugin]
+name = "axiom-calculator"
+version = "1.0.0"
+description = "A safe arithmetic calculator demonstrating the AXIOM v2 Plugin Ecosystem."
+author = "AXIOM Team <team@axiom.local>"
+license = "MIT"
+axiom_version = ">=2.0.0"
+
+[entrypoint]
+module = "calculator_plugin"
+class = "CalculatorPlugin"
+
+[permissions]
+# This plugin only needs pure computation — it requires NO special permissions.
+network_access  = false   # Cannot open sockets or call requests
+filesystem      = false   # Cannot read/write files outside its workspace
+shell           = false   # Cannot invoke subprocess
+desktop_ui      = false   # Cannot interact with the desktop

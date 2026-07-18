@@ -50,6 +50,7 @@ class TestAxiomConfigToDict:
         assert set(data.keys()) == {
             "debug",
             "log_level",
+            "proactive_kernel",
             "ollama_base_url",
             "ollama_model",
             "ollama_temperature",
@@ -60,6 +61,9 @@ class TestAxiomConfigToDict:
             "event_history_limit",
             "sandbox_mode",
             "allow_system_tools",
+            "allow_cloud_fallback",
+            "monitor_window_focus",
+            "monitor_clipboard",
         }
 
 

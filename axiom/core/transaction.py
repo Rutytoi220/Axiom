@@ -83,12 +83,18 @@ class WorkspaceTransactionManager:
         transaction_id: Optional[str] = None,
         staging_root: Optional[Path] = None,
         verbose: bool = True,
+        blackboard=None,
+        session_id: Optional[str] = None,
     ) -> None:
         self._bus = bus
         self._txn_id = transaction_id or str(uuid.uuid4())
         self._staging_root = staging_root or (Path.home() / ".axiom" / "staging")
         self._staging_dir: Path = self._staging_root / self._txn_id
         self._verbose = verbose
+
+        # Optional Blackboard reference — purged on commit/rollback to free RAM.
+        self._blackboard = blackboard
+        self._session_id = session_id
 
         # Maps absolute original path → absolute staging path (or _NEW_FILE_SENTINEL).
         self._snapshots: Dict[str, str] = {}
@@ -127,6 +133,7 @@ class WorkspaceTransactionManager:
         self._active = False
         self._unsubscribe_failure_events()
         logger.debug("Transaction %s committed; staging cleaned.", self._txn_id)
+        self._purge_blackboard(reason="commit")
 
     def rollback(self) -> None:
         """Restore all snapshotted files to their pre-transaction state.
@@ -144,6 +151,7 @@ class WorkspaceTransactionManager:
             self._cleanup_staging()
             self._active = False
             self._unsubscribe_failure_events()
+            self._purge_blackboard(reason="rollback")
             return
 
         self._print(f"[!] Rolling back {modified_count} modified file(s)…")
@@ -188,10 +196,25 @@ class WorkspaceTransactionManager:
                 "files_restored": restored,
                 "errors": errors,
             })
+        self._purge_blackboard(reason="rollback")
 
     # ------------------------------------------------------------------
     # Snapshotting
     # ------------------------------------------------------------------
+
+    def _purge_blackboard(self, reason: str = "transaction_end") -> None:
+        """Purge the associated Blackboard session namespace to free RAM.
+
+        Called automatically by both :meth:`commit` and :meth:`rollback` so
+        that ephemeral scratchpad data never outlives its transaction.
+        """
+        if self._blackboard is None or self._session_id is None:
+            return
+        freed = self._blackboard.purge_session(self._session_id)
+        logger.debug(
+            "Transaction %s: Blackboard session '%s' purged on %s (%d artifacts freed).",
+            self._txn_id, self._session_id, reason, freed
+        )
 
     def snapshot(self, path: str | Path) -> None:
         """Back up *path* before it is mutated.
