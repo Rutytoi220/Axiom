@@ -1,13 +1,28 @@
-"""Base agent class for AXIOM."""
+"""DEPRECATED: Compatibility shim for legacy code.
 
-from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+This module provides backwards-compatible imports for code that still
+references axiom.agents.base_agent. It will be removed in a future release.
+
+For new code:
+- Use axiom.agents.base.BaseAgent for async-first agents
+- Use axiom.agents.sync_adapter.SyncAgentAdapter for sync agents
+"""
+
+import warnings
 from enum import Enum
 from dataclasses import dataclass
-import uuid
-import logging
+from typing import Any, Dict, Optional
+from abc import ABC, abstractmethod
 
-logger = logging.getLogger(__name__)
+
+def _warn_deprecated():
+    warnings.warn(
+        "axiom.agents.base_agent is deprecated. "
+        "Use axiom.agents.base.BaseAgent for async agents or "
+        "axiom.agents.sync_adapter.SyncAgentAdapter for sync agents.",
+        DeprecationWarning,
+        stacklevel=3
+    )
 
 
 class AgentState(Enum):
@@ -30,16 +45,17 @@ class AgentResponse:
 
 
 class BaseAgent(ABC):
-    """Base class for all agents."""
+    """DEPRECATED: Use axiom.agents.base.BaseAgent or axiom.agents.sync_adapter.SyncAgentAdapter."""
     
     def __init__(self, agent_id: str, name: str, description: str):
+        _warn_deprecated()
         self.agent_id = agent_id
         self.name = name
         self.description = description
         self.state = AgentState.IDLE
         self.memory: Dict[str, Any] = {}
-        self.event_bus = None  # Set by engine
-        self.registry = None   # Set by engine
+        self.event_bus = None
+        self.registry = None
         self._execution_count = 0
     
     def set_engine_refs(self, event_bus, registry) -> None:
@@ -55,7 +71,6 @@ class BaseAgent(ABC):
     def set_state(self, state: AgentState) -> None:
         """Set agent state."""
         self.state = state
-        logger.debug(f"Agent {self.agent_id} state changed to {state.value}")
     
     def get_state(self) -> AgentState:
         """Get current agent state."""
@@ -93,7 +108,6 @@ class BaseAgent(ABC):
                 self.set_state(AgentState.ERROR)
             return response
         except Exception as e:
-            logger.error(f"Agent {self.agent_id} error: {e}")
             self.set_state(AgentState.ERROR)
             return AgentResponse(
                 agent_id=self.agent_id,

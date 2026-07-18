@@ -72,7 +72,7 @@ class OrchestratorAgent(SimpleBaseAgent):
     def list_agents(self) -> List[str]:
         return sorted(self._agents.keys())
 
-    def run(self, task: str, use_tools: bool = True, session_id: Optional[str] = None) -> AgentResult:
+    def run(self, task: str, use_tools: bool = True, session_id: Optional[str] = None, timeout: Optional[float] = None) -> AgentResult:
         self._execution_count += 1
         self._state = "running"
         try:
@@ -80,11 +80,11 @@ class OrchestratorAgent(SimpleBaseAgent):
             steps: List[str] = []
             if self._llm is None:
                 return self._prefix_route(task, steps)
-            return self._agentic_loop(task, steps, use_tools=use_tools, session_id=session_id)
+            return self._agentic_loop(task, steps, use_tools=use_tools, session_id=session_id, timeout=timeout)
         finally:
             self._state = "idle"
 
-    def _agentic_loop(self, task: str, steps: List[str], use_tools: bool = True, session_id: Optional[str] = None) -> AgentResult:
+    def _agentic_loop(self, task: str, steps: List[str], use_tools: bool = True, session_id: Optional[str] = None, timeout: Optional[float] = None) -> AgentResult:
         session_id = str(session_id or uuid.uuid4())
         plan = self._load_plan(session_id) or self._create_plan(task)
         state = AgentState.THINK
@@ -92,6 +92,8 @@ class OrchestratorAgent(SimpleBaseAgent):
         observations: List[Dict[str, Any]] = []
         final_response = ""
         rounds = 0
+        timeout = timeout if timeout is not None else 120.0
+        deadline = time.time() + timeout
 
         self._persist_step(session_id, "user", {"task": task})
         self._log(f"Session {session_id}: starting state machine", steps)
@@ -103,13 +105,19 @@ class OrchestratorAgent(SimpleBaseAgent):
             self._log(f"LLM availability check failed, continuing: {exc}", steps)
 
         while state != AgentState.EXIT and rounds < MAX_TOOL_ROUNDS:
+            if deadline and time.time() > deadline:
+                final_response = "Task processing timed out."
+                self._log("Task timed out before completion.", steps)
+                break
+                
             rounds += 1
             self._persist_step(session_id, "state", {"state": state.value, "plan": asdict(plan), "round": rounds})
 
             if state == AgentState.THINK:
                 self._log(f"THINK round {rounds}: {plan.current()}", steps)
                 messages = self._build_messages(task, plan, observations, session_id)
-                response_msg = self._call_llm(messages, tool_schemas)
+                time_left = max(1.0, deadline - time.time()) if deadline else 60.0 # Default 60s max per generation round
+                response_msg = self._call_llm(messages, tool_schemas, timeout=time_left)
                 self._persist_step(session_id, "reasoning", response_msg)
                 tool_calls = response_msg.get("tool_calls") or []
                 if tool_calls and use_tools:
@@ -123,7 +131,13 @@ class OrchestratorAgent(SimpleBaseAgent):
             elif state == AgentState.ACT:
                 executed_tool_ids_this_round = set()
                 for tc in pending_calls:
-                    tool_name, arguments, tc_id = self._normalize_tool_call(tc)
+                    try:
+                        tool_name, arguments, tc_id = self._normalize_tool_call(tc)
+                    except ValueError as exc:
+                        tool_name = tc.get("function", {}).get("name") or tc.get("name") or "unknown"
+                        observations.append(self._structured_tool_result(tool_name, tc, {"error": f"Malformed tool arguments JSON: {exc}. Please fix the syntax."}, False))
+                        continue
+                        
                     sig = tc_id or hashlib.md5(f"{tool_name}:{json.dumps(arguments, sort_keys=True, default=str)}".encode()).hexdigest()
                     if sig in executed_tool_ids_this_round:
                         result = self._structured_tool_result(tool_name, arguments, {"error": "Duplicate tool call skipped for this inference step."}, False)
@@ -178,14 +192,16 @@ class OrchestratorAgent(SimpleBaseAgent):
             observations=observations,
         )
 
-    def _call_llm(self, messages: List[Dict[str, Any]], tool_schemas: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _call_llm(self, messages: List[Dict[str, Any]], tool_schemas: List[Dict[str, Any]], timeout: Optional[float] = None) -> Dict[str, Any]:
         last_exc = None
         for attempt in range(LLM_RETRIES):
             try:
                 if tool_schemas and hasattr(self._llm, "chat_with_tools"):
-                    msg = self._llm.chat_with_tools(messages, tool_schemas)
+                    kwargs = {"timeout": timeout} if timeout else {}
+                    msg = self._llm.chat_with_tools(messages, tool_schemas, **kwargs)
                     return msg if isinstance(msg, dict) else {"role": "assistant", "content": str(msg)}
-                content = self._llm.chat(messages)
+                kwargs = {"timeout": timeout} if timeout else {}
+                content = self._llm.chat(messages, **kwargs)
                 return {"role": "assistant", "content": content or ""}
             except Exception as exc:
                 last_exc = exc
@@ -208,13 +224,18 @@ class OrchestratorAgent(SimpleBaseAgent):
         fence = re.search(r"```(?:json)?\s*(.*?)```", raw, flags=re.DOTALL | re.IGNORECASE)
         if fence:
             raw = fence.group(1).strip()
+        
+        is_json_like = raw.startswith("{") or fence is not None
         if not raw.startswith("{"):
             match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
             raw = match.group(0) if match else raw
+            
         try:
             parsed = json.loads(raw)
             return parsed if isinstance(parsed, dict) else {"input": parsed}
-        except Exception:
+        except Exception as e:
+            if is_json_like:
+                raise ValueError(str(e))
             return {"input": text}
 
     def _create_plan(self, task: str) -> Plan:

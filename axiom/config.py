@@ -66,3 +66,15 @@ def set_config(config: AxiomConfig) -> None:
     """Set global AXIOM configuration."""
     global _config
     _config = config
+
+
+# Re-export legacy settings schemas so new code can import from axiom.config
+try:
+    from core.settings_registry import (
+        SettingCategory,
+        SettingMetadata,
+        SettingsRegistry,
+        get_settings_registry,
+    )
+except ImportError:
+    pass

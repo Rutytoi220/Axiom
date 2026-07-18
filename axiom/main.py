@@ -1,7 +1,6 @@
 f"""AXIOM main entry point and initialization."""
 
 from axiom.core import Engine
-from axiom.memory import MemoryManager
 from axiom.llm import OllamaClient
 from axiom.api.cli import CLI, run_cli
 from axiom.config import AxiomConfig, get_config, set_config

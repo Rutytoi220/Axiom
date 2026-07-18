@@ -37,13 +37,14 @@ class OllamaClient:
         """
         self.config = config or OllamaConfig()
     
-    def _request(self, method: str, path: str, body: Optional[Dict] = None) -> Dict:
+    def _request(self, method: str, path: str, body: Optional[Dict] = None, timeout: Optional[float] = None) -> Dict:
         """Make HTTP request to Ollama server.
         
         Args:
             method: HTTP method (GET, POST, etc.)
             path: API path (e.g., "/api/generate")
             body: Request body as dict (will be JSON encoded)
+            timeout: Optional override for the connection timeout
             
         Returns:
             Response as dictionary
@@ -61,8 +62,9 @@ class OllamaClient:
             headers={"Content-Type": "application/json"}
         )
         
+        effective_timeout = timeout if timeout is not None else self.config.timeout
         try:
-            with urllib.request.urlopen(req, timeout=self.config.timeout) as resp:
+            with urllib.request.urlopen(req, timeout=effective_timeout) as resp:
                 response_data = resp.read().decode()
                 return json.loads(response_data)
         except urllib.error.HTTPError as e:
@@ -91,6 +93,11 @@ class OllamaClient:
         except Exception as e:
             logger.debug(f"Ollama not available: {e}")
             return False
+
+    async def is_available_async(self) -> bool:
+        """Async version of is_available."""
+        import asyncio
+        return await asyncio.to_thread(self.is_available)
     
     def list_models(self) -> List[str]:
         """List available models in Ollama.
@@ -107,6 +114,11 @@ class OllamaClient:
         except Exception as e:
             logger.debug(f"Error listing models: {e}")
             return []
+
+    async def list_models_async(self) -> List[str]:
+        """Async version of list_models."""
+        import asyncio
+        return await asyncio.to_thread(self.list_models)
     
     def generate(self, prompt: str, model: Optional[str] = None, 
                 stream: bool = False) -> str:
@@ -142,13 +154,19 @@ class OllamaClient:
         except Exception as e:
             logger.error(f"Error generating response: {e}")
             return ""
+
+    async def generate_async(self, prompt: str, model: Optional[str] = None) -> str:
+        """Async version of generate."""
+        import asyncio
+        return await asyncio.to_thread(self.generate, prompt, model)
     
-    def chat(self, messages: List[Dict[str, str]], model: Optional[str] = None) -> str:
+    def chat(self, messages: List[Dict[str, str]], model: Optional[str] = None, timeout: Optional[float] = None) -> str:
         """Chat with Ollama using message format.
         
         Args:
             messages: List of message dicts with 'role' and 'content' keys
             model: Model name (uses config default if not provided)
+            timeout: Optional maximum seconds to wait for this generation
             
         Returns:
             Chat response text
@@ -168,7 +186,7 @@ class OllamaClient:
         }
         
         try:
-            response = self._request("POST", "/api/chat", payload)
+            response = self._request("POST", "/api/chat", payload, timeout=timeout)
             message = response.get("message", {})
             return message.get("content", "")
         except OllamaError:
@@ -176,15 +194,21 @@ class OllamaClient:
         except Exception as e:
             logger.error(f"Error in chat: {e}")
             return ""
+
+    async def chat_async(self, messages: List[Dict[str, str]], model: Optional[str] = None) -> str:
+        """Async version of chat."""
+        import asyncio
+        return await asyncio.to_thread(self.chat, messages, model)
     
     def chat_with_tools(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]],
-                        model: Optional[str] = None) -> Dict[str, Any]:
+                        model: Optional[str] = None, timeout: Optional[float] = None) -> Dict[str, Any]:
         """Chat with Ollama using tool/function calling.
 
         Args:
             messages: List of message dicts (role + content, may include tool results)
             tools: List of tool schemas in OpenAI-compatible format
             model: Model override
+            timeout: Optional maximum seconds to wait for this generation
 
         Returns:
             Full assistant message dict — may contain 'tool_calls' list
@@ -201,13 +225,19 @@ class OllamaClient:
         payload = {k: v for k, v in payload.items() if v is not None}
 
         try:
-            response = self._request("POST", "/api/chat", payload)
+            response = self._request("POST", "/api/chat", payload, timeout=timeout)
             return response.get("message", {"role": "assistant", "content": ""})
         except OllamaError:
             raise
         except Exception as e:
             logger.error(f"Error in chat_with_tools: {e}")
             return {"role": "assistant", "content": f"Error: {str(e)}"}
+
+    async def chat_with_tools_async(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]],
+                                    model: Optional[str] = None) -> Dict[str, Any]:
+        """Async version of chat_with_tools."""
+        import asyncio
+        return await asyncio.to_thread(self.chat_with_tools, messages, tools, model)
 
     def embed(self, text: str, model: Optional[str] = None) -> List[float]:
         """Generate embeddings using Ollama.
@@ -232,6 +262,11 @@ class OllamaClient:
         except Exception as e:
             logger.error(f"Error generating embedding: {e}")
             return []
+
+    async def embed_async(self, text: str, model: Optional[str] = None) -> List[float]:
+        """Async version of embed."""
+        import asyncio
+        return await asyncio.to_thread(self.embed, text, model)
 
     def set_model(self, model: str) -> None:
         """Switch to a different model."""

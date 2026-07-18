@@ -41,6 +41,11 @@ class Registry:
         with self._lock:
             return self._tools.get(tool_id)
     
+    def has_tool(self, tool_id: str) -> bool:
+        """Check if a tool is registered."""
+        with self._lock:
+            return tool_id in self._tools
+
     def list_tools(self) -> Dict[str, Any]:
         """List all registered tools."""
         with self._lock:

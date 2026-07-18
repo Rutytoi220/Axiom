@@ -2,7 +2,7 @@
 
 This is the primary user-facing entry point (axiom_cli.py, the ``axiom``
 console script) and previously had zero test coverage. Tests run with the
-working directory redirected to a temporary path so MemoryManager's default
+working directory redirected to a temporary path so SyncMemoryStore's default
 ``axiom.db`` (a real on-disk file, independent of the CLI's in-memory
 engine/event store) never touches the repository checkout.
 
@@ -219,11 +219,11 @@ def test_emptyline_produces_no_output(cli, capsys):
 
 
 def test_cli_agent_events_reach_bus_subscribers(cli):
-    """Regression: CLI wires core EventBus into agents that emit via publish_sync.
+    """Agent lifecycle events emitted via publish_sync reach wildcard subscribers.
 
-    SimpleBaseAgent._emit only calls bus.publish_sync(). The core EventBus
-    used by axiom.core.Engine has no publish_sync, so agent lifecycle events
-    are silently dropped and never reach wildcard subscribers.
+    SimpleBaseAgent._emit calls bus.publish_sync(). The core EventBus now
+    implements publish_sync, so events like agent.started and agent.completed
+    are no longer silently dropped.
     """
     received = []
 
@@ -232,7 +232,6 @@ def test_cli_agent_events_reach_bus_subscribers(cli):
         received.append(name)
 
     bus = cli.engine.event_bus
-    assert not hasattr(bus, "publish_sync"), "precondition: core bus lacks publish_sync"
     bus.subscribe("*", on_event)
 
     echo_agent = cli.orchestrator._agents["echo_agent"]

@@ -4,7 +4,7 @@ import asyncio
 import pytest
 from unittest.mock import Mock, AsyncMock, MagicMock
 
-from axiom.agents import BaseAgent, AgentResult, OrchestratorAgent, ShellAgent
+from axiom.agents import BaseAgent, AgentResult, RegexRouter, ShellAgent
 from axiom.events import EventBus, Event
 from axiom.tools import ShellTool, FileTool
 
@@ -130,33 +130,33 @@ class TestShellAgent:
         """Test that shell agent emits events."""
         event_bus = EventBus()
         events_captured = []
-        
-        async def event_handler(event):
-            events_captured.append(event.name)
-        
+
+        def event_handler(event):
+            events_captured.append(event.event_type)
+
         event_bus.subscribe("agent.shell.*", event_handler)
-        
+
         agent = ShellAgent(event_bus=event_bus)
         result = await agent.run("echo test")
-        
+
         assert result.success is True
         assert "agent.shell.started" in events_captured
         assert "agent.shell.completed" in events_captured
-    
+
     @pytest.mark.asyncio
     async def test_shell_agent_error_event(self):
         """Test that shell agent emits error events."""
         event_bus = EventBus()
         events_captured = []
-        
-        async def event_handler(event):
-            events_captured.append(event.name)
-        
+
+        def event_handler(event):
+            events_captured.append(event.event_type)
+
         event_bus.subscribe("agent.shell.*", event_handler)
-        
+
         agent = ShellAgent(event_bus=event_bus)
         result = await agent.run("exit 1")
-        
+
         # Command executes but fails
         assert "agent.shell.completed" in events_captured
 
@@ -173,20 +173,20 @@ class MockAgent(BaseAgent):
         )
 
 
-class TestOrchestratorAgent:
-    """Test OrchestratorAgent implementation."""
+class TestRegexRouter:
+    """Test RegexRouter implementation."""
     
     @pytest.mark.asyncio
-    async def test_orchestrator_properties(self):
-        """Test orchestrator properties."""
-        agent = OrchestratorAgent()
+    async def test_router_properties(self):
+        """Test router properties."""
+        agent = RegexRouter()
         assert agent.name == "orchestrator"
         assert agent.description is not None
     
     @pytest.mark.asyncio
-    async def test_orchestrator_decompose_task_shell(self):
+    async def test_router_decompose_task_shell(self):
         """Test task decomposition for shell commands."""
-        agent = OrchestratorAgent()
+        agent = RegexRouter()
         subtasks = agent._decompose_task("run command: echo hello")
         
         assert len(subtasks) >= 1
@@ -194,18 +194,18 @@ class TestOrchestratorAgent:
         assert "echo hello" in subtasks[0]["parameter"]
     
     @pytest.mark.asyncio
-    async def test_orchestrator_decompose_task_generic(self):
+    async def test_router_decompose_task_generic(self):
         """Test task decomposition for generic tasks."""
-        agent = OrchestratorAgent()
+        agent = RegexRouter()
         subtasks = agent._decompose_task("perform some work")
         
         assert len(subtasks) >= 1
         # Should fall back to default routing
     
     @pytest.mark.asyncio
-    async def test_orchestrator_synthesize_results(self):
+    async def test_router_synthesize_results(self):
         """Test result synthesis."""
-        agent = OrchestratorAgent()
+        agent = RegexRouter()
         
         results = {
             "task1": AgentResult(success=True, output={"key": "value"}),
@@ -220,80 +220,80 @@ class TestOrchestratorAgent:
         assert synthesis["subtask_results"]["task2"]["success"] is False
     
     @pytest.mark.asyncio
-    async def test_orchestrator_with_agent_registry(self):
-        """Test orchestrator with registered agents."""
+    async def test_router_with_agent_registry(self):
+        """Test router with registered agents."""
         event_bus = EventBus()
         mock_registry = Mock()
         mock_agent = MockAgent("test", "test agent", event_bus)
         mock_registry.get_agent = Mock(return_value=mock_agent)
         
-        orchestrator = OrchestratorAgent(event_bus=event_bus, agent_registry=mock_registry)
-        result = await orchestrator.run("run command: test")
+        router = RegexRouter(event_bus=event_bus, agent_registry=mock_registry)
+        result = await router.run("run command: test")
         
         assert result.success is True
         assert len(result.steps_taken) > 0
     
     @pytest.mark.asyncio
-    async def test_orchestrator_task_started_event(self):
-        """Test that orchestrator emits task.started event."""
+    async def test_router_task_started_event(self):
+        """Test that router emits task.started event."""
         event_bus = EventBus()
         events_captured = []
         
-        async def event_handler(event):
-            events_captured.append(event.name)
+        def event_handler(event):
+            events_captured.append(event.event_type)
         
         event_bus.subscribe("agent.task.*", event_handler)
         
-        orchestrator = OrchestratorAgent(event_bus=event_bus)
-        result = await orchestrator.run("generic task")
+        router = RegexRouter(event_bus=event_bus)
+        result = await router.run("generic task")
         
         assert "agent.task.started" in events_captured
     
     @pytest.mark.asyncio
-    async def test_orchestrator_task_completed_event(self):
-        """Test that orchestrator emits task.completed event."""
+    async def test_router_task_completed_event(self):
+        """Test that router emits task.completed event."""
         event_bus = EventBus()
         events_captured = []
         
-        async def event_handler(event):
-            events_captured.append(event.name)
+        def event_handler(event):
+            events_captured.append(event.event_type)
         
         event_bus.subscribe("agent.task.*", event_handler)
         
-        orchestrator = OrchestratorAgent(event_bus=event_bus)
-        result = await orchestrator.run("generic task")
+        router = RegexRouter(event_bus=event_bus)
+        result = await router.run("generic task")
         
         assert "agent.task.completed" in events_captured
     
     @pytest.mark.asyncio
-    async def test_orchestrator_empty_decomposition(self):
+    async def test_router_empty_decomposition(self):
         """Test handling of empty decomposition."""
         event_bus = EventBus()
-        orchestrator = OrchestratorAgent(event_bus=event_bus)
+        router = RegexRouter(event_bus=event_bus)
         
         # Patch _decompose_task to return empty list
-        orchestrator._decompose_task = lambda x: []
+        router._decompose_task = lambda x: []
         
-        result = await orchestrator.run("some task")
+        result = await router.run("some task")
         
         assert result.success is False
         assert result.error is not None
     
     @pytest.mark.asyncio
-    async def test_orchestrator_with_context(self):
-        """Test orchestrator with execution context."""
+    async def test_router_with_context(self):
+        """Test router with execution context."""
         event_bus = EventBus()
         mock_registry = Mock()
         mock_agent = MockAgent("test", "test agent")
         mock_registry.get_agent = Mock(return_value=mock_agent)
         
-        orchestrator = OrchestratorAgent(
+        router = RegexRouter(
             event_bus=event_bus,
             agent_registry=mock_registry
         )
         
         context = {"timeout": 30, "priority": "high"}
-        result = await orchestrator.run("test task", context)
+        result = await router.run("test task", context)
         
         assert result.success is True
 
@@ -309,8 +309,8 @@ class TestIntegration:
         
         # Subscribe to all agent events
         events = []
-        async def capture_events(event):
-            events.append(event.name)
+        def capture_events(event):
+            events.append(event.event_type)
         
         event_bus.subscribe("agent.*", capture_events)
         
@@ -323,7 +323,7 @@ class TestIntegration:
     
     @pytest.mark.asyncio
     async def test_orchestrator_delegation_chain(self):
-        """Test orchestrator delegating to shell agent."""
+        """Test router delegating to shell agent."""
         event_bus = EventBus()
         shell_agent = ShellAgent(event_bus=event_bus)
         
@@ -333,13 +333,13 @@ class TestIntegration:
             side_effect=lambda name: shell_agent if name == "shell_agent" else None
         )
         
-        orchestrator = OrchestratorAgent(
+        router = RegexRouter(
             event_bus=event_bus,
             agent_registry=mock_registry
         )
         
-        # Run a shell command through orchestrator
-        result = await orchestrator.run("run command: echo delegation")
+        # Run a shell command through router
+        result = await router.run("run command: echo delegation")
         
         assert result.success is True
         assert result.output is not None
@@ -351,14 +351,14 @@ class TestIntegration:
         
         all_events = []
         
-        async def capture_all(event):
-            all_events.append(event.name)
+        def capture_all(event):
+            all_events.append(event.event_type)
         
         event_bus.subscribe("agent.*", capture_all)
         
         # Create agents
         shell_agent = ShellAgent(event_bus=event_bus)
-        orchestrator = OrchestratorAgent(event_bus=event_bus)
+        router = RegexRouter(event_bus=event_bus)
         
         # Execute commands
         await shell_agent.run("echo shell test")

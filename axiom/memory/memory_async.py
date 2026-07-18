@@ -6,7 +6,13 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import logging
+import shutil
+import sqlite3
+
 import aiosqlite
+
+logger = logging.getLogger(__name__)
 
 from axiom.memory.protocol import MemoryBackend
 from axiom.memory.semantic import SemanticIndex
@@ -37,12 +43,39 @@ class MemoryStore(MemoryBackend):
     async def initialize(self) -> None:
         if self._initialized:
             return
+        
+        try:
+            await self._init_db_connection()
+        except sqlite3.DatabaseError as e:
+            if self._db:
+                await self._db.close()
+                self._db = None
+            backup_path = f"{self.db_path}.corrupted.{int(time.time())}"
+            logger.error(f"Database corruption detected ({e}). Backing up to {backup_path} and resetting.")
+            try:
+                shutil.move(self.db_path, backup_path)
+            except OSError:
+                pass
+            # Retry initialization once with fresh file
+            await self._init_db_connection()
+            
+    async def _init_db_connection(self) -> None:
         self._db = await aiosqlite.connect(self.db_path, timeout=30)
         self._db.row_factory = aiosqlite.Row
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.execute("PRAGMA busy_timeout=30000")
-        await self._db.executescript(_SCHEMA)
-        await self._db.commit()
+        
+        async with self._db.execute("PRAGMA user_version") as cursor:
+            row = await cursor.fetchone()
+            current_version = row[0] if row else 0
+            
+        if current_version == 0:
+            await self._db.executescript(_SCHEMA)
+            await self._db.execute("PRAGMA user_version = 1")
+            await self._db.commit()
+        elif current_version > 1:
+            raise sqlite3.DatabaseError(f"Database version {current_version} is higher than supported version 1. Please upgrade AXIOM.")
+            
         self._initialized = True
 
     async def close(self) -> None:

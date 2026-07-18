@@ -1,0 +1,1 @@
+Please record a GIF or take a screenshot of the terminal CLI in action and replace this file with the image.

@@ -32,9 +32,6 @@ on the resulting ``Future``.
 
 import asyncio
 import threading
-from typing import TypeVar
-
-T = TypeVar("T")
 
 _loop: asyncio.AbstractEventLoop | None = None
 _thread: threading.Thread | None = None
@@ -84,7 +81,14 @@ def run_sync(coro):
 
 
 def shutdown_bridge() -> None:
-    """Stop the background loop.  Called during application teardown."""
+    """Stop the background loop.  Call during application teardown.
+
+    Must be called *after* all consumers (e.g. ``SyncMemoryStore.close()``)
+    have finished submitting work.  Calling it while a ``run_sync()`` call
+    is in-flight on another thread will stop the loop mid-coroutine;
+    the ``future.result()`` in that thread will raise
+    ``concurrent.futures.CancelledError``.
+    """
     global _loop, _thread
     if _loop is not None:
         _loop.call_soon_threadsafe(_loop.stop)

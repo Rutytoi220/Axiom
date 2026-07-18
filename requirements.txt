@@ -1,3 +1,4 @@
+aiosqlite>=0.19.0
 requests
 opencv-python==4.8.1.78
 pillow==10.1.0

@@ -1,57 +1,8 @@
 """Echo agent implementation."""
 
 from axiom.agents.base import AgentResult
-from typing import Dict, Any, List
-
-
-class SimpleBaseAgent:
-    """Simplified base agent for sync execution."""
-
-    def __init__(self, name: str, registry=None, bus=None, memory=None):
-        """Initialize base agent.
-
-        Args:
-            name: Agent name
-            registry: Component registry (optional)
-            bus: Event bus for publishing events (optional)
-            memory: Optional memory store
-        """
-        self.name = name
-        self.registry = registry
-        self.bus = bus
-        self.memory = memory
-        self._execution_count = 0
-
-    def run(self, task: str) -> AgentResult:
-        """Execute a task. Must be overridden by subclasses."""
-        raise NotImplementedError(f"{self.__class__.__name__} must implement run()")
-
-    def get_info(self) -> Dict[str, Any]:
-        """Return agent metadata for introspection (e.g. the CLI's `agents` command).
-
-        Subclasses may override ``description`` (property or attribute) and
-        ``_state`` for more specific reporting; both fall back to sensible
-        defaults here so every ``SimpleBaseAgent`` subclass is introspectable
-        without requiring an explicit override.
-        """
-        return {
-            "name": self.name,
-            "description": getattr(self, "description", f"{self.__class__.__name__} agent"),
-            "state": getattr(self, "_state", "idle"),
-            "execution_count": self._execution_count,
-        }
-
-    def _emit(self, event: str, data: Dict[str, Any]) -> None:
-        """Emit an event via the event bus (if available and callable)."""
-        if self.bus and hasattr(self.bus, 'publish_sync'):
-            try:
-                self.bus.publish_sync(event, data)
-            except Exception:
-                pass  # Silently ignore if publish fails
-
-    def _log(self, msg: str, steps: List[str]) -> None:
-        """Add a step to the log."""
-        steps.append(msg)
+from axiom.agents.simple_base import SimpleBaseAgent
+from typing import Dict, Any
 
 
 class EchoAgent(SimpleBaseAgent):

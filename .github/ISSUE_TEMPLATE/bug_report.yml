@@ -1,0 +1,50 @@
+name: Bug Report
+description: Create a report to help us improve AXIOM
+title: "[BUG] "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report!
+  - type: input
+    id: version
+    attributes:
+      label: AXIOM Version
+      description: What version of AXIOM are you running? (e.g., 1.0.0 or commit hash)
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      description: Are you using Linux, macOS, or WSL?
+    validations:
+      required: true
+  - type: input
+    id: ollama
+    attributes:
+      label: Ollama Version & Model
+      description: What version of Ollama and which model (e.g., llama3:8b) are you using?
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of what the bug is.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce the problem?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs
+      description: Paste any relevant terminal output or crash logs here.
+      render: shell

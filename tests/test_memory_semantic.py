@@ -1,4 +1,4 @@
-"""Tests for MemoryManager's optional semantic search integration.
+"""Tests for SyncMemoryStore's optional semantic search integration.
 
 Uses a deterministic fake embedding provider so these tests do not require a
 running Ollama instance.
@@ -6,7 +6,7 @@ running Ollama instance.
 
 from typing import List, Optional
 
-from axiom.memory import MemoryManager
+from axiom.memory import SyncMemoryStore
 
 
 class FakeEmbeddingProvider:
@@ -30,7 +30,7 @@ class ExplodingEmbeddingProvider:
 
 def test_add_message_without_provider_is_unchanged(tmp_path):
     """No embedding_provider means behavior matches the pre-existing contract."""
-    memory = MemoryManager(str(tmp_path / "memory.db"))
+    memory = SyncMemoryStore(str(tmp_path / "memory.db"))
     memory.create_conversation("Test")
 
     message_id = memory.add_message("user", "hello world")
@@ -40,7 +40,7 @@ def test_add_message_without_provider_is_unchanged(tmp_path):
 
 
 def test_search_semantic_without_provider_returns_empty_list(tmp_path):
-    memory = MemoryManager(str(tmp_path / "memory.db"))
+    memory = SyncMemoryStore(str(tmp_path / "memory.db"))
     memory.create_conversation("Test")
     memory.add_message("user", "hello world")
 
@@ -55,7 +55,7 @@ def test_search_semantic_ranks_by_similarity(tmp_path):
             "cats": [1.0, 0.0],
         }
     )
-    memory = MemoryManager(str(tmp_path / "memory.db"), embedding_provider=provider)
+    memory = SyncMemoryStore(str(tmp_path / "memory.db"), embedding_provider=provider)
     memory.create_conversation("Test")
     memory.add_message("user", "I love cats")
     memory.add_message("user", "The weather is sunny today")
@@ -78,7 +78,7 @@ def test_search_semantic_respects_limit(tmp_path):
             "query": [1.0, 0.0],
         }
     )
-    memory = MemoryManager(str(tmp_path / "memory.db"), embedding_provider=provider)
+    memory = SyncMemoryStore(str(tmp_path / "memory.db"), embedding_provider=provider)
     memory.create_conversation("Test")
     memory.add_message("user", "a")
     memory.add_message("user", "b")
@@ -92,7 +92,7 @@ def test_search_semantic_respects_limit(tmp_path):
 def test_messages_without_embeddable_content_are_skipped_gracefully(tmp_path):
     """Provider returning an empty embedding must not break message storage."""
     provider = FakeEmbeddingProvider({})  # embed() returns [] for everything
-    memory = MemoryManager(str(tmp_path / "memory.db"), embedding_provider=provider)
+    memory = SyncMemoryStore(str(tmp_path / "memory.db"), embedding_provider=provider)
     memory.create_conversation("Test")
 
     message_id = memory.add_message("user", "unembeddable content")
@@ -103,7 +103,7 @@ def test_messages_without_embeddable_content_are_skipped_gracefully(tmp_path):
 
 def test_embedding_failure_does_not_break_add_message(tmp_path):
     provider = ExplodingEmbeddingProvider()
-    memory = MemoryManager(str(tmp_path / "memory.db"), embedding_provider=provider)
+    memory = SyncMemoryStore(str(tmp_path / "memory.db"), embedding_provider=provider)
     memory.create_conversation("Test")
 
     message_id = memory.add_message("user", "hello")
@@ -115,7 +115,7 @@ def test_embedding_failure_does_not_break_add_message(tmp_path):
 
 def test_search_semantic_failure_returns_empty_list_without_raising(tmp_path):
     provider = ExplodingEmbeddingProvider()
-    memory = MemoryManager(str(tmp_path / "memory.db"), embedding_provider=provider)
+    memory = SyncMemoryStore(str(tmp_path / "memory.db"), embedding_provider=provider)
     memory.create_conversation("Test")
     memory.add_message("user", "hello")
 
@@ -125,7 +125,7 @@ def test_search_semantic_failure_returns_empty_list_without_raising(tmp_path):
 def test_keyword_search_relevant_still_works_alongside_semantic(tmp_path):
     """search_relevant (keyword) and search_semantic are independent, additive APIs."""
     provider = FakeEmbeddingProvider({"urgent task": [1.0, 0.0]})
-    memory = MemoryManager(str(tmp_path / "memory.db"), embedding_provider=provider)
+    memory = SyncMemoryStore(str(tmp_path / "memory.db"), embedding_provider=provider)
     memory.create_conversation("Test")
     memory.add_message("user", "urgent task")
 

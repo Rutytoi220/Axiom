@@ -6,7 +6,7 @@ and support for agents, tools, and plugins.
 
 from axiom.core import Engine, EventBus, Event, Registry, ExecutionContext
 from axiom.llm import OllamaClient, OllamaConfig
-from axiom.memory import MemoryManager
+from axiom.memory import SyncMemoryStore
 from axiom.planning import ExecutionPlan, PlanError, PlanStep, StepStatus, TaskPlanner
 from axiom.agents import BaseAgent, AgentResult, OrchestratorAgent, ShellAgent
 from axiom.tools import (
@@ -43,8 +43,7 @@ __all__ = [
     # LLM
     "OllamaClient",
     "OllamaConfig",
-    # Memory
-    "MemoryManager",
+    "SyncMemoryStore",
     # Planning
     "ExecutionPlan",
     "PlanError",

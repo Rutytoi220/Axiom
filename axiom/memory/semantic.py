@@ -17,14 +17,21 @@ class EmbeddingProvider(Protocol):
 
 def _cosine_similarity(a: List[float], b: List[float]) -> float:
     """Compute cosine similarity between two vectors."""
+    import numpy as np
+    
     if len(a) != len(b) or not a:
         return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(x * x for x in b))
+        
+    vec_a = np.array(a, dtype=np.float32)
+    vec_b = np.array(b, dtype=np.float32)
+    
+    norm_a = np.linalg.norm(vec_a)
+    norm_b = np.linalg.norm(vec_b)
+    
     if norm_a == 0 or norm_b == 0:
         return 0.0
-    return dot / (norm_a * norm_b)
+        
+    return float(np.dot(vec_a, vec_b) / (norm_a * norm_b))
 
 
 class SemanticIndex:
@@ -89,10 +96,23 @@ class SemanticIndex:
             params = ()
         cursor = await db.execute(query, params)
         rows = await cursor.fetchall()
+        if not rows:
+            return []
+            
+        import numpy as np
+        
+        q_vec = np.array(query_embedding, dtype=np.float32)
+        q_norm = np.linalg.norm(q_vec)
+        if q_norm == 0:
+            return []
+            
         scored = []
         for row in rows:
             stored = json.loads(row["embedding_json"])
-            sim = _cosine_similarity(query_embedding, stored)
+            s_vec = np.array(stored, dtype=np.float32)
+            s_norm = np.linalg.norm(s_vec)
+            sim = float(np.dot(q_vec, s_vec) / (q_norm * s_norm)) if s_norm > 0 else 0.0
+            
             scored.append(
                 {
                     "id": row["id"],

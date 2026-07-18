@@ -27,6 +27,12 @@ setup(
     python_requires=">=3.12",
     install_requires=[
         "requests>=2.28.0",
+        "aiosqlite>=0.19.0",
+        "psutil>=5.9.0",
+        "numpy>=1.24.0",
+        "pyautogui>=0.9.53",
+        "pillow>=10.1.0",
+        "opencv-python>=4.8.0",
     ],
     extras_require={
         "dev": [

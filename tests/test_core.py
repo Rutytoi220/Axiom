@@ -2,9 +2,9 @@
 
 import pytest
 from axiom.core import Engine, Event, EventBus, Registry, ExecutionContext
-from axiom.memory import MemoryManager
+from axiom.memory import SyncMemoryStore
 from axiom.tools import ShellTool, FileTool
-from axiom.agents import OrchestratorAgent
+from axiom.agents import RegexRouter
 
 
 class TestEngine:
@@ -80,13 +80,13 @@ class TestRegistry:
         assert len(tools) > 0
 
 
-class TestMemoryManager:
+class TestSyncMemoryStoreConversations:
     """Test memory management."""
 
     def test_conversation_creation(self, tmp_path):
         """Test conversation creation."""
         db_path = str(tmp_path / "test.db")
-        memory = MemoryManager(db_path)
+        memory = SyncMemoryStore(db_path)
 
         conv_id = memory.create_conversation("Test")
         assert conv_id is not None
@@ -95,7 +95,7 @@ class TestMemoryManager:
     def test_message_storage(self, tmp_path):
         """Test message storage."""
         db_path = str(tmp_path / "test.db")
-        memory = MemoryManager(db_path)
+        memory = SyncMemoryStore(db_path)
 
         memory.create_conversation("Test")
         memory.add_message("user", "Hello")
@@ -129,8 +129,8 @@ class TestAgents:
 
     @pytest.mark.asyncio
     async def test_orchestrator_agent(self):
-        """Test orchestrator agent."""
-        agent = OrchestratorAgent()
+        """Test regex router agent."""
+        agent = RegexRouter()
         result = await agent.run("test input")
 
         assert result.success is True

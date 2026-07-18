@@ -1,14 +1,16 @@
 """AXIOM Command-line interface."""
 
-import asyncio
 import cmd
 import json
 import logging
+import os
+from pathlib import Path
 from typing import Optional
-from axiom.core import Engine
-from axiom.memory import MemoryManager, SyncMemoryStore
+from axiom.core import Engine, shutdown_bridge
+from axiom.memory import SyncMemoryStore
 from axiom.llm import OllamaClient, OllamaConfig
 from axiom.agents.orchestrator_agent import OrchestratorAgent
+from axiom.tool_registry import ToolRegistry
 from axiom.tools import (
     EchoTool,
     ShellTool,
@@ -16,6 +18,7 @@ from axiom.tools import (
     FileWriteTool,
     SystemInfoTool
 )
+from axiom.legacy_wrapper import create_legacy_tools
 from axiom.plugins import NXBTPlugin, AutomationPlugin
 
 logging.basicConfig(
@@ -40,13 +43,22 @@ class CLI(cmd.Cmd):
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Create memory store first
-        self.memory_store = SyncMemoryStore(":memory:")
-        # Pass memory store to engine
-        self.engine = Engine(memory=self.memory_store)
-        self.memory = MemoryManager()
-        self.ollama = OllamaClient(OllamaConfig(model="qwen2.5:14b"))
-        self.orchestrator = OrchestratorAgent(self.engine.registry, self.engine.event_bus, self.memory_store, llm=self.ollama)
+        # Create LLM client
+        model = os.environ.get("AXIOM_MODEL", "llama3:8b")
+        self.ollama = OllamaClient(OllamaConfig(model=model))
+        
+        # Create unified memory store backed by persistent database
+        axiom_dir = Path.home() / ".axiom"
+        axiom_dir.mkdir(exist_ok=True, parents=True)
+        db_path = str(axiom_dir / "axiom.db")
+        self.memory = SyncMemoryStore(db_path, embedding_provider=self.ollama)
+        self.memory_store = self.memory  # Alias for backward compatibility internally
+        
+        # Pass unified memory store to engine
+        self.engine = Engine(memory=self.memory)
+        
+        self.tool_registry = ToolRegistry(self.engine.registry)
+        self.orchestrator = OrchestratorAgent(self.tool_registry, self.engine.event_bus, self.memory_store, llm=self.ollama)
         self._event_log = []
         self._closed = False
         self._subscribe_events()
@@ -71,17 +83,9 @@ class CLI(cmd.Cmd):
             logger.debug("CLI event handler failed", exc_info=True)
 
     def _run_async(self, coro):
-        """Helper to run async code in synchronous context."""
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # If loop is running, create a new one
-                return asyncio.run(coro)
-            else:
-                return loop.run_until_complete(coro)
-        except RuntimeError:
-            # No event loop in thread, create a new one
-            return asyncio.run(coro)
+        """Run an async coroutine from synchronous CLI context."""
+        from axiom.core.async_bridge import run_sync
+        return run_sync(coro)
     
     def _init_system(self) -> None:
         """Initialize the AXIOM system."""
@@ -113,6 +117,9 @@ class CLI(cmd.Cmd):
             FileWriteTool("."),
             SystemInfoTool()
         ]
+        
+        # Bridge legacy brain.action_registry actions into the modern tool system.
+        tools.extend(create_legacy_tools())
         
         for tool in tools:
             self.engine.registry.register_tool(tool.tool_id, tool)
@@ -186,6 +193,10 @@ class CLI(cmd.Cmd):
             else:
                 print("(No output)")
             print("="*60 + "\n")
+        except KeyboardInterrupt:
+            print("\n\n[Generation cancelled by user]")
+            # Optionally store an aborted message, but for now just return cleanly
+            return
         except Exception as e:
             print(f"\nError processing request: {e}\n")
             logger.exception(f"Error in do_ask: {e}")
@@ -369,8 +380,8 @@ class CLI(cmd.Cmd):
         self._closed = True
         self.engine.shutdown()
         self.memory.close()
-        self.memory_store.close()
         self.ollama.close()
+        shutdown_bridge()
 
     def postloop(self) -> None:
         """Ensure resources are released when the command loop exits."""

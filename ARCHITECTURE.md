@@ -21,16 +21,13 @@ The foundation is an event bus pattern that enables loose coupling between compo
 - Components register themselves in `Registry`
 - `ExecutionContext` maintains state during task execution
 
-> **Note on parallel implementations:** `axiom/engine/`, top-level
-> `axiom/events.py`, and top-level `axiom/registry.py` provide a second,
-> independently tested `Engine`/`EventBus`/`Registry` stack used by
-> `axiom.engine.CoreEngine` and covered by `tests/test_core_engine.py`,
-> `tests/test_event_bus.py`, and `tests/test_registry.py`. Both stacks are
-> live and intentionally kept separate rather than merged, since unifying
-> them would require a broader migration outside the scope of incidental
-> changes. Confirmed genuinely dead code (`axiom/cli.py`, and the
-> `_old_backup`/`_backup`/`_impl` module variants left over from an earlier
-> refactor, two of which had broken imports) has been removed.
+> **EventBus consolidation:** As of the current version, `axiom.core.events`
+> is the single canonical EventBus implementation — sync-first, with
+> fnmatch wildcard pattern matching and `bus.published` meta-events.
+> `axiom/events.py` re-exports from `axiom.core.events` for backward
+> compatibility. The `axiom/engine/` and `axiom/registry.py` stacks remain
+> as legacy code; they use the canonical bus via the re-export. A future
+> migration can remove them once their tests are ported.
 
 ### 2. **LLM Layer** (`axiom/llm/`)
 

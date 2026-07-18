@@ -92,14 +92,13 @@ class BaseAgent(ABC):
     async def _emit_event(self, event_name: str, payload: Dict[str, Any]) -> None:
         """
         Emit an event via event bus.
-        
-        Args:
-            event_name: Name of event
-            payload: Event payload
+
+        Uses the synchronous publish_sync path so this works with the
+        canonical :class:`axiom.core.events.EventBus`.
         """
         if self._event_bus:
             try:
-                await self._event_bus.publish(event_name, payload)
+                self._event_bus.publish_sync(event_name, payload)
             except Exception as e:
                 logger.warning(f"Failed to emit event {event_name}: {str(e)}")
     

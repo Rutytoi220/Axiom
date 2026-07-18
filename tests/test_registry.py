@@ -476,8 +476,8 @@ class TestRegistryEvents:
         
         events = []
         
-        async def handler(event):
-            events.append(event.payload)
+        def handler(event):
+            events.append(event.data)
         
         event_bus.subscribe("registry.registered", handler)
         
@@ -486,11 +486,9 @@ class TestRegistryEvents:
         
         registry.register("my_tool", MyTool, ComponentType.TOOL)
         
-        # Give event time to emit
-        await asyncio.sleep(0.01)
-        
-        # Event should be emitted (if event loop is running)
-        # Note: This test may not always work depending on event loop state
+        # Event is emitted synchronously via publish_sync
+        assert len(events) == 1
+        assert events[0]["name"] == "my_tool"
     
     @pytest.mark.asyncio
     async def test_unregister_emits_event(self):
@@ -500,8 +498,8 @@ class TestRegistryEvents:
         
         events = []
         
-        async def handler(event):
-            events.append(event.payload)
+        def handler(event):
+            events.append(event.data)
         
         event_bus.subscribe("registry.unregistered", handler)
         
@@ -511,8 +509,9 @@ class TestRegistryEvents:
         registry.register("my_tool", MyTool, ComponentType.TOOL)
         registry.unregister("my_tool", ComponentType.TOOL)
         
-        # Give event time to emit
-        await asyncio.sleep(0.01)
+        # Event is emitted synchronously via publish_sync
+        assert len(events) == 1
+        assert events[0]["name"] == "my_tool"
 
 
 class TestRegistryIntegration:

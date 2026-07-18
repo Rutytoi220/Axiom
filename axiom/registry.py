@@ -1,6 +1,5 @@
 """Registry for managing named objects and components."""
 
-import asyncio
 import inspect
 import logging
 import threading
@@ -10,7 +9,6 @@ from typing import Any, Callable, Dict, List, Optional, Type
 from axiom.events import EventBus
 
 logger = logging.getLogger(__name__)
-_DEBUG_LOG = "/run/media/rutytoi/fast af/ChienGPT/.cursor/debug-e94045.log"
 
 
 class ComponentType(Enum):
@@ -58,28 +56,6 @@ class Registry:
             ComponentType.AGENT: BaseAgent,
             ComponentType.PLUGIN: BasePlugin,
         }
-        # #region agent log
-        import json as _json
-        import time as _time
-
-        try:
-            with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
-                _f.write(
-                    _json.dumps(
-                        {
-                            "sessionId": "e94045",
-                            "hypothesisId": "B",
-                            "location": "registry.py:Registry.__init__",
-                            "message": "registry_capabilities",
-                            "data": {"has_base_classes": True, "module": __name__},
-                            "timestamp": int(_time.time() * 1000),
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
 
     def register(self, name: str, component: Any, component_type: Optional[ComponentType] = None) -> None:
         if not name:
@@ -178,14 +154,7 @@ class Registry:
             )
 
     def _emit_event(self, event_name: str, payload: Any) -> None:
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self._event_bus.publish(event_name, payload))
-        except RuntimeError:
-            try:
-                asyncio.run(self._event_bus.publish(event_name, payload))
-            except RuntimeError:
-                logger.debug("No event loop available for %s", event_name)
+        self._event_bus.publish_sync(event_name, payload)
 
     def get_event_bus(self) -> EventBus:
         return self._event_bus
