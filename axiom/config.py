@@ -5,9 +5,17 @@ from typing import Optional
 
 
 @dataclass
+class BehaviorConfig:
+    profile: str = "default"
+
+
+@dataclass
 class AxiomConfig:
     """AXIOM system configuration."""
     
+    # Behavior
+    behavior: BehaviorConfig = None
+
     # System
     debug: bool = False
     log_level: str = "INFO"
@@ -17,9 +25,14 @@ class AxiomConfig:
     monitor_window_focus: bool = False
     monitor_clipboard: bool = False
     
+    def __post_init__(self):
+        if self.behavior is None:
+            self.behavior = BehaviorConfig()
+    
     # LLM
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "neural-chat"
+    ollama_model: str = "llama3.1:latest"
+    embedding_model: str = "nomic-embed-text"
     ollama_temperature: float = 0.7
     
     # Memory
@@ -48,6 +61,7 @@ class AxiomConfig:
             "proactive_kernel": self.proactive_kernel,
             "ollama_base_url": self.ollama_base_url,
             "ollama_model": self.ollama_model,
+            "embedding_model": self.embedding_model,
             "ollama_temperature": self.ollama_temperature,
             "db_path": self.db_path,
             "max_history": self.max_history,

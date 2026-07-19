@@ -36,7 +36,7 @@ class CLI(cmd.Cmd):
     ╔═══════════════════════════════════════════════════════════════╗
     ║                    AXIOM - AI Orchestration                   ║
     ║              Local-First LLM Framework for Linux              ║
-    ║                    Type 'help' for commands                   ║
+    ║                    Type '/help' for commands                  ║
     ╚═══════════════════════════════════════════════════════════════╝
     """
     
@@ -45,9 +45,16 @@ class CLI(cmd.Cmd):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Create LLM client
-        model = os.environ.get("AXIOM_MODEL", "llama3:8b")
-        self.ollama = OllamaClient(OllamaConfig(model=model))
+        from axiom.config import get_config
+        config = get_config()
+        if "AXIOM_MODEL" in os.environ:
+            config.ollama_model = os.environ["AXIOM_MODEL"]
+            
+        self.ollama = OllamaClient(OllamaConfig(model=config.ollama_model, embedding_model=config.embedding_model))
         
+        # Validate dynamic models
+        from axiom.core.config_service import initialize_model_config
+        initialize_model_config(config, self.ollama)
         # Create unified memory store backed by persistent database
         axiom_dir = Path.home() / ".axiom"
         axiom_dir.mkdir(exist_ok=True, parents=True)
@@ -66,8 +73,13 @@ class CLI(cmd.Cmd):
         self._init_system()
         
         # Start Sleep Cycle Daemon
-        self.sleep_daemon = SleepCycleDaemon(self.engine.event_bus, self.memory)
+        self.sleep_daemon = SleepCycleDaemon(self.engine.event_bus, self.memory, self.ollama)
         self.sleep_daemon.start()
+
+        # Start Routine Engine
+        from axiom.core.routine import RoutineEngine
+        self.routine_engine = RoutineEngine(self)
+        self.routine_engine.start()
     
     def _subscribe_events(self) -> None:
         """Capture events via pub/sub instead of monkey-patching the event bus."""
@@ -115,12 +127,19 @@ class CLI(cmd.Cmd):
     
     def _register_tools(self) -> None:
         """Register system tools."""
+        from axiom.tools.os_assist import SafeFileSearchTool, FileOpenerTool, AppLauncherTool, CaptureScreenContextTool
+        from axiom.tools.document_reader import ReadDocumentContentTool
         tools = [
             EchoTool(),
             ShellTool(),
             FileReadTool("."),
             FileWriteTool("."),
-            SystemInfoTool()
+            SystemInfoTool(),
+            SafeFileSearchTool(),
+            FileOpenerTool(),
+            AppLauncherTool(),
+            CaptureScreenContextTool(),
+            ReadDocumentContentTool()
         ]
         
         # Bridge legacy brain.action_registry actions into the modern tool system.
@@ -158,10 +177,14 @@ class CLI(cmd.Cmd):
         logger.info(f"Initialized {len(plugins)} plugins")
     
     def do_ask(self, arg: str) -> None:
-        """Ask AXIOM a question: ask <question>"""
+        """Ask AXIOM a question: ask <question> [--verbose]"""
         if not arg:
-            print("Usage: ask <question>")
+            print("Usage: ask <question> [--verbose]")
             return
+            
+        is_verbose = "--verbose" in arg
+        if is_verbose:
+            arg = arg.replace("--verbose", "").strip()
         
         print(f"\n[Processing: {arg[:50]}...]")
         
@@ -176,7 +199,7 @@ class CLI(cmd.Cmd):
                     # Agentic loop output
                     output_str = response.output.get("response", "")
                     tool_results = response.output.get("tool_results", [])
-                    if tool_results:
+                    if tool_results and is_verbose:
                         output_str += "\n\n--- Tool calls ---"
                         for tr in tool_results:
                             output_str += f"\n  ▸ {tr['tool']}({json.dumps(tr['arguments'], default=str)[:80]})"
@@ -205,6 +228,83 @@ class CLI(cmd.Cmd):
         except Exception as e:
             print(f"\nError processing request: {e}\n")
             logger.exception(f"Error in do_ask: {e}")
+    def do_run(self, arg: str) -> None:
+        """Run an interactive magic DevEx workflow. Usage: run <prompt>"""
+        if not arg.strip():
+            print("Usage: run <prompt>")
+            return
+            
+        from axiom.cli.interactive import InteractiveWorkflowRunner
+        runner = InteractiveWorkflowRunner(engine=self.engine, orchestrator=self.orchestrator)
+        
+        try:
+            # We must run this inside the async bridge because orchestrator.run is async but 
+            # wait, orchestrator.run is synchronous here? Let's check:
+            # In do_eval we do self._run_async(harness.run_suite())
+            # orchestrator.run is synchronous (it has an _agentic_loop that runs until completion).
+            runner.run(arg)
+        except Exception as e:
+            # Exception is already printed by InteractiveWorkflowRunner
+            pass
+
+    def do_commit(self, arg: str) -> None:
+        """Commit the pending workspace transaction. Usage: commit"""
+        txns = getattr(self.engine, 'active_transactions', [])
+        if not txns:
+            print("No active transaction to commit.")
+            return
+        txn = txns.pop()
+        txn.commit()
+        print(f"[✓] Successfully committed transaction.")
+
+    def do_rollback(self, arg: str) -> None:
+        """Rollback the pending workspace transaction. Usage: rollback"""
+        txns = getattr(self.engine, 'active_transactions', [])
+        if not txns:
+            print("No active transaction to rollback.")
+            return
+        txn = txns.pop()
+        txn.rollback()
+        print(f"[✓] Successfully rolled back transaction.")
+
+    def do_routine(self, arg: str) -> None:
+        """Manage background routines. Usage: routine add "<prompt>", routine list, routine delete <id>"""
+        parts = arg.split(maxsplit=1)
+        if not parts:
+            print("Usage: routine add \"<prompt>\", routine list, routine delete <id>")
+            return
+            
+        cmd = parts[0].lower()
+        if cmd == "list":
+            routines = self.routine_engine.list_routines()
+            if not routines:
+                print("No active routines.")
+                return
+            for r in routines:
+                print(f"[{r['id'][:8]}] {r['cron_expression']} -> {r['prompt']}")
+        elif cmd == "add":
+            if len(parts) < 2:
+                print("Usage: routine add \"<prompt>\"")
+                return
+            prompt = parts[1].strip('"\'')
+            print(f"Parsing natural language schedule via LLM...")
+            cron_expr = self._run_async(self.routine_engine.parse_schedule_to_cron(prompt))
+            rid = self.routine_engine.add_routine(prompt, cron_expr)
+            print(f"[✓] Added routine {rid[:8]} running at '{cron_expr}'")
+        elif cmd == "delete":
+            if len(parts) < 2:
+                print("Usage: routine delete <id>")
+                return
+            target_id = parts[1].strip()
+            # Find full ID
+            for r in self.routine_engine.list_routines():
+                if r['id'].startswith(target_id):
+                    self.routine_engine.delete_routine(r['id'])
+                    print(f"[✓] Deleted routine {r['id'][:8]}")
+                    return
+            print(f"Routine {target_id} not found.")
+        else:
+            print("Unknown routine command.")
 
     def do_eval(self, arg: str) -> None:
         """Run the Autonomous SWE-Bench Evaluation Harness: eval --run-suite"""
@@ -233,6 +333,31 @@ class CLI(cmd.Cmd):
         except Exception as e:
             print(f"\nError running evaluation: {e}\n")
             logger.exception(f"Error in do_eval: {e}")
+
+    def do_repair(self, arg: str) -> None:
+        """Trigger the Autonomous Self-Healing Engine on a directory: repair <path>"""
+        if not arg.strip():
+            print("Usage: repair <path>")
+            return
+            
+        target_dir = arg.strip()
+        print(f"\n[Starting Autonomous Self-Healing Engine on {target_dir}...]")
+        
+        try:
+            from axiom.evals.swe_harness import SWEBenchHarness
+            harness = SWEBenchHarness(self.engine)
+            success = self._run_async(harness.repair(target_dir))
+            
+            print("\n" + "="*60)
+            if success:
+                print(f"[✓] Self-Repair SUCCESS: {target_dir} is fixed.")
+            else:
+                print(f"[✗] Self-Repair FAILED: Could not fix {target_dir}.")
+            print("="*60 + "\n")
+            
+        except Exception as e:
+            print(f"\nError during self-repair: {e}\n")
+            logger.exception(f"Error in do_repair: {e}")
 
     def do_monitor(self, arg: str) -> None:
         """Launch the Interactive Textual TUI System Monitor: monitor"""
@@ -513,7 +638,57 @@ class CLI(cmd.Cmd):
                 
         else:
             print("Usage: daemon [start|stop|status]")
+
+    def do_service(self, arg: str) -> None:
+        """Manage AXIOM as a systemd user service: service [install|start|stop|restart|status]"""
+        args = arg.split()
+        if not args:
+            print("Usage: service [install|start|stop|restart|status]")
+            return
+
+        cmd = args[0].lower()
+        
+        from axiom.core.service_mgr import SystemdServiceManager
+        mgr = SystemdServiceManager()
+
+        if not mgr.is_supported():
+            print("Error: Systemd user services are not supported on this OS/environment.")
+            return
+
+        if cmd == "install":
+            print("Installing AXIOM systemd service...")
+            if mgr.install():
+                print("[✓] Service installed and enabled on boot.")
+            else:
+                print("[✗] Failed to install service.")
+        elif cmd == "start":
+            print("Starting service...")
+            if mgr.start():
+                print("[✓] Service started.")
+            else:
+                print("[✗] Failed to start service.")
+        elif cmd == "stop":
+            print("Stopping service...")
+            if mgr.stop():
+                print("[✓] Service stopped.")
+            else:
+                print("[✗] Failed to stop service.")
+        elif cmd == "restart":
+            print("Restarting service...")
+            if mgr.restart():
+                print("[✓] Service restarted.")
+            else:
+                print("[✗] Failed to restart service.")
+        elif cmd == "status":
+            print(mgr.status())
+        else:
+            print(f"Unknown service command: {cmd}")
+            print("Usage: service [install|start|stop|restart|status]")
             
+    def do_exit(self, arg: str) -> None:
+        """Alias for quit"""
+        return self.do_quit(arg)
+
     def do_quit(self, arg: str) -> None:
         """Exit AXIOM"""
         print("\nShutting down AXIOM...")
@@ -537,6 +712,26 @@ class CLI(cmd.Cmd):
         """Ensure resources are released when the command loop exits."""
         self.close()
     
+    def precmd(self, line: str) -> str:
+        """Route slash commands to system methods, else default to chat."""
+        stripped = line.strip()
+        if not stripped:
+            return line
+        if stripped == "EOF":
+            return line
+            
+        if stripped.startswith("/"):
+            return stripped[1:]
+        
+        # Backward compatibility for 'ask' and 'run' prefixes
+        if stripped.startswith("ask "):
+            return stripped
+        if stripped.startswith("run "):
+            return stripped
+            
+        # Default to ask
+        return f"ask {stripped}"
+
     def do_help(self, arg: str) -> None:
         """Show help information"""
         if arg:
@@ -546,18 +741,21 @@ class CLI(cmd.Cmd):
             print("AXIOM Commands")
             print("="*60)
             print("""
-  ask <question>      - Ask AXIOM a question
-  tools              - List all registered tools
-  agents             - List all registered agents
-  plugins            - List all registered plugins
-  status             - Show system status
-  history            - Show conversation history
-  clear_history      - Clear conversation history
-  resume <id>        - Resume conversation/session by ID
-  memory_log         - Show memory event log
-  trace --last       - Replay telemetry from the last execution
-  exit/quit          - Exit AXIOM
-  help               - Show this help message
+  (any text)         - Chat directly with AXIOM
+  /ask <question>    - Ask AXIOM a question (legacy prefix)
+  /tools             - List all registered tools
+  /agents            - List all registered agents
+  /plugins           - List all registered plugins
+  /status            - Show system status
+  /history           - Show conversation history
+  /clear_history     - Clear conversation history
+  /resume <id>       - Resume conversation/session by ID
+  /memory_log        - Show memory event log
+  /trace --last      - Replay telemetry from the last execution
+  /service           - Manage AXIOM systemd user service
+  /repair <path>     - Trigger Autonomous Self-Healing Engine on a directory
+  /exit or /quit     - Exit AXIOM
+  /help              - Show this help message
             """)
             print("="*60 + "\n")
     
@@ -615,6 +813,80 @@ class CLI(cmd.Cmd):
             elif etype in ("orchestrator.task.received", "orchestrator.task.completed"):
                 print(f"\n[{ts}] {etype.upper()}: {data.get('task')}")
         print("=================================\n")
+
+    def do_plugin(self, arg: str) -> None:
+        """Manage AXIOM plugins. Usage: plugin <install|list|inspect> [args]"""
+        args = arg.split()
+        if not args:
+            print("Usage: plugin <install|list|inspect> [args]")
+            return
+            
+        cmd = args[0]
+        plugin_root = Path.home() / ".axiom" / "plugins"
+        
+        from axiom.plugins.loader import PluginLoader
+        loader = PluginLoader()
+        
+        if cmd == "list":
+            if not plugin_root.exists():
+                print("No plugins installed.")
+                return
+            print("\n=== INSTALLED PLUGINS ===")
+            for path in plugin_root.iterdir():
+                if path.is_dir() and (path / "plugin.toml").exists():
+                    try:
+                        manifest = loader.load_manifest(path)
+                        print(f" - {manifest.name} (v{manifest.version}) by {manifest.author}")
+                    except Exception as e:
+                        print(f" - [INVALID] {path.name}: {e}")
+            print("=========================\n")
+            
+        elif cmd == "install":
+            if len(args) < 2:
+                print("Usage: plugin install <path>")
+                return
+            src = Path(args[1]).resolve()
+            if not src.exists() or not (src / "plugin.toml").exists():
+                print(f"Error: Valid plugin.toml not found in {src}")
+                return
+                
+            try:
+                manifest = loader.load_manifest(src)
+                dest = plugin_root / manifest.plugin_id
+                if dest.exists():
+                    import shutil
+                    shutil.rmtree(dest)
+                import shutil
+                shutil.copytree(src, dest)
+                print(f"Successfully installed plugin '{manifest.name}' to {dest}")
+            except Exception as e:
+                print(f"Failed to install plugin: {e}")
+                
+        elif cmd == "inspect":
+            if len(args) < 2:
+                print("Usage: plugin inspect <name>")
+                return
+            target_id = args[1]
+            dest = plugin_root / target_id
+            if not dest.exists():
+                print(f"Plugin '{target_id}' not found.")
+                return
+            try:
+                manifest = loader.load_manifest(dest)
+                print(f"\n=== PLUGIN AUDIT: {manifest.name} ===")
+                print(f"Version:       {manifest.version}")
+                print(f"Description:   {manifest.description}")
+                print(f"Entrypoint:    {manifest.module}.{manifest.entry_class}")
+                print("\n[CAPABILITIES]")
+                print(f" Filesystem:   {'GRANTED' if manifest.permissions.allows('filesystem') else 'DENIED'}")
+                print(f" Network:      {'GRANTED' if manifest.permissions.allows('network') else 'DENIED'}")
+                print(f" Shell:        {'GRANTED' if manifest.permissions.allows('shell') else 'DENIED'}")
+                print("=======================================\n")
+            except Exception as e:
+                print(f"Error inspecting plugin: {e}")
+                
+        else:
+            print(f"Unknown plugin command: {cmd}")
 
     def do_replay(self, arg: str) -> None:
         """Alias for trace --last"""

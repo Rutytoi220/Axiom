@@ -51,8 +51,9 @@ def test_do_ask_without_argument_shows_usage(cli, capsys):
     assert "Usage: ask <question>" in captured.out
 
 
-def test_do_ask_reports_ollama_unavailable_without_crashing(cli, capsys):
+def test_do_ask_reports_ollama_unavailable_without_crashing(cli, capsys, monkeypatch):
     """With no Ollama server reachable, do_ask must degrade gracefully."""
+    monkeypatch.setattr(cli.ollama, "is_available", lambda: False)
     cli.onecmd("ask what can you do")
 
     captured = capsys.readouterr()
@@ -94,7 +95,8 @@ def test_do_plugins_lists_registered_plugins(cli, capsys):
     assert "enabled" in captured.out
 
 
-def test_do_status_reports_system_state_without_ollama(cli, capsys):
+def test_do_status_reports_system_state_without_ollama(cli, capsys, monkeypatch):
+    monkeypatch.setattr(cli.ollama, "is_available", lambda: False)
     cli.onecmd("status")
 
     captured = capsys.readouterr()

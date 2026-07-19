@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import secrets
+import webbrowser
 from pathlib import Path
 from typing import Any, Dict, Set, Callable
 
@@ -41,6 +42,8 @@ class AxiomDaemon:
         
         self._ws_server = None
         self._uds_server = None
+        self._http_server = None
+        self._http_task = None
         self._is_running = False
         
         # Subscribe to all events to forward them to subscribers
@@ -86,6 +89,31 @@ class AxiomDaemon:
             os.chmod(self.sock_path, 0o600)
             logger.info(f"UDS server listening on {self.sock_path}")
 
+        # 3. Start HTTP/WS Gateway Server
+        import uvicorn
+        from axiom.client.gateway import create_app
+        app = create_app(self)
+        config = uvicorn.Config(app=app, host="127.0.0.1", port=49103, log_level="error")
+        self._http_server = uvicorn.Server(config)
+        self._http_task = asyncio.create_task(self._http_server.serve())
+        logger.info("HTTP/WS Gateway listening on http://127.0.0.1:49103")
+        
+        # 4. Trigger Native Browser Spawn
+        # We run this in a background task so it doesn't block startup
+        asyncio.create_task(self._spawn_browser())
+
+    async def _spawn_browser(self) -> None:
+        """Wait briefly for the HTTP server to bind, then spawn the browser."""
+        await asyncio.sleep(0.5)
+        # We run the webbrowser launch in a thread so it doesn't block the async loop
+        # or drop orphan terminals
+        target_url = f"http://127.0.0.1:49103/?token={self.token}"
+        try:
+            await asyncio.to_thread(webbrowser.open_new_tab, target_url)
+            logger.info("Triggered OS default browser for GUI Gateway.")
+        except Exception as e:
+            logger.error(f"Failed to spawn default browser: {e}")
+
     async def stop(self) -> None:
         """Stop all servers."""
         self._is_running = False
@@ -101,6 +129,15 @@ class AxiomDaemon:
                     self.sock_path.unlink()
                 except OSError:
                     pass
+                    
+        if self._http_server:
+            self._http_server.should_exit = True
+            if self._http_task:
+                try:
+                    await asyncio.wait_for(self._http_task, timeout=5.0)
+                except asyncio.TimeoutError:
+                    pass
+                    
         logger.info("AxiomDaemon stopped")
 
     # -- Event Streaming --

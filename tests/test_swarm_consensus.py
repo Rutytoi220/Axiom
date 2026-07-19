@@ -1,90 +1,114 @@
-"""Tests for the Multi-Agent Swarm Orchestration & Consensus Protocol."""
+"""Tests for Swarm Blackboard and Consensus."""
 
 import pytest
 import asyncio
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import patch, MagicMock
 
-from axiom.core.events import EventBus, Event
-from axiom.agents.swarm.consensus import ConsensusEngine, ProposalState
-from axiom.agents.swarm.coder_agent import CoderAgent
-from axiom.agents.swarm.test_runner_agent import TestRunnerAgent
+from axiom.swarm.blackboard import Blackboard, Proposal, Critique, Vote
+from axiom.swarm.consensus import ConsensusEngine
 
-
-@pytest.fixture
-def event_bus():
-    return EventBus()
-
-
-@pytest.fixture
-def tool_registry():
-    registry = Mock()
-    mock_write = AsyncMock(return_value="File written")
-    registry.get_tool.return_value = mock_write
-    return registry
+@pytest.mark.asyncio
+async def test_blackboard_state():
+    bb = Blackboard()
+    
+    # Test proposal
+    p = Proposal(author="agent1", content="My plan")
+    await bb.post_proposal(p)
+    
+    fetched_p = await bb.get_proposal(p.id)
+    assert fetched_p is not None
+    assert fetched_p.content == "My plan"
+    
+    # Test critique
+    c = Critique(target_proposal_id=p.id, author="agent2", content="Looks good")
+    await bb.post_critique(c)
+    
+    critiques = await bb.get_critiques(p.id)
+    assert len(critiques) == 1
+    assert critiques[0].author == "agent2"
+    
+    # Test vote
+    v = Vote(target_proposal_id=p.id, author="agent3", decision=True)
+    await bb.post_vote(v)
+    
+    votes = await bb.get_votes(p.id)
+    assert len(votes) == 1
+    assert votes[0].decision is True
+    
+    # Test clear
+    await bb.clear()
+    assert await bb.get_proposal(p.id) is None
 
 
 @pytest.mark.asyncio
-async def test_consensus_approval(event_bus, tool_registry):
-    # Setup agents
-    coder = CoderAgent(event_bus=event_bus, tool_registry=tool_registry)
-    reviewer = TestRunnerAgent(event_bus=event_bus, tool_registry=tool_registry)
+@patch("axiom.swarm.consensus.OllamaClient")
+async def test_consensus_engine_reaches_consensus(MockOllamaClient):
+    # Setup mocks
+    proposer_mock = MagicMock()
+    critic_mock = MagicMock()
     
-    # Coder attempts to write a python file. The reviewer should approve it.
-    result = await coder.write_code("test_file.py", "print('hello')")
+    def side_effect(*args, **kwargs):
+        # We need distinct mock instances to return different values
+        if "qwen3-coder" in args[0].model:
+            return proposer_mock
+        return critic_mock
+
+    MockOllamaClient.side_effect = side_effect
     
-    assert "error" not in result["result"]
-    assert result["result"] == "File written"
+    # Proposer returns a plan
+    proposer_mock.chat.return_value = "I will write the file safely."
+    # Critic approves
+    critic_mock.chat.return_value = "This is safe. CONSENSUS_REACHED"
     
-    # Verify the tool was actually executed
-    tool = tool_registry.get_tool("write_file")
-    tool.assert_called_once_with(path="test_file.py", content="print('hello')")
+    bus = MagicMock()
+    engine = ConsensusEngine(bus)
+    
+    # Run debate
+    tools = [{"name": "delete_file", "arguments": {"path": "test.txt"}}]
+    result = await engine.run_debate("delete this file", "context", tools)
+    
+    assert result is True
+    
+    # Verify bus events
+    bus.publish_sync.assert_any_call("swarm.debate.started", {"task": "delete this file", "tool_count": 1})
+    bus.publish_sync.assert_any_call("swarm.consensus.reached", {"consensus": True, "revisions": 0})
+    
+    # Verify blackboard state
+    proposals = list(engine.blackboard.proposals.values())
+    assert len(proposals) == 1
+    
+    critiques = await engine.blackboard.get_critiques(proposals[0].id)
+    assert len(critiques) == 1
+    assert critiques[0].consensus_reached is True
 
 
 @pytest.mark.asyncio
-async def test_consensus_rejection(event_bus, tool_registry):
-    # Setup agents
-    coder = CoderAgent(event_bus=event_bus, tool_registry=tool_registry)
-    reviewer = TestRunnerAgent(event_bus=event_bus, tool_registry=tool_registry)
+@patch("axiom.swarm.consensus.OllamaClient")
+async def test_consensus_engine_rejects(MockOllamaClient):
+    proposer_mock = MagicMock()
+    critic_mock = MagicMock()
     
-    # Coder attempts to write a non-python file. The reviewer should reject it.
-    result = await coder.write_code("evil_script.sh", "rm -rf /")
-    
-    assert "error" in result["result"]
-    assert "Execution blocked" in result["result"]["error"]
-    
-    # Verify the tool was NOT executed
-    tool = tool_registry.get_tool("write_file")
-    tool.assert_not_called()
+    def side_effect(*args, **kwargs):
+        if "qwen3-coder" in args[0].model:
+            return proposer_mock
+        return critic_mock
 
-
-@pytest.mark.asyncio
-async def test_consensus_deadlock_timeout(event_bus, tool_registry):
-    # Setup ONLY the coder. No reviewer exists to vote.
-    coder = CoderAgent(event_bus=event_bus, tool_registry=tool_registry)
+    MockOllamaClient.side_effect = side_effect
     
-    # Mock the timeout to be very short for the test
-    with patch("axiom.agents.swarm.base_subagent.ConsensusEngine.propose") as mock_propose:
-        # Instead of actually timing out (which we test below), we can just force the return
-        mock_propose.return_value = False
-        
-        result = await coder.write_code("test_file.py", "print('hello')")
-        assert "error" in result["result"]
-
-
-def test_consensus_engine_deadlock_mitigation(event_bus):
-    engine = ConsensusEngine(event_bus)
+    proposer_mock.chat.return_value = "Plan 1"
+    # Critic never says CONSENSUS_REACHED
+    critic_mock.chat.return_value = "This is dangerous, do not proceed."
     
-    # Propose with a 0.1s timeout and no voters
-    approved = engine.propose(
-        agent_name="GhostAgent",
-        tool_name="write_file",
-        arguments={"path": "test.py"},
-        timeout=0.1
-    )
+    bus = MagicMock()
+    engine = ConsensusEngine(bus)
     
-    assert approved is False
+    tools = [{"name": "delete_file", "arguments": {"path": "test.txt"}}]
+    result = await engine.run_debate("delete this file", "context", tools)
     
-    # Find the proposal and verify its state is REJECTED
-    assert len(engine._proposals) == 1
-    proposal_id = list(engine._proposals.keys())[0]
-    assert engine._proposals[proposal_id]["state"] == ProposalState.REJECTED
+    assert result is False
+    
+    # Should have forced 1 revision round
+    assert proposer_mock.chat.call_count == 2
+    assert critic_mock.chat.call_count == 2
+    
+    bus.publish_sync.assert_any_call("swarm.consensus.failed", {"consensus": False, "revisions": 2})

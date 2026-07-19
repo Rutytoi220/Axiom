@@ -1,14 +1,30 @@
 Screen {
-    layout: grid;
-    grid-size: 2 2;
-    grid-rows: 1fr 2fr;
-    grid-columns: 1fr 1fr;
+    layout: vertical;
     background: #0d1117;
 }
 
+#main-container {
+    height: 1fr;
+}
+
+#top-panels {
+    height: 2fr;
+}
+
+#left-sidebar {
+    width: 30%;
+}
+
+#center-panel {
+    width: 70%;
+}
+
+#bottom-panels {
+    height: 1fr;
+}
+
 TelemetryPanel {
-    row-span: 1;
-    column-span: 2;
+    height: 100%;
     background: #161b22;
     border: round #58a6ff;
     padding: 1;
@@ -16,21 +32,29 @@ TelemetryPanel {
 }
 
 SwarmDebatePanel {
-    row-span: 1;
-    column-span: 1;
+    width: 50%;
+    height: 100%;
     background: #161b22;
     border: round #3fb950;
+    padding: 1;
+    margin: 1 0 1 1;
+}
+
+RoutinesPanel {
+    width: 50%;
+    height: 100%;
+    background: #161b22;
+    border: round #d2a8ff;
     padding: 1;
     margin: 1;
 }
 
 FlightRecorderLog {
-    row-span: 1;
-    column-span: 1;
+    height: 100%;
     background: #161b22;
-    border: round #d2a8ff;
+    border: round #58a6ff;
     padding: 1;
-    margin: 1;
+    margin: 1 1 1 0;
 }
 
 .panel-title {
@@ -40,7 +64,7 @@ FlightRecorderLog {
     margin-bottom: 1;
 }
 
-.tier-badge {
+.tier-badge, .intent-badge {
     color: #0d1117;
     background: #58a6ff;
     text-style: bold;
@@ -57,4 +81,21 @@ FlightRecorderLog {
 
 .debate-rejected {
     color: #f85149;
+}
+
+#offline-overlay {
+    dock: top;
+    height: 100%;
+    width: 100%;
+    background: rgba(13, 17, 23, 0.85);
+    align: center middle;
+    display: none;
+}
+
+.offline-pulse {
+    color: #f85149;
+    text-style: bold;
+    content-align: center middle;
+    width: auto;
+    height: auto;
 }

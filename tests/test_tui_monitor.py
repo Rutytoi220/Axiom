@@ -8,7 +8,8 @@ from axiom.client.tui.app import AxiomMonitorApp
 from axiom.client.tui.widgets import (
     TelemetryUpdate,
     SwarmProposalUpdate,
-    FlightRecordUpdate
+    FlightRecordUpdate,
+    RoutineUpdate
 )
 
 
@@ -24,14 +25,14 @@ async def test_tui_reacts_to_telemetry_messages():
         
         # Manually post a telemetry message to the TelemetryPanel
         panel = app.query_one("TelemetryPanel")
-        panel.post_message(TelemetryUpdate(ram=45.0, vram=80.0, tier="tier3"))
+        panel.post_message(TelemetryUpdate(ram=45.0, vram=80.0, intent="code"))
         
         # Let the message queue process
         await pilot.pause(0.1)
         
-        # Find the labels inside the progress bars and tier badge
-        tier_badge = app.query_one("#tier-badge")
-        assert "TIER 3" in str(tier_badge.render())
+        # Find the labels inside the progress bars and intent badge
+        intent_badge = app.query_one("#intent-badge")
+        assert "CODE" in str(intent_badge.render())
 
 
 @pytest.mark.asyncio
@@ -95,3 +96,29 @@ async def test_tui_socket_reconnection(mock_open_connection):
         
         # The app should still be running without crashing
         assert app.is_running
+        assert app.daemon_online is False
+        
+        # The offline overlay should be visible
+        overlay = app.query_one("#offline-overlay")
+        assert overlay.display is True
+
+
+@pytest.mark.asyncio
+async def test_tui_reacts_to_routine_updates():
+    """Verify the routines panel logs properly."""
+    app = AxiomMonitorApp()
+    
+    async with app.run_test() as pilot:
+        await asyncio.sleep(0.1)
+        
+        panel = app.query_one("RoutinesPanel")
+        panel.post_message(RoutineUpdate(
+            routine_name="MemoryConsolidation",
+            next_run="15:00",
+            status="RUNNING"
+        ))
+        
+        await pilot.pause(0.1)
+        
+        routines_panel = app.query_one("RoutinesPanel")
+        assert routines_panel.log_widget is not None

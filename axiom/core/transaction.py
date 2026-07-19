@@ -128,11 +128,21 @@ class WorkspaceTransactionManager:
         """Mark the transaction successful and clean up the staging directory."""
         if not self._active:
             return
+            
+        modified_files = list(self._snapshots.keys())
+        
         self._cleanup_staging()
         self._committed = True
         self._active = False
         self._unsubscribe_failure_events()
         logger.debug("Transaction %s committed; staging cleaned.", self._txn_id)
+        
+        if self._bus is not None:
+            self._bus.publish_sync("transaction.committed", {
+                "transaction_id": self._txn_id,
+                "files_modified": modified_files,
+            })
+            
         self._purge_blackboard(reason="commit")
 
     def rollback(self) -> None:
@@ -194,6 +204,7 @@ class WorkspaceTransactionManager:
             self._bus.publish_sync("transaction.rolled_back", {
                 "transaction_id": self._txn_id,
                 "files_restored": restored,
+                "files_modified": list(self._snapshots.keys()),
                 "errors": errors,
             })
         self._purge_blackboard(reason="rollback")

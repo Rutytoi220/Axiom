@@ -75,3 +75,100 @@ async def test_run_suite_generates_markdown(harness):
     assert "off-by-one-error" in report
     assert "syntax-error" in report
     assert "✅" in report or "❌" in report
+
+
+@pytest.mark.asyncio
+@patch("subprocess.run")
+@patch("axiom.evals.swe_harness.OllamaClient")
+@patch("axiom.evals.swe_harness.ConsensusEngine")
+async def test_repair_success(MockConsensusEngine, MockOllamaClient, mock_run, harness, tmp_path):
+    # Setup test directory
+    test_dir = tmp_path / "buggy_project"
+    test_dir.mkdir()
+    
+    file_path = test_dir / "math.py"
+    file_path.write_text("def add(a, b): return a - b")
+    
+    # Mock LLM to return valid JSON tool call
+    llm_mock = Mock()
+    llm_mock.chat.return_value = f'[{{"name": "write_file", "arguments": {{"path": "{file_path}", "content": "def add(a, b): return a + b"}}}}]'
+    MockOllamaClient.return_value = llm_mock
+    
+    # Mock ConsensusEngine to approve
+    consensus_mock = Mock()
+    # run_debate is async
+    from unittest.mock import AsyncMock
+    consensus_mock.run_debate = AsyncMock(return_value=True)
+    MockConsensusEngine.return_value = consensus_mock
+    
+    # Mock subprocess.run for pytest
+    # First call: fail, Second call (verify): success
+    mock_run_fail = Mock()
+    mock_run_fail.returncode = 1
+    mock_run_fail.stdout = "FAILED test_add"
+    mock_run_fail.stderr = "assert 2 == 5"
+    
+    mock_run_success = Mock()
+    mock_run_success.returncode = 0
+    mock_run_success.stdout = "PASSED"
+    mock_run_success.stderr = ""
+    
+    mock_run.side_effect = [mock_run_fail, mock_run_success]
+    
+    # Track publishes
+    harness.event_bus.publish_sync = Mock()
+    
+    result = await harness.repair(str(test_dir))
+    
+    assert result is True
+    
+    # The file should be updated
+    assert file_path.read_text() == "def add(a, b): return a + b"
+    
+    # EventBus should broadcast success
+    harness.event_bus.publish_sync.assert_called_with("harness.repair.success", {"target": str(test_dir.resolve()), "attempts": 1})
+
+
+@pytest.mark.asyncio
+@patch("subprocess.run")
+@patch("axiom.evals.swe_harness.OllamaClient")
+@patch("axiom.evals.swe_harness.ConsensusEngine")
+async def test_repair_rollback_on_failure(MockConsensusEngine, MockOllamaClient, mock_run, harness, tmp_path):
+    test_dir = tmp_path / "buggy_project2"
+    test_dir.mkdir()
+    
+    file_path = test_dir / "math.py"
+    file_path.write_text("def add(a, b): return a - b")
+    
+    # Mock LLM
+    llm_mock = Mock()
+    llm_mock.chat.return_value = f'[{{"name": "write_file", "arguments": {{"path": "{file_path}", "content": "def add(a, b): return a * b"}}}}]'
+    MockOllamaClient.return_value = llm_mock
+    
+    # Mock ConsensusEngine to approve
+    consensus_mock = Mock()
+    from unittest.mock import AsyncMock
+    consensus_mock.run_debate = AsyncMock(return_value=True)
+    MockConsensusEngine.return_value = consensus_mock
+    
+    # Mock subprocess.run for pytest
+    # ALWAYS fail
+    mock_run_fail = Mock()
+    mock_run_fail.returncode = 1
+    mock_run_fail.stdout = "FAILED"
+    mock_run_fail.stderr = ""
+    
+    mock_run.return_value = mock_run_fail
+    
+    harness.event_bus.publish_sync = Mock()
+    
+    result = await harness.repair(str(test_dir))
+    
+    # Should fail after 3 attempts
+    assert result is False
+    
+    # The file should be rolled back to original
+    assert file_path.read_text() == "def add(a, b): return a - b"
+    
+    # EventBus should broadcast failure
+    harness.event_bus.publish_sync.assert_called_with("harness.repair.failed", {"target": str(test_dir.resolve())})

@@ -47,16 +47,19 @@ def test_router_downgrades_to_tier2_when_fallback_disabled(mock_print, mock_llm_
     # Set fallback to False
     set_config(AxiomConfig(allow_cloud_fallback=False))
     
+    # Mock capabilities to avoid TypeError
+    mock_llm_client.capabilities = {"models": ["llama3.1:latest", "qwen3-coder:latest", "qwen3:0.6b"]}
+    
     router = InferenceRouter(llm_client=mock_llm_client, telemetry_daemon=mock_telemetry)
     
-    # Send a Tier 3 message (complex, long context)
+    # Send a Code message (complex, long context)
     messages = [{"role": "user", "content": "refactor this architecture framework"}]
     
     # Route it
     target = router._route_request(messages)
     
-    # It should downgrade to tier2 because fallback is disabled
-    assert target == router.model_tiers["tier2"]
+    # It should downgrade from code to orchestration
+    assert target == router.model_tiers["orchestration"]
     
     # Assert chat works
     response = router.chat(messages)
@@ -85,7 +88,7 @@ def test_router_bursts_to_cloud_when_fallback_enabled(mock_print, mock_llm_clien
         assert target == "cloud"
         
         # The print statement should have been called
-        mock_print.assert_any_call("\n[!] Local VRAM exhausted (<15%). Bursting Tier 3 task to Cloud Fallback...\n")
+        mock_print.assert_any_call("\n[!] Local VRAM exhausted (<15%). Bursting Code task to Cloud Fallback...\n")
         
         # Assert chat routes to cloud mock
         with patch.object(router.cloud_adapter, '_call_mock_for_tests', return_value="cloud response") as mock_cloud:

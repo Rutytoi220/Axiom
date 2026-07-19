@@ -17,6 +17,7 @@ from axiom.memory.context_manager import ContextManager, estimate_messages_token
 from axiom.core.transaction import WorkspaceTransactionManager, StagingCapExceeded
 from axiom.engine.telemetry import HardwareTelemetryDaemon
 from axiom.engine.router import InferenceRouter
+from axiom.swarm.consensus import ConsensusEngine
 
 logger = logging.getLogger(__name__)
 
@@ -101,9 +102,19 @@ class OrchestratorAgent(SimpleBaseAgent):
         session_id = str(session_id or uuid.uuid4())
         plan = self._load_plan(session_id) or self._create_plan(task)
         state = AgentState.THINK
+        
+        # Determine intent early to conditionally disable tools
+        intent = "orchestration"
+        if hasattr(self._llm, "_classify_task"):
+            intent = self._llm._classify_task([{"role": "user", "content": task}])
+        if intent == "chat":
+            use_tools = False
+            self._log("Task intent is 'chat'. Conditionally disabling tools for rapid response.", steps)
+            
         tool_schemas = self._get_tool_schemas() if use_tools else []
         observations: List[Dict[str, Any]] = []
         final_response = ""
+        accumulated_response = ""
         rounds = 0
         timeout = timeout if timeout is not None else 120.0
         deadline = time.time() + timeout
@@ -141,22 +152,133 @@ class OrchestratorAgent(SimpleBaseAgent):
 
             if state == AgentState.THINK:
                 self._log(f"THINK round {rounds}: {plan.current()}", steps)
-                messages = self._build_messages(task, plan, observations, session_id, override_prompt)
+                messages = self._build_messages(task, plan, observations, session_id, override_prompt, intent=intent)
                 override_prompt = None
                 time_left = max(1.0, deadline - time.time()) if deadline else 60.0 # Default 60s max per generation round
                 response_msg = self._call_llm(messages, tool_schemas, timeout=time_left)
                 self._persist_step(session_id, "reasoning", response_msg)
                 tool_calls = response_msg.get("tool_calls") or []
+                content = response_msg.get("content")
+                import re, json
+                
+                # Universal Plaintext/Markdown Tool-Call Interceptor (ReAct Fallback Parser)
+                if not tool_calls and content and use_tools:
+                    pattern_python = r'(\w+)\s*\(["\']?(.*?)["\']?\)'
+                    pattern_md = r'\*\*?(\w+)\*\*?.*?```(?:json|text)?\s*([^\n`]+)\s*```'
+                    pattern_colon = r'(?:Tool|Call|Action):\s*(\w+).*?([/\w\-. ]+\.\w+)'
+                    pattern_link = r'\[(\w+)\]\(([^)]+)\)'
+                    
+                    match = None
+                    for pattern in (pattern_python, pattern_md, pattern_colon, pattern_link):
+                        m = re.search(pattern, str(content), flags=re.IGNORECASE | re.DOTALL)
+                        if m:
+                            func_name_cand = m.group(1).strip()
+                            found_schema = any(schema.get("function", {}).get("name") == func_name_cand for schema in tool_schemas) if tool_schemas else False
+                            if found_schema:
+                                match = m
+                                break
+
+                    if match:
+                        func_name = match.group(1).strip()
+                        args_raw = match.group(2).strip()
+                        try:
+                            schema = next(s["function"] for s in tool_schemas if s["function"]["name"] == func_name)
+                            props = schema.get("parameters", {}).get("properties", {})
+                            
+                            if args_raw.startswith("{") and args_raw.endswith("}"):
+                                parsed_args = json.loads(args_raw)
+                            elif props:
+                                first_key = list(props.keys())[0]
+                                parsed_args = {first_key: args_raw}
+                            else:
+                                parsed_args = {}
+                            
+                            tool_calls.append({
+                                "function": {
+                                    "name": func_name,
+                                    "arguments": parsed_args
+                                }
+                            })
+                            content = str(content).replace(match.group(0), "")
+                            response_msg["content"] = content
+                        except Exception as e:
+                            logger.warning(f"Failed to parse universal plaintext tool call: {e}")
+                if content:
+                    content_str = str(content)
+                    
+                    # Scrub <think> tags (even unclosed ones)
+                    content_str = re.sub(r"<think>[\s\S]*?(?:</think>|$)", "", content_str, flags=re.IGNORECASE)
+                    
+                    # Scrub role headers if the LLM leaked them
+                    content_str = re.sub(r"^(assistant|role:\s*assistant):?\s*\n+", "", content_str, flags=re.IGNORECASE).strip()
+                    
+                    # Scrub common output prefixes
+                    content_str = re.sub(r"^(?:Final Answer:|Please try again\.)\s*", "", content_str, flags=re.IGNORECASE).strip()
+                    content_str = re.sub(r"<\|.*?\|>", "", content_str).strip()
+                    
+                    # Also strip any raw json block if it leaked (tools handle this directly via API)
+                    content_str = re.sub(r"```json.*?```", "", content_str, flags=re.DOTALL).strip()
+                    
+                    if content_str:
+                        accumulated_response += (content_str + "\n\n")
+                    
                 if tool_calls and use_tools:
                     state = AgentState.ACT
                     pending_calls = tool_calls
                     assistant_msg = response_msg
                 else:
-                    final_response = response_msg.get("content") or "Task completed."
+                    if accumulated_response.strip():
+                        final_response = accumulated_response.strip()
+                    elif len(observations) == 0:
+                        logger.warning("Model returned empty response on conversational turn.")
+                        final_response = " [!] The model returned an empty response. Try rephrasing or typing /help."
+                    else:
+                        final_response = "Task finished, see tool observations."
                     state = AgentState.REFLECT
 
             elif state == AgentState.ACT:
                 executed_tool_ids_this_round = set()
+                
+                # Check for high-risk operations
+                file_mutators = 0
+                has_delete = False
+                for tc in pending_calls:
+                    func = tc.get("function", {}) if isinstance(tc, dict) else {}
+                    t_name = func.get("name") or tc.get("name") or ""
+                    if t_name in ("write_file", "replace_file_content", "multi_replace_file_content"):
+                        file_mutators += 1
+                    if t_name == "delete_file":
+                        has_delete = True
+                        
+                is_high_risk = has_delete or file_mutators > 3
+                
+                if is_high_risk:
+                    self._log(f"ACT: High-risk batch detected ({file_mutators} mutators, delete={has_delete}). Triggering Swarm Consensus.", steps)
+                    consensus_engine = ConsensusEngine(self._bus if hasattr(self, "_bus") else getattr(self, "bus", None))
+                    context_summary = json.dumps([{"role": msg["role"], "content": msg["content"][:200]} for msg in self._chat_history[-3:]])
+                    
+                    # Run async consensus engine
+                    consensus_reached = self._run_coro_sync(consensus_engine.run_debate(
+                        task=task,
+                        context=context_summary,
+                        pending_tools=pending_calls
+                    ))
+                    
+                    if not consensus_reached:
+                        self._log("ACT: Swarm Consensus REJECTED the operation.", steps)
+                        for tc in pending_calls:
+                            func = tc.get("function", {}) if isinstance(tc, dict) else {}
+                            tool_name = func.get("name") or tc.get("name") or "unknown"
+                            arguments = func.get("arguments", tc.get("arguments", {}))
+                            observations.append(self._structured_tool_result(
+                                tool_name, arguments, 
+                                {"error": "Swarm Consensus rejected the proposed execution plan. Revise your approach."}, False
+                            ))
+                        state = AgentState.OBSERVE
+                        continue
+                    
+                    self._log("ACT: Swarm Consensus APPROVED.", steps)
+
                 for tc in pending_calls:
                     try:
                         tool_name, arguments, tc_id = self._normalize_tool_call(tc)
@@ -208,7 +330,17 @@ class OrchestratorAgent(SimpleBaseAgent):
                 reflection = self._reflect(task, plan, observations, final_response)
                 self._persist_step(session_id, "reflection", reflection)
                 if reflection.get("complete") or final_response:
-                    final_response = final_response or reflection.get("answer") or "Task completed."
+                    if final_response:
+                        pass
+                    elif reflection.get("answer"):
+                        final_response = reflection.get("answer")
+                    elif accumulated_response.strip():
+                        final_response = accumulated_response.strip()
+                    elif len(observations) == 0:
+                        logger.warning("Model returned empty response on conversational turn.")
+                        final_response = " [!] The model returned an empty response. Try rephrasing or typing /help."
+                    else:
+                        final_response = "Task finished, see tool observations."
                     state = AgentState.EXIT
                 else:
                     plan.current_step = min(plan.current_step + 1, max(len(plan.steps) - 1, 0))
@@ -231,7 +363,9 @@ class OrchestratorAgent(SimpleBaseAgent):
         else:
             txn.commit()
 
-        self._chat_history = (self._chat_history + [{"role": "user", "content": task}, {"role": "assistant", "content": final_response}])[-20:]
+        is_empty_warning = "[!] The model returned an empty response" in final_response
+        if final_response.strip() and not is_empty_warning:
+            self._chat_history = (self._chat_history + [{"role": "user", "content": task}, {"role": "assistant", "content": final_response}])[-20:]
 
         # Persist a summary of older turns when history grows large.
         if self._context_manager.should_summarize(self._chat_history):
@@ -241,7 +375,7 @@ class OrchestratorAgent(SimpleBaseAgent):
         self._emit("orchestrator.task.completed", {"task": task, "success": True, "rounds": rounds, "session_id": session_id})
         return AgentResult(True, output={"response": final_response, "tool_results": observations, "rounds": rounds, "session_id": session_id, "plan": asdict(plan)}, steps_taken=steps)
 
-    def _build_messages(self, task: str, plan: Plan, observations: List[Dict[str, Any]], session_id: str, override_prompt: Optional[str] = None) -> List[Dict[str, Any]]:
+    def _build_messages(self, task: str, plan: Plan, observations: List[Dict[str, Any]], session_id: str, override_prompt: Optional[str] = None, intent: str = "orchestration") -> List[Dict[str, Any]]:
         mem_start_time = time.perf_counter()
         memories = self._retrieve_relevant_memory(task, session_id, top_k=6)
         persisted_summaries = self._retrieve_summaries(session_id)
@@ -252,9 +386,72 @@ class OrchestratorAgent(SimpleBaseAgent):
             "results_count": len(memories) + len(persisted_summaries)
         })
 
+        from axiom.config import get_config
+        config = get_config()
+        if intent == "chat":
+            base_prompt = (
+                "You are AXIOM, an intelligent local-first AI assistant running on Linux. "
+                "Be concise, helpful, and conversational. Do not list your tools unless explicitly asked."
+            )
+        else:
+            base_prompt = (
+                "You are the AXIOM Orchestrator.\n"
+                "1. Your sole purpose is to execute requested tasks using the provided tools.\n"
+                "2. NEVER output your internal reasoning, thought process, or status logs in the Final Answer.\n"
+                "3. If a tool call is required, invoke it natively and silently. DO NOT output raw JSON blocks in your text response.\n"
+                "4. If no tool is required, provide ONLY the direct response to the user.\n"
+                "5. If you must plan, keep it in an internal-only scratchpad (if implemented), but do not send it to the user interface.\n"
+                "6. You MUST invoke tools using the native structured tool-call API whenever possible. If outputting text tool calls, strictly use registered tool names.\n"
+                "7. CRITICAL RULE: You are strictly FORBIDDEN from claiming to have performed an action (opening a file, reading a document, executing a script) unless you have actually emitted a tool call and received the verified [System Observation]. DO NOT roleplay, simulate, or hallucinate tool execution in conversational prose. If a tool is not available, state explicitly that you cannot perform the action. This rule applies ONLY to system tool actions (files, apps, shell). You are free to converse, introduce yourself, and answer general questions normally without restriction.\n"
+                "CONSTRAINTS:\n"
+                "- NO verbose planning logs.\n"
+                "- STRIKE the 'Final Answer:' header from your output; just provide the content.\n"
+                "8. [MULTIMODAL PERCEPTION] If the user refers to 'this window', 'my screen', 'look at this', or asks to diagnose a visual issue, you MUST use the 'capture_screen_context' tool."
+            )
+        
+        try:
+            from axiom.perception.watcher import ActiveWindowContext
+            active_win = ActiveWindowContext.get_active_window_title()
+            base_prompt += f"\n\n[System Context: User is currently looking at active window: '{active_win}']"
+        except ImportError:
+            pass
+
+        if config.behavior.profile in ("tech_beginner", "casual"):
+            base_prompt += " The user is a beginner or casual user. You MUST prioritize safe, read-only assistive tools like SafeFileSearchTool, FileOpenerTool, and AppLauncherTool over raw Bash or FileEdit tools. Explain things simply."
+
+        # Inject Tool Registry Capabilities
+        if intent != "chat" and hasattr(self, "registry") and self.registry:
+            try:
+                tools = self.registry.list_tools() if hasattr(self.registry, "list_tools") else {}
+                if tools:
+                    capabilities = []
+                    for t_name, t_obj in tools.items():
+                        desc = getattr(t_obj, "description", "No description available")
+                        capabilities.append(f"{t_name} ({desc})")
+                    if capabilities:
+                        base_prompt += f"\n\n[Available System Capabilities]: You have access to the following tools: {', '.join(capabilities)}."
+                        base_prompt += "\nIf the user asks what you can do or what tools you have, explicitly summarize your [Available System Capabilities] in plain, friendly English."
+            except Exception as e:
+                self._log(f"Failed to inject tool capabilities: {e}", [])
+
+        episodic_summaries = []
+        if hasattr(self, "_memory_store") and self._memory_store:
+            try:
+                # Retrieve the top 5 most relevant episodic summaries or just recent ones.
+                # If we just use search without query it might not work depending on SyncAdapter,
+                # but SyncMemoryStore.search(tags) exists.
+                summary_records = self._memory_store.search(["episodic_summary"])
+                episodic_summaries = [rec.get("value") or rec.get("value_json") for rec in summary_records[:5]]
+            except Exception as e:
+                self._log(f"Failed to fetch episodic summaries: {e}", [])
+
         system_messages = [
-            {"role": "system", "content": "You are AXIOM, a local-first autonomous agent. Operate on the plan. Use tools only when needed. Return a final answer when complete."},
-            {"role": "system", "content": json.dumps({"plan": asdict(plan), "persisted_summaries": persisted_summaries}, default=str)},
+            {"role": "system", "content": base_prompt},
+            {"role": "system", "content": json.dumps({
+                "plan": asdict(plan), 
+                "persisted_summaries": persisted_summaries,
+                "episodic_knowledge": episodic_summaries
+            }, default=str)},
         ]
         if override_prompt:
             system_messages.append({"role": "system", "content": override_prompt})
@@ -360,29 +557,42 @@ class OrchestratorAgent(SimpleBaseAgent):
 
     def _execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         start_time = time.perf_counter()
+        
+        def _scrub_jargon(err_msg: str) -> str:
+            if not err_msg:
+                return err_msg
+            err_str = str(err_msg)
+            if "FileNotFoundError" in err_str or "No such file" in err_str:
+                return "I couldn't find that file. Are you sure the name and path are correct?"
+            if "PermissionError" in err_str or "Permission denied" in err_str:
+                return "I don't have permission to access that file or folder. You might need to change its permissions."
+            return err_str
+
         # Delegate to ToolRegistry.execute() when available for safe dispatch.
-        if self.registry and hasattr(self.registry, "execute"):
-            tool_result = self.registry.execute(tool_name, **arguments)
-            payload = {"output": getattr(tool_result, "output", None), "error": getattr(tool_result, "error", None)}
-            result_dict = self._structured_tool_result(tool_name, arguments, payload, bool(getattr(tool_result, "success", False)))
-        else:
-            # Fallback: direct tool lookup and execution against raw core registry.
-            tools = self.registry.list_tools() if self.registry and hasattr(self.registry, "list_tools") else {}
-            tool = tools.get(tool_name) or next((t for t in tools.values() if getattr(t, "name", None) == tool_name), None)
-            if not tool:
-                result_dict = self._structured_tool_result(tool_name, arguments, {"error": f"Tool not found: {tool_name}"}, False)
+        try:
+            if self.registry and hasattr(self.registry, "execute"):
+                tool_result = self.registry.execute(tool_name, **arguments)
+                payload = {"output": getattr(tool_result, "output", None), "error": _scrub_jargon(getattr(tool_result, "error", None))}
+                result_dict = self._structured_tool_result(tool_name, arguments, payload, bool(getattr(tool_result, "success", False)))
             else:
-                try:
+                # Fallback: direct tool lookup and execution against raw core registry.
+                tools = self.registry.list_tools() if self.registry and hasattr(self.registry, "list_tools") else {}
+                tool = tools.get(tool_name) or next((t for t in tools.values() if getattr(t, "name", None) == tool_name), None)
+                if not tool:
+                    result_dict = self._structured_tool_result(tool_name, arguments, {"error": f"Tool not found: {tool_name}"}, False)
+                else:
                     result = tool.execute(arguments)
                     if asyncio.iscoroutine(result):
                         result = self._run_coro_sync(result)
                     if isinstance(result, dict) and {"tool", "arguments", "result", "success"}.issubset(result.keys()):
+                        if "error" in result.get("result", {}):
+                            result["result"]["error"] = _scrub_jargon(result["result"]["error"])
                         result_dict = result
                     else:
-                        payload = {"output": getattr(result, "output", result), "error": getattr(result, "error", None)}
+                        payload = {"output": getattr(result, "output", result), "error": _scrub_jargon(getattr(result, "error", None))}
                         result_dict = self._structured_tool_result(tool_name, arguments, payload, bool(getattr(result, "success", True)))
-                except Exception as exc:
-                    result_dict = self._structured_tool_result(tool_name, arguments, {"error": str(exc)}, False)
+        except Exception as exc:
+            result_dict = self._structured_tool_result(tool_name, arguments, {"error": _scrub_jargon(str(exc))}, False)
         
         duration_ms = (time.perf_counter() - start_time) * 1000
         self._emit("tool.executed", {
@@ -392,6 +602,15 @@ class OrchestratorAgent(SimpleBaseAgent):
             "success": result_dict.get("success", False),
             "error": result_dict.get("result", {}).get("error", None)
         })
+
+        if tool_name == "safe_file_search":
+            results = result_dict.get("result", {}).get("output", [])
+            self._emit("assist.search.completed", {"query": arguments.get("query"), "results_count": len(results) if isinstance(results, list) else 0})
+        elif tool_name == "app_launcher":
+            self._emit("assist.app.launched", {"app_name": arguments.get("app_name")})
+        elif tool_name == "file_opener":
+            self._emit("assist.file.opened", {"file_path": arguments.get("file_path")})
+
         return result_dict
 
     def _structured_tool_result(self, tool: str, arguments: Dict[str, Any], result: Dict[str, Any], success: bool) -> Dict[str, Any]:

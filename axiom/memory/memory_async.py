@@ -81,10 +81,55 @@ class MemoryStore(MemoryBackend):
                 pass # Columns might already exist if partially migrated
             await self._db.execute("PRAGMA user_version = 2")
             await self._db.commit()
-        elif current_version > 2:
+        if current_version > 2:
             raise sqlite3.DatabaseError(f"Database version {current_version} is higher than supported version 2. Please upgrade AXIOM.")
             
         self._initialized = True
+        
+        # Trigger vector database migration as background task
+        import asyncio
+        asyncio.create_task(self._migrate_legacy_embeddings())
+
+    async def _migrate_legacy_embeddings(self) -> None:
+        """Migrate existing SQLite embeddings to Qdrant Local Store on startup."""
+        if not hasattr(self._semantic, "_vector_store") or not self._semantic._vector_store:
+            return
+            
+        vector_store = self._semantic._vector_store
+        
+        try:
+            # Check if we've already migrated by counting Qdrant vectors
+            import asyncio
+            count = await asyncio.to_thread(vector_store.count)
+            if count > 0:
+                return  # Already migrated or has data
+                
+            db = self._conn()
+            cursor = await db.execute("SELECT id, owner_id, owner_type, embedding_json, model FROM embeddings")
+            rows = await cursor.fetchall()
+            
+            if not rows:
+                return
+                
+            logger.info(f"Starting migration of {len(rows)} legacy semantic embeddings to Qdrant...")
+            
+            for row in rows:
+                try:
+                    embedding = json.loads(row["embedding_json"])
+                    await asyncio.to_thread(
+                        vector_store.upsert,
+                        row["owner_id"],
+                        row["owner_type"],
+                        embedding,
+                        {"model": row["model"]}
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to migrate embedding {row['id']}: {e}")
+                    
+            logger.info("Successfully completed semantic embedding migration.")
+            
+        except Exception as e:
+            logger.error(f"Migration to Qdrant failed: {e}")
 
     async def close(self) -> None:
         if self._db:

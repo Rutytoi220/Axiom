@@ -15,6 +15,12 @@ from axiom.core.events import EventBus, Event
 from axiom.agents.swarm.coder_agent import CoderAgent
 from axiom.agents.swarm.test_runner_agent import TestRunnerAgent
 from axiom.core.engine import Engine
+from axiom.core.transaction import WorkspaceTransactionManager
+from axiom.swarm.consensus import ConsensusEngine
+from axiom.llm.ollama_client import OllamaClient, OllamaConfig
+import subprocess
+import json
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -149,3 +155,133 @@ class SWEBenchHarness:
             
         report.append("\n**Evaluation Complete.**")
         return "\n".join(report)
+
+    async def repair(self, target_dir: str) -> bool:
+        """Autonomous Self-Healing Loop on a target directory."""
+        target_path = Path(target_dir).resolve()
+        if not target_path.exists() or not target_path.is_dir():
+            logger.error(f"Target directory {target_path} does not exist.")
+            return False
+
+        max_retries = 3
+        current_attempt = 1
+        
+        # We need an LLM to generate the initial fix patch (tool calls)
+        fixer_llm = OllamaClient(OllamaConfig(model="qwen3-coder:latest"))
+        
+        while current_attempt <= max_retries:
+            logger.info(f"Self-Repair Attempt {current_attempt}/{max_retries} on {target_path}")
+            
+            # Step 1: Reproduction
+            result = subprocess.run(
+                ["pytest", "--tb=short", str(target_path)],
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode == 0:
+                logger.info(f"Test suite passed on attempt {current_attempt}! Repair successful.")
+                self.event_bus.publish_sync("harness.repair.success", {"target": str(target_path), "attempts": current_attempt})
+                return True
+                
+            failure_log = result.stdout + "\n" + result.stderr
+            logger.info("Test suite failed. Captured traceback for Swarm dispatch.")
+            
+            # Gather minimal context (just .py files)
+            context = []
+            for root, _, files in os.walk(target_path):
+                for f in files:
+                    if f.endswith(".py"):
+                        fpath = Path(root) / f
+                        try:
+                            content = fpath.read_text()
+                            context.append(f"--- File: {fpath} ---\n{content}")
+                        except Exception:
+                            pass
+            context_str = "\n".join(context)
+            
+            # Generate proposed fix
+            prompt = (
+                "You are an autonomous repair agent. The following test suite failed:\n"
+                f"TRACEBACK:\n{failure_log[-2000:]}\n\n"
+                f"CODE CONTEXT:\n{context_str}\n\n"
+                "Provide a JSON array of tool calls using the 'write_file' tool to fix the bug. "
+                "Output ONLY a valid JSON array, for example:\n"
+                '[{"name": "write_file", "arguments": {"path": "/path/to/file.py", "content": "..."}}]'
+            )
+            
+            response = fixer_llm.chat([{"role": "user", "content": prompt}])
+            
+            # Parse tool calls
+            import re
+            pending_tools = []
+            try:
+                # Extract JSON array
+                match = re.search(r"\[.*\]", response, flags=re.DOTALL)
+                if match:
+                    pending_tools = json.loads(match.group(0))
+                else:
+                    pending_tools = json.loads(response)
+            except Exception as e:
+                logger.error(f"Failed to parse LLM tool calls: {e}")
+                current_attempt += 1
+                continue
+                
+            if not pending_tools:
+                logger.warning("LLM generated no tool calls to fix the issue.")
+                current_attempt += 1
+                continue
+                
+            # Step 2: Swarm Dispatch (ConsensusEngine)
+            consensus_engine = ConsensusEngine(self.event_bus)
+            consensus_reached = await consensus_engine.run_debate(
+                task="Fix the failing pytest suite",
+                context=failure_log[-1000:],
+                pending_tools=pending_tools
+            )
+            
+            if not consensus_reached:
+                logger.warning("Swarm consensus rejected the proposed fix.")
+                current_attempt += 1
+                continue
+                
+            # Step 3 & 4: Verification and Commit/Rollback
+            txn = WorkspaceTransactionManager(bus=self.event_bus, verbose=True)
+            txn.begin()
+            
+            try:
+                # Apply the patch tools
+                for tc in pending_tools:
+                    tool_name = tc.get("name")
+                    args = tc.get("arguments", {})
+                    path = args.get("path")
+                    content = args.get("content")
+                    
+                    if tool_name == "write_file" and path and content:
+                        txn.snapshot(path)
+                        Path(path).write_text(content)
+                
+                # Verify
+                verify_result = subprocess.run(
+                    ["pytest", "--tb=short", str(target_path)],
+                    capture_output=True,
+                    text=True
+                )
+                
+                if verify_result.returncode == 0:
+                    txn.commit()
+                    logger.info(f"Verification tests passed! Repair committed on attempt {current_attempt}.")
+                    self.event_bus.publish_sync("harness.repair.success", {"target": str(target_path), "attempts": current_attempt})
+                    return True
+                else:
+                    logger.warning(f"Verification tests failed on attempt {current_attempt}. Rolling back.")
+                    txn.rollback()
+            except Exception as e:
+                logger.error(f"Error applying patch: {e}. Rolling back.")
+                txn.rollback()
+                
+            current_attempt += 1
+            
+        logger.error(f"Self-Repair failed after {max_retries} attempts.")
+        self.event_bus.publish_sync("harness.repair.failed", {"target": str(target_path)})
+        return False

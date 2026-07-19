@@ -15,6 +15,7 @@ class OllamaConfig:
     """Configuration for Ollama client."""
     base_url: str = "http://localhost:11434"
     model: str = "neural-chat"
+    embedding_model: str = "nomic-embed-text"
     temperature: float = 0.7
     top_p: float = 0.9
     top_k: int = 40
@@ -36,8 +37,56 @@ class OllamaClient:
             config: OllamaConfig instance with connection settings
         """
         self.config = config or OllamaConfig()
+        self.capabilities = {"chat": None, "generate": None, "models": []}
     
-    def _request(self, method: str, path: str, body: Optional[Dict] = None, timeout: Optional[float] = None) -> Dict:
+    def _detect_capabilities(self) -> None:
+        """Probe API to detect models and supported endpoints."""
+        try:
+            # Check models
+            response = self._request("GET", "/api/tags")
+            models = response.get("models", [])
+            self.capabilities["models"] = [m.get("name", "") for m in models if isinstance(m, dict) and m.get("name")]
+            self.capabilities["generate"] = True
+            
+            # Check chat endpoint
+            try:
+                # Use a valid model to test endpoint existence to prevent model-not-found 404s
+                test_model = self.capabilities["models"][0] if self.capabilities["models"] else "dummy"
+                self._request("POST", "/api/chat", {"model": test_model, "messages": []}, silent_error=True)
+                self.capabilities["chat"] = True
+            except OllamaError as e:
+                if "HTTP 404" in str(e) and "dummy" in test_model:
+                     # If dummy, we can't be sure if 404 is model or endpoint. Assume True.
+                    self.capabilities["chat"] = True
+                elif "HTTP 404" in str(e):
+                    # Valid model but 404, endpoint must not exist
+                    self.capabilities["chat"] = False
+                else:
+                    self.capabilities["chat"] = True
+            except Exception:
+                self.capabilities["chat"] = False
+                
+            model_tag = self.config.model
+            if self.capabilities["models"]:
+                model_tag = self.normalize_model(model_tag)
+                
+            logger.info(f"[AXIOM] Detected Ollama API Capabilities: Chat={self.capabilities.get('chat')}, Generate={self.capabilities.get('generate')}, DefaultModel={model_tag}")
+        except Exception as e:
+            logger.debug(f"Failed to detect capabilities: {e}")
+
+    def normalize_model(self, model: str) -> str:
+        """Normalize model name to match available tags."""
+        if not self.capabilities.get("models"):
+            return model
+        if model in self.capabilities["models"]:
+            return model
+        # Try appending :latest
+        latest = f"{model}:latest"
+        if latest in self.capabilities["models"]:
+            return latest
+        return model
+    
+    def _request(self, method: str, path: str, body: Optional[Dict] = None, timeout: Optional[float] = None, silent_error: bool = False) -> Dict:
         """Make HTTP request to Ollama server.
         
         Args:
@@ -45,6 +94,7 @@ class OllamaClient:
             path: API path (e.g., "/api/generate")
             body: Request body as dict (will be JSON encoded)
             timeout: Optional override for the connection timeout
+            silent_error: If True, suppresses error logging
             
         Returns:
             Response as dictionary
@@ -68,16 +118,20 @@ class OllamaClient:
                 response_data = resp.read().decode()
                 return json.loads(response_data)
         except urllib.error.HTTPError as e:
-            error_msg = f"HTTP {e.code}: {e.reason}"
-            logger.error(error_msg)
+            model_info = body.get("model", "unknown") if isinstance(body, dict) else "unknown"
+            error_msg = f"HTTP {e.code}: {e.reason} for {method} {url} (model: {model_info})"
+            if not silent_error:
+                logger.error(error_msg)
             raise OllamaError(error_msg)
         except urllib.error.URLError as e:
             error_msg = f"Connection failed: {e.reason}"
-            logger.error(error_msg)
+            if not silent_error:
+                logger.error(error_msg)
             raise OllamaError(error_msg)
         except Exception as e:
             error_msg = f"Request failed: {str(e)}"
-            logger.error(error_msg)
+            if not silent_error:
+                logger.error(error_msg)
             raise OllamaError(error_msg)
     
     def is_available(self) -> bool:
@@ -135,7 +189,7 @@ class OllamaClient:
         Raises:
             OllamaError: On server error or connection failure
         """
-        model = model or self.config.model
+        model = self.normalize_model(model or self.config.model)
         
         payload = {
             "model": model,
@@ -174,7 +228,21 @@ class OllamaClient:
         Raises:
             OllamaError: On server error or connection failure
         """
-        model = model or self.config.model
+        model = self.normalize_model(model or self.config.model)
+        
+        if self.capabilities.get("chat") is False:
+            builder = PromptBuilder()
+            for msg in messages:
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "")
+                if role == "system":
+                    builder.system(content)
+                elif role == "user":
+                    builder.user(content)
+                elif role == "assistant":
+                    builder.assistant(content)
+            prompt = builder.build_raw()
+            return self.generate(prompt, model=model)
         
         payload = {
             "model": model,
@@ -189,7 +257,22 @@ class OllamaClient:
             response = self._request("POST", "/api/chat", payload, timeout=timeout)
             message = response.get("message", {})
             return message.get("content", "")
-        except OllamaError:
+        except OllamaError as e:
+            if "HTTP 404" in str(e):
+                logger.warning(f"Chat API returned 404 for {model}. Falling back to /api/generate")
+                self.capabilities["chat"] = False
+                builder = PromptBuilder()
+                for msg in messages:
+                    role = msg.get("role", "unknown")
+                    content = msg.get("content", "")
+                    if role == "system":
+                        builder.system(content)
+                    elif role == "user":
+                        builder.user(content)
+                    elif role == "assistant":
+                        builder.assistant(content)
+                prompt = builder.build_raw()
+                return self.generate(prompt, model=model)
             raise
         except Exception as e:
             logger.error(f"Error in chat: {e}")
@@ -213,7 +296,7 @@ class OllamaClient:
         Returns:
             Full assistant message dict — may contain 'tool_calls' list
         """
-        model = model or self.config.model
+        model = self.normalize_model(model or self.config.model)
 
         payload = {
             "model": model,
@@ -249,7 +332,7 @@ class OllamaClient:
         Returns:
             Embedding vector as list of floats
         """
-        model = model or self.config.model
+        model = self.normalize_model(model or getattr(self.config, "embedding_model", self.config.model))
         
         payload = {
             "model": model,

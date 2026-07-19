@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch, AsyncMock
 
-from axiom.tools import BaseTool, ToolResult, ShellTool, FileTool
+from axiom.tools import BaseTool, ToolResult, ShellTool, FileTool, FileReadTool
 
 
 class TestToolResult:
@@ -193,6 +193,26 @@ class TestShellTool:
         assert result.success is True
 
 
+class TestFileReadTool:
+    """Test FileReadTool implementation."""
+
+    @pytest.mark.asyncio
+    async def test_file_read_rejects_pdf(self):
+        """Test reading a PDF file is rejected."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tool = FileReadTool(base_dir=tmpdir)
+            test_file = Path(tmpdir) / "test.pdf"
+            test_file.write_text("fake pdf data")
+            
+            result = await tool.execute({
+                "operation": "read",
+                "path": "test.pdf"
+            })
+            
+            assert result.success is False
+            assert "MUST use the read_document_content tool" in result.error
+
+
 class TestFileTool:
     """Test FileTool implementation."""
     
@@ -232,6 +252,22 @@ class TestFileTool:
             
             assert result.success is True
             assert result.output == "hello world"
+
+    @pytest.mark.asyncio
+    async def test_file_read_rejects_pdf(self):
+        """Test reading a PDF file is rejected."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tool = FileTool(base_dir=tmpdir)
+            test_file = Path(tmpdir) / "test.pdf"
+            test_file.write_text("fake pdf data")
+            
+            result = await tool.execute({
+                "operation": "read",
+                "path": "test.pdf"
+            })
+            
+            assert result.success is False
+            assert "MUST use the read_document_content tool" in result.error
     
     @pytest.mark.asyncio
     async def test_file_read_nonexistent_file(self):

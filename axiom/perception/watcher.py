@@ -21,7 +21,29 @@ from axiom.perception.scrubber import PrivacyScrubber
 from axiom.perception.intent_engine import IntentEngine
 from axiom.config import get_config
 
+import subprocess
+
 logger = logging.getLogger(__name__)
+
+class ActiveWindowContext:
+    """Extracts active window metadata cross-platform using lightweight wrappers."""
+    
+    @staticmethod
+    def get_active_window_title() -> str:
+        """Fetch the active window title safely."""
+        try:
+            # Fallback to xdotool on Linux
+            result = subprocess.run(
+                ["xdotool", "getactivewindow", "getwindowname"],
+                capture_output=True,
+                text=True,
+                timeout=1.0
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+            return "Unknown Window"
+        except Exception:
+            return "Unknown Window"
 
 
 class ResourceGovernor:

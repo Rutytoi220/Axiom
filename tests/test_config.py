@@ -10,7 +10,7 @@ class TestAxiomConfigDefaults:
         assert config.debug is False
         assert config.log_level == "INFO"
         assert config.ollama_base_url == "http://localhost:11434"
-        assert config.ollama_model == "neural-chat"
+        assert config.ollama_model == "llama3.1:latest"
         assert config.db_path == "axiom.db"
         assert config.sandbox_mode is True
 
@@ -53,6 +53,7 @@ class TestAxiomConfigToDict:
             "proactive_kernel",
             "ollama_base_url",
             "ollama_model",
+            "embedding_model",
             "ollama_temperature",
             "db_path",
             "max_history",

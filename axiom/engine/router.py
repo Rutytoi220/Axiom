@@ -24,56 +24,95 @@ class InferenceRouter:
         self.telemetry = telemetry_daemon
         self.cloud_adapter = CloudAdapter()
         
-        # Configure the routing matrix (model names to map to tiers)
-        # Default config; can be updated based on user hardware profiling in the future.
+        # Configure the routing matrix (model names to map to intents)
         self.model_tiers = {
-            "tier1": "phi3:mini",        # Sub-3B parameter, very fast
-            "tier2": "llama3:8b",        # 7-8B parameter, standard
-            "tier3": "mixtral:8x7b"      # >30B parameter, complex
+            "chat": "llama3.1:latest",          # Promoted to 8B class for multi-turn stability
+            "orchestration": "llama3.1:latest", # General Orchestration/Assistive Context
+            "code": "qwen3-coder:latest"        # Code Generation/Refactoring
         }
+        self._current_active_model = None
 
     def _classify_task(self, messages: List[Dict[str, Any]], tool_schemas: Optional[List[Dict[str, Any]]] = None) -> str:
-        """Classify the prompt complexity into a Tier."""
+        """Classify the prompt complexity into a Task Intent."""
         if not messages:
-            return "tier1"
-            
-        # Combine all user/system message contents for heuristic checking
-        full_text = "\n".join([m.get("content", "") for m in messages if isinstance(m.get("content"), str)]).lower()
+            return "chat"
+        # Isolate user text for accurate heuristic checking without system prompt pollution
+        user_messages = [m.get("content", "") for m in messages if isinstance(m.get("content"), str) and m.get("role") == "user"]
+        user_text = "\n".join(user_messages).lower()
         
-        # 1. Tier 3 Heuristics: Large context, complex keywords, architecture
-        tier3_keywords = ["architecture", "refactor", "design pattern", "framework", "complex"]
-        if len(full_text) > 4000 or any(kw in full_text for kw in tier3_keywords):
-            return "tier3"
+        # Fallback to full text if no user messages exist
+        if not user_text:
+            user_text = "\n".join([m.get("content", "") for m in messages if isinstance(m.get("content"), str)]).lower()
+        
+        import re
+        
+        # 1. Code Heuristics: Only trigger on explicit keywords in user prompt
+        code_pattern = r'\b(python|javascript|refactor|debug|compile|class|import|traceback|pytest|git)\b|\.py\b'
+        if re.search(code_pattern, user_text):
+            return "code"
             
-        # 2. Tier 1 Heuristics: Very short prompt, no tools, formatting tasks
-        if len(messages) <= 2 and len(full_text) < 200 and not tool_schemas:
-            return "tier1"
+        # 2. Check for File Paths, Extensions, explicit Tool Verbs, or Contextual Pronouns
+        # These MUST override the short-prompt chat fallback.
+        path_ext_pattern = r'(/home/|~/|\./|\.pdf\b|\.txt\b|\.docx\b|\.csv\b|\.json\b|\.sh\b|\.md\b)'
+        tool_verb_pattern = r'\b(read|open|delete|write|launch|echo|screen|status|file|run|search|test|fix|show|close)\b'
+        contextual_pronoun_pattern = r'\b(the file|that document|it|the pdf)\b'
+        
+        has_path_or_verb = bool(
+            re.search(path_ext_pattern, user_text) or 
+            re.search(tool_verb_pattern, user_text) or
+            re.search(contextual_pronoun_pattern, user_text)
+        )
             
-        # 3. Tier 2: Default for most standard agentic loops
-        return "tier2"
+        # 3. Chat Heuristics: Very short prompt (<15 words) and NO explicit tool keywords or paths
+        word_count = len(user_text.split())
+        if word_count < 15 and not has_path_or_verb:
+            return "chat"
+            
+        # 4. Orchestration: Default fallback for general queries
+        return "orchestration"
 
     def _route_request(self, messages: List[Dict[str, Any]], tool_schemas: Optional[List[Dict[str, Any]]] = None) -> str:
         """Determine which model to use, considering telemetry downgrades."""
-        target_tier = self._classify_task(messages, tool_schemas)
+        target_intent = self._classify_task(messages, tool_schemas)
         
-        if target_tier == "tier3":
-            # Check for OOM conditions before scheduling a Tier 3 task
+        if target_intent == "code":
+            # Check for OOM conditions before scheduling a Code task
             if self.telemetry and self.telemetry.latest_state.get("warning"):
                 ram_avail = self.telemetry.latest_state.get("ram_available_percent", 0)
                 
                 config = get_config()
                 if getattr(config, "allow_cloud_fallback", False) and self.cloud_adapter.is_configured:
-                    print("\n[!] Local VRAM exhausted (<15%). Bursting Tier 3 task to Cloud Fallback...\n")
+                    print("\n[!] Local VRAM exhausted (<15%). Bursting Code task to Cloud Fallback...\n")
                     logger.warning(f"Local VRAM exhausted ({ram_avail:.1f}%). Bursting to Cloud Fallback.")
                     return "cloud"
                 else:
                     logger.warning(
-                        f"Emergency Downgrade: Tier 3 task requested, but RAM is critically low ({ram_avail:.1f}%). "
-                        "Downgrading to Tier 2 to prevent OOM crash."
+                        f"Emergency Downgrade: Code task requested, but RAM is critically low ({ram_avail:.1f}%). "
+                        "Downgrading to Orchestration to prevent OOM crash."
                     )
-                    target_tier = "tier2"
+                    target_intent = "orchestration"
                 
-        return self.model_tiers.get(target_tier, getattr(getattr(self.llm_client, "config", None), "model", "default"))
+                
+        target_model_name = self.model_tiers.get(target_intent)
+        
+        # Verify the target model is actually installed
+        capabilities = getattr(self.llm_client, "capabilities", {})
+        installed_models = capabilities.get("models", [])
+        
+        # If installed_models is populated but our target isn't there, fall back to the main config model
+        if installed_models and target_model_name not in installed_models and f"{target_model_name}:latest" not in installed_models:
+            return getattr(getattr(self.llm_client, "config", None), "model", "default")
+            
+        selected_model = target_model_name or getattr(getattr(self.llm_client, "config", None), "model", "default")
+        
+        # Log mid-flight model swapping if it changes
+        if self._current_active_model and self._current_active_model != selected_model:
+            logger.info(f"Mid-Flight Context Router Swapping Model: {self._current_active_model} -> {selected_model} (Intent: {target_intent})")
+        elif not self._current_active_model:
+            logger.info(f"Context Router initializing with Model: {selected_model} (Intent: {target_intent})")
+            
+        self._current_active_model = selected_model
+        return selected_model
 
     def chat(self, messages: List[Dict[str, Any]], **kwargs) -> str:
         """Route and execute a standard chat completion."""

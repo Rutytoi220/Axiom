@@ -10,6 +10,11 @@ import shutil
 from abc import ABC
 from typing import Any, Dict, List, Optional
 from pathlib import Path
+__all__ = [
+    "ToolResult", "ToolParameter", "BaseTool",
+    "EchoTool", "ShellTool", "FileReadTool", "FileWriteTool", "SystemInfoTool", "FileTool",
+    "SafeFileSearchTool", "FileOpenerTool", "AppLauncherTool"
+]
 
 logger = logging.getLogger(__name__)
 
@@ -341,7 +346,7 @@ class FileReadTool(BaseTool):
     def name(self) -> str: return "file_read"
     
     @property
-    def description(self) -> str: return "Read file contents, list directories, or check existence safely."
+    def description(self) -> str: return "Reads plain text files ONLY (e.g., .txt, .py, .md, .sh, .json). DO NOT use this tool for PDFs (.pdf), Word documents (.docx), or spreadsheets—it will fail. Use `read_document_content` for those formats."
     
     @property
     def schema(self) -> Dict[str, Any]:
@@ -379,6 +384,8 @@ class FileReadTool(BaseTool):
                 items = [{"name": p.name, "is_dir": p.is_dir()} for p in full_path.iterdir()]
                 return ToolResult(success=True, output={"items": items})
             elif op == "read":
+                if full_path.suffix.lower() in (".pdf", ".docx", ".doc", ".xls", ".xlsx"):
+                    return ToolResult(success=False, error="[!] Error: Cannot read binary/rich documents with file_read. You MUST use the read_document_content tool instead.")
                 if not full_path.is_file(): return ToolResult(success=False, error="Not a file")
                 try:
                     content = full_path.read_text(encoding=params.get("encoding", "utf-8"))
@@ -569,7 +576,7 @@ class FileTool(BaseTool):
     @property
     def description(self) -> str:
         """Return tool description."""
-        return "File system operations with path sandboxing"
+        return "Reads plain text files ONLY. File system operations with path sandboxing. DO NOT use this tool for PDFs (.pdf), Word documents (.docx), or spreadsheets—it will fail. Use `read_document_content` for those formats."
     
     @property
     def schema(self) -> Dict[str, Any]:
@@ -697,6 +704,11 @@ class FileTool(BaseTool):
     def _read(self, file_path: Path, encoding: str) -> ToolResult:
         """Read file contents."""
         try:
+            if file_path.suffix.lower() in (".pdf", ".docx", ".doc", ".xls", ".xlsx"):
+                return ToolResult(
+                    success=False,
+                    error="[!] Error: Cannot read binary/rich documents with file tool. You MUST use the read_document_content tool instead."
+                )
             if not file_path.exists():
                 return ToolResult(
                     success=False,
@@ -1163,3 +1175,64 @@ class ScreenCaptureTool(BaseTool):
                 success=False,
                 error=f"Screen capture failed: {str(e)}"
             )
+
+
+class QueryCodeGraphTool(BaseTool):
+    """Tool for querying the AST Knowledge Graph."""
+    
+    def __init__(self, index):
+        super().__init__()
+        self._index = index
+        
+    @property
+    def tool_id(self) -> str:
+        return "query_code_graph"
+        
+    @property
+    def name(self) -> str:
+        return "query_code_graph"
+        
+    @property
+    def description(self) -> str:
+        return "Query the structural AST Knowledge Graph to find dependent files or inheritance trees."
+        
+    @property
+    def schema(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "query_type": {
+                    "type": "string",
+                    "enum": ["dependent_files", "inheritance_tree"],
+                    "description": "Type of query to run."
+                },
+                "target_symbol": {
+                    "type": "string",
+                    "description": "The name of the class, function, or module to query."
+                }
+            },
+            "required": ["query_type", "target_symbol"]
+        }
+        
+    async def execute(self, params: Dict[str, Any]) -> ToolResult:
+        query_type = params.get("query_type")
+        target_symbol = params.get("target_symbol")
+        
+        if not query_type or not target_symbol:
+            return ToolResult(success=False, error="query_type and target_symbol are required.")
+            
+        try:
+            from axiom.indexer.impact import get_dependent_files, get_inheritance_tree
+            
+            if query_type == "dependent_files":
+                result = get_dependent_files(target_symbol, self._index)
+            elif query_type == "inheritance_tree":
+                result = get_inheritance_tree(target_symbol, self._index)
+            else:
+                return ToolResult(success=False, error=f"Unknown query_type: {query_type}")
+                
+            return ToolResult(success=True, output=result)
+        except Exception as e:
+            return ToolResult(success=False, error=f"Graph query failed: {e}")
+
+from axiom.tools.os_assist import SafeFileSearchTool, FileOpenerTool, AppLauncherTool
