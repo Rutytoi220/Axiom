@@ -31,7 +31,7 @@ class AxiomConfig:
     
     # LLM
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "llama3.1:latest"
+    ollama_model: str = "qwen3:8b"
     embedding_model: str = "nomic-embed-text"
     ollama_temperature: float = 0.7
     

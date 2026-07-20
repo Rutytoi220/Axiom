@@ -23,6 +23,27 @@ logger = logging.getLogger(__name__)
 
 MAX_TOOL_ROUNDS = 10
 LLM_RETRIES = 3
+DOCUMENT_EXTRACTION_NOTICE = (
+    "[Document Extraction Notice]: Zero selectable characters found in {file_path}. "
+    "This document may be encrypted, security-locked, or rendered as a flat image "
+    "scan lacking a readable text layer. Please convert via OCR."
+)
+PRUNED_ECHO_INDICATOR = "[System: Pruned duplicate model echo -> Retrying...]"
+CHAT_ECHO_RETRY_FALLBACK = (
+    "I apologize, my conversational buffer stuttered. Could you repeat or rephrase that?"
+)
+CHAT_ECHO_RETRY_PROMPT = (
+    "[System: Duplicate assistant response pruned.] Generate a substantively fresh answer "
+    "to the latest user message. Do not repeat the previous answer and do not mention this retry."
+)
+INTERNAL_OBSERVATION_PREFIXES = ("[system notice]", "[system warn]", "[system notice:")
+DIRECT_ACTION_MODE_GUARD = (
+    "CRITICAL EXECUTION RULE: You are operating in Direct Action Mode. You are "
+    "STRICTLY FORBIDDEN from outputting introductory greetings, self-identifications, "
+    "or capability recitals (e.g., DO NOT say 'I am AXIOM', 'Here is what I can do', "
+    "or 'How can I assist you today'). If a user requests a file check or system "
+    "action, emit ONLY the required tool call syntax or immediate analytical findings."
+)
 
 
 class AgentState(str, Enum):
@@ -138,6 +159,8 @@ class OrchestratorAgent(SimpleBaseAgent):
         except Exception as exc:
             self._log(f"LLM availability check failed, continuing: {exc}", steps)
 
+        executed_signatures = set()
+
         while state != AgentState.EXIT and rounds < MAX_TOOL_ROUNDS:
             if deadline and time.time() > deadline:
                 final_response = "Task processing timed out."
@@ -155,8 +178,11 @@ class OrchestratorAgent(SimpleBaseAgent):
                 messages = self._build_messages(task, plan, observations, session_id, override_prompt, intent=intent)
                 override_prompt = None
                 time_left = max(1.0, deadline - time.time()) if deadline else 60.0 # Default 60s max per generation round
-                response_msg = self._call_llm(messages, tool_schemas, timeout=time_left)
-                self._persist_step(session_id, "reasoning", response_msg)
+                
+                # Low-Temperature Enforcement for structured tools
+                temp_override = 0.1 if intent in ("orchestration", "code") else None
+                response_msg = self._call_llm(messages, tool_schemas, timeout=time_left, temperature=temp_override)
+                
                 tool_calls = response_msg.get("tool_calls") or []
                 content = response_msg.get("content")
                 import re, json
@@ -167,9 +193,10 @@ class OrchestratorAgent(SimpleBaseAgent):
                     pattern_md = r'\*\*?(\w+)\*\*?.*?```(?:json|text)?\s*([^\n`]+)\s*```'
                     pattern_colon = r'(?:Tool|Call|Action):\s*(\w+).*?([/\w\-. ]+\.\w+)'
                     pattern_link = r'\[(\w+)\]\(([^)]+)\)'
+                    pattern_paren_json = r'\(?(\w+)\s*:\s*(\{[^}]+\}|[^\)]+)\)?'
                     
                     match = None
-                    for pattern in (pattern_python, pattern_md, pattern_colon, pattern_link):
+                    for pattern in (pattern_python, pattern_md, pattern_colon, pattern_link, pattern_paren_json):
                         m = re.search(pattern, str(content), flags=re.IGNORECASE | re.DOTALL)
                         if m:
                             func_name_cand = m.group(1).strip()
@@ -186,7 +213,26 @@ class OrchestratorAgent(SimpleBaseAgent):
                             props = schema.get("parameters", {}).get("properties", {})
                             
                             if args_raw.startswith("{") and args_raw.endswith("}"):
-                                parsed_args = json.loads(args_raw)
+                                try:
+                                    parsed_json = json.loads(args_raw)
+                                    # Try to unwrap if the tool only needs a single string argument and a common key exists
+                                    common_keys = ["path", "file", "url", "query", "arg", "text", "file_path"]
+                                    if len(props) == 1:
+                                        first_key = list(props.keys())[0]
+                                        # If the parsed_json has the exact key the tool expects, use it directly
+                                        if first_key in parsed_json:
+                                            parsed_args = {first_key: parsed_json[first_key]}
+                                        else:
+                                            # Otherwise try common keys
+                                            extracted_val = next((parsed_json[k] for k in common_keys if k in parsed_json), None)
+                                            if extracted_val is not None:
+                                                parsed_args = {first_key: extracted_val}
+                                            else:
+                                                parsed_args = parsed_json
+                                    else:
+                                        parsed_args = parsed_json
+                                except json.JSONDecodeError:
+                                    parsed_args = {}
                             elif props:
                                 first_key = list(props.keys())[0]
                                 parsed_args = {first_key: args_raw}
@@ -203,11 +249,73 @@ class OrchestratorAgent(SimpleBaseAgent):
                             response_msg["content"] = content
                         except Exception as e:
                             logger.warning(f"Failed to parse universal plaintext tool call: {e}")
+                    
+                    if not match and not tool_calls and tool_schemas and len(executed_signatures) == 0:
+                        # Co-Occurrence Fallback Interceptor
+                        found_tool_name = None
+                        for schema in tool_schemas:
+                            t_name = schema.get("function", {}).get("name")
+                            if t_name and t_name in str(content):
+                                found_tool_name = t_name
+                                break
+                        
+                        if found_tool_name:
+                            # Search for a valid argument string
+                            path_ext_pattern = r'(/home/[/\w\-.]+|~/[/\w\-.]+|\./[/\w\-.]+|/?[\w\-./]+\.(?:pdf|txt|py|sh|json|csv)\b)'
+                            arg_match = re.search(path_ext_pattern, str(content), flags=re.IGNORECASE)
+                            if not arg_match:
+                                # Try quoted strings
+                                arg_match = re.search(r'["\']([^"\']+)["\']', str(content))
+                            
+                            if arg_match:
+                                extracted_arg = arg_match.group(1) if arg_match.groups() else arg_match.group(0)
+                                try:
+                                    schema = next(s["function"] for s in tool_schemas if s["function"]["name"] == found_tool_name)
+                                    props = schema.get("parameters", {}).get("properties", {})
+                                    if props:
+                                        first_key = list(props.keys())[0]
+                                        parsed_args = {first_key: extracted_arg.strip()}
+                                    else:
+                                        parsed_args = {}
+                                    
+                                    tool_calls.append({
+                                        "function": {
+                                            "name": found_tool_name,
+                                            "arguments": parsed_args
+                                        }
+                                    })
+                                    # Strip to prevent duplicate parsing or UI clutter
+                                    content = str(content).replace(found_tool_name, "").replace(extracted_arg, "")
+                                    response_msg["content"] = content
+                                except Exception as e:
+                                    logger.warning(f"Failed to parse co-occurrence tool call: {e}")
+
+                # A conversational preamble on an action turn is neither a valid
+                # tool call nor a user-facing answer. Reject it before it can enter
+                # accumulated_response (and therefore the CLI output buffer).
+                if (
+                    intent in ("orchestration", "code")
+                    and tool_schemas
+                    and self._is_disallowed_action_greeting(content)
+                ):
+                    if tool_calls:
+                        content = ""
+                        response_msg["content"] = ""
+                    else:
+                        override_prompt = (
+                            DIRECT_ACTION_MODE_GUARD
+                            + " Your previous response was rejected because it was an introductory preamble. "
+                            "Issue the required native tool call now."
+                        )
+                        self._log("Rejected introductory model preamble on Direct Action Mode turn.", steps)
+                        continue
+
                 if content:
                     content_str = str(content)
                     
                     # Scrub <think> tags (even unclosed ones)
                     content_str = re.sub(r"<think>[\s\S]*?(?:</think>|$)", "", content_str, flags=re.IGNORECASE)
+                    content_str = content_str.replace("</think>", "").replace("<think>", "").strip()
                     
                     # Scrub role headers if the LLM leaked them
                     content_str = re.sub(r"^(assistant|role:\s*assistant):?\s*\n+", "", content_str, flags=re.IGNORECASE).strip()
@@ -219,21 +327,51 @@ class OrchestratorAgent(SimpleBaseAgent):
                     # Also strip any raw json block if it leaked (tools handle this directly via API)
                     content_str = re.sub(r"```json.*?```", "", content_str, flags=re.DOTALL).strip()
                     
+                    # Strip out hallucinated bracketed placeholders
+                    content_str = re.sub(r"\[[^\]]*?(?:extracted|processed|opened|completed)[^\]]*?\]", "", content_str, flags=re.IGNORECASE).strip()
+                    
+                    # Unpack trailing JSON wrappers like `assistant { "answer": "text" }`
+                    wrapper_match = re.search(r'assistant\s*\{\s*"answer"\s*:\s*"(.*?)"\s*\}', content_str, flags=re.IGNORECASE | re.DOTALL)
+                    if wrapper_match:
+                        content_str = wrapper_match.group(1).strip()
+                    
+                    # Strip standalone tags
+                    content_str = re.sub(r"^(?:invoke|tool_call|PDF Content|Result):?\s*", "", content_str, flags=re.IGNORECASE).strip()
+                    
                     if content_str:
                         accumulated_response += (content_str + "\n\n")
                     
                 if tool_calls and use_tools:
+                    self._persist_step(session_id, "reasoning", response_msg)
                     state = AgentState.ACT
                     pending_calls = tool_calls
                     assistant_msg = response_msg
                 else:
                     if accumulated_response.strip():
                         final_response = accumulated_response.strip()
-                    elif len(observations) == 0:
+                    elif observations:
+                        final_response = self._format_latest_observation_response(observations)
+                    else:
                         logger.warning("Model returned empty response on conversational turn.")
                         final_response = " [!] The model returned an empty response. Try rephrasing or typing /help."
+
+                    # Chat responses have no tool side effects, so reject a duplicate before
+                    # it is written to turn history or SQLite and immediately re-generate it.
+                    if intent == "chat" and self._is_duplicate_assistant_response(final_response):
+                        logger.warning("Echo Pruning: Dropped duplicate assistant response from history buffer.")
+                        retry_response, retry_message = self._retry_pruned_chat_response(
+                            task=task,
+                            plan=plan,
+                            observations=observations,
+                            session_id=session_id,
+                            timeout=time_left,
+                        )
+                        final_response = retry_response or CHAT_ECHO_RETRY_FALLBACK
+                        accumulated_response = final_response
+                        if retry_message is not None:
+                            self._persist_step(session_id, "reasoning", retry_message)
                     else:
-                        final_response = "Task finished, see tool observations."
+                        self._persist_step(session_id, "reasoning", response_msg)
                     state = AgentState.REFLECT
 
             elif state == AgentState.ACT:
@@ -288,10 +426,20 @@ class OrchestratorAgent(SimpleBaseAgent):
                         continue
 
                     sig = tc_id or hashlib.md5(f"{tool_name}:{json.dumps(arguments, sort_keys=True, default=str)}".encode()).hexdigest()
+                    dedup_sig = f"{tool_name}:{str(sorted(arguments.items()))}"
                     self._tool_call_history.append(sig)
 
                     if self._tool_call_history.count(sig) >= 3:
                         override_prompt = "You are repeating yourself. Abort current strategy and re-evaluate."
+
+                    if dedup_sig in executed_signatures:
+                        override_prompt = f"[System Notice]: Tool '{tool_name}' has already been executed with these exact arguments during this turn. DO NOT invoke it again. Formulate your final answer to the user right now using the observations already provided."
+                        result = self._structured_tool_result(tool_name, arguments, {"error": override_prompt}, False)
+                        observations.append(result)
+                        self._persist_step(session_id, "tool_result", result)
+                        self._log(f"ACT {tool_name}: BLOCKED BY LOOP BREAKER.", steps)
+                        use_tools = False  # Disable tools to force a final answer synthesis
+                        continue
 
                     # --- Snapshot filesystem targets before mutation ---
                     if txn.should_snapshot(tool_name):
@@ -315,6 +463,7 @@ class OrchestratorAgent(SimpleBaseAgent):
                         result = self._structured_tool_result(tool_name, arguments, {"error": "Duplicate tool call skipped for this inference step."}, False)
                     else:
                         executed_tool_ids_this_round.add(sig)
+                        executed_signatures.add(dedup_sig)
                         result = self._execute_tool(tool_name, arguments)
                     observations.append(result)
                     self._persist_step(session_id, "tool_result", result)
@@ -336,14 +485,16 @@ class OrchestratorAgent(SimpleBaseAgent):
                         final_response = reflection.get("answer")
                     elif accumulated_response.strip():
                         final_response = accumulated_response.strip()
-                    elif len(observations) == 0:
+                    elif observations:
+                        final_response = self._format_latest_observation_response(observations)
+                    else:
                         logger.warning("Model returned empty response on conversational turn.")
                         final_response = " [!] The model returned an empty response. Try rephrasing or typing /help."
-                    else:
-                        final_response = "Task finished, see tool observations."
                     state = AgentState.EXIT
                 else:
                     plan.current_step = min(plan.current_step + 1, max(len(plan.steps) - 1, 0))
+                    if len(observations) > 0:
+                        override_prompt = "[System Notice: Tool execution complete. You MUST now write a plain-English summary of these findings for the user. Do not leave your response blank.]"
                     state = AgentState.THINK
                 self._save_plan(session_id, plan)
 
@@ -364,7 +515,16 @@ class OrchestratorAgent(SimpleBaseAgent):
             txn.commit()
 
         is_empty_warning = "[!] The model returned an empty response" in final_response
-        if final_response.strip() and not is_empty_warning:
+        
+        # Echo Pruning / History Sanitization
+        is_echo = self._is_duplicate_assistant_response(final_response)
+        if is_echo:
+            logger.warning("Echo Pruning: Dropped duplicate assistant response from history buffer.")
+            # Conversational echoes are retried in THINK before persistence. This is only a
+            # defensive fallback for a response produced outside that normal completion path.
+            final_response = CHAT_ECHO_RETRY_FALLBACK if intent == "chat" else PRUNED_ECHO_INDICATOR
+                
+        if final_response.strip() and not is_empty_warning and not is_echo:
             self._chat_history = (self._chat_history + [{"role": "user", "content": task}, {"role": "assistant", "content": final_response}])[-20:]
 
         # Persist a summary of older turns when history grows large.
@@ -388,6 +548,13 @@ class OrchestratorAgent(SimpleBaseAgent):
 
         from axiom.config import get_config
         config = get_config()
+        tools_loaded = False
+        if intent != "chat" and self.registry and hasattr(self.registry, "list_tools"):
+            try:
+                tools_loaded = bool(self.registry.list_tools())
+            except Exception:
+                logger.debug("Unable to determine whether action tools are loaded.", exc_info=True)
+
         if intent == "chat":
             base_prompt = (
                 "You are AXIOM, an intelligent local-first AI assistant running on Linux. "
@@ -395,6 +562,7 @@ class OrchestratorAgent(SimpleBaseAgent):
             )
         else:
             base_prompt = (
+                (DIRECT_ACTION_MODE_GUARD + "\n\n" if tools_loaded else "") +
                 "You are the AXIOM Orchestrator.\n"
                 "1. Your sole purpose is to execute requested tasks using the provided tools.\n"
                 "2. NEVER output your internal reasoning, thought process, or status logs in the Final Answer.\n"
@@ -402,11 +570,12 @@ class OrchestratorAgent(SimpleBaseAgent):
                 "4. If no tool is required, provide ONLY the direct response to the user.\n"
                 "5. If you must plan, keep it in an internal-only scratchpad (if implemented), but do not send it to the user interface.\n"
                 "6. You MUST invoke tools using the native structured tool-call API whenever possible. If outputting text tool calls, strictly use registered tool names.\n"
-                "7. CRITICAL RULE: You are strictly FORBIDDEN from claiming to have performed an action (opening a file, reading a document, executing a script) unless you have actually emitted a tool call and received the verified [System Observation]. DO NOT roleplay, simulate, or hallucinate tool execution in conversational prose. If a tool is not available, state explicitly that you cannot perform the action. This rule applies ONLY to system tool actions (files, apps, shell). You are free to converse, introduce yourself, and answer general questions normally without restriction.\n"
+                "7. CRITICAL RULE: You are strictly FORBIDDEN from claiming to have performed an action (opening a file, reading a document, executing a script) unless you have actually emitted a tool call and received the verified [System Observation]. DO NOT roleplay, simulate, or hallucinate tool execution in conversational prose. If a tool is not available, state explicitly that you cannot perform the action.\n"
+                "8. CRITICAL Temporal Rule: You must respond ONLY to the user's latest (most recent) message at the very bottom of the prompt. Use older conversation history solely for context and reference. NEVER ignore the latest prompt to answer old, ignored, or previously addressed questions from earlier turns.\n"
                 "CONSTRAINTS:\n"
                 "- NO verbose planning logs.\n"
                 "- STRIKE the 'Final Answer:' header from your output; just provide the content.\n"
-                "8. [MULTIMODAL PERCEPTION] If the user refers to 'this window', 'my screen', 'look at this', or asks to diagnose a visual issue, you MUST use the 'capture_screen_context' tool."
+                "9. [MULTIMODAL PERCEPTION] If the user refers to 'this window', 'my screen', 'look at this', or asks to diagnose a visual issue, you MUST use the 'capture_screen_context' tool."
             )
         
         try:
@@ -456,6 +625,10 @@ class OrchestratorAgent(SimpleBaseAgent):
         if override_prompt:
             system_messages.append({"role": "system", "content": override_prompt})
             
+        # Inject Task Isolation Anchor if intent is not chat
+        if intent != "chat":
+            task = f"[Current Task - IGNORE ALL PREVIOUS UNANSWERED OR INCOMPLETE TOPICS AND EXECUTE ONLY THIS REQUEST]: {task}"
+            
         messages = self._context_manager.build_context_window(
             system_messages=system_messages,
             chat_history=self._chat_history,
@@ -484,15 +657,17 @@ class OrchestratorAgent(SimpleBaseAgent):
                 
         return messages
 
-    def _call_llm(self, messages: List[Dict[str, Any]], tool_schemas: List[Dict[str, Any]], timeout: Optional[float] = None) -> Dict[str, Any]:
+    def _call_llm(self, messages: List[Dict[str, Any]], tool_schemas: List[Dict[str, Any]], timeout: Optional[float] = None, temperature: Optional[float] = None) -> Dict[str, Any]:
         last_exc = None
         for attempt in range(LLM_RETRIES):
             try:
                 if tool_schemas and hasattr(self._llm, "chat_with_tools"):
                     kwargs = {"timeout": timeout} if timeout else {}
+                    if temperature is not None: kwargs["temperature"] = temperature
                     msg = self._llm.chat_with_tools(messages, tool_schemas, **kwargs)
                     return msg if isinstance(msg, dict) else {"role": "assistant", "content": str(msg)}
                 kwargs = {"timeout": timeout} if timeout else {}
+                if temperature is not None: kwargs["temperature"] = temperature
                 content = self._llm.chat(messages, **kwargs)
                 return {"role": "assistant", "content": content or ""}
             except Exception as exc:
@@ -572,7 +747,11 @@ class OrchestratorAgent(SimpleBaseAgent):
         try:
             if self.registry and hasattr(self.registry, "execute"):
                 tool_result = self.registry.execute(tool_name, **arguments)
-                payload = {"output": getattr(tool_result, "output", None), "error": _scrub_jargon(getattr(tool_result, "error", None))}
+                raw_error = getattr(tool_result, "error", None)
+                # ToolResult.error is textual. Treat mock/sentinel objects as absent
+                # rather than rendering their repr as an execution failure.
+                error = _scrub_jargon(raw_error) if isinstance(raw_error, str) else None
+                payload = {"output": getattr(tool_result, "output", None), "error": error}
                 result_dict = self._structured_tool_result(tool_name, arguments, payload, bool(getattr(tool_result, "success", False)))
             else:
                 # Fallback: direct tool lookup and execution against raw core registry.
@@ -612,6 +791,114 @@ class OrchestratorAgent(SimpleBaseAgent):
             self._emit("assist.file.opened", {"file_path": arguments.get("file_path")})
 
         return result_dict
+
+    def _format_observation_response(self, observation: Dict[str, Any]) -> str:
+        """Render a tool result without masking empty document extraction failures."""
+        tool_name = str(observation.get("tool") or "unknown")
+        arguments = observation.get("arguments") if isinstance(observation.get("arguments"), dict) else {}
+        result = observation.get("result") if isinstance(observation.get("result"), dict) else {}
+        error = result.get("error")
+        output = result.get("output")
+
+        if error:
+            text = str(error).strip()
+        else:
+            text = output.get("content") if isinstance(output, dict) and "content" in output else output
+            if text is None or (isinstance(text, str) and not text.strip()):
+                if tool_name in {"read_document_content", "file_read"}:
+                    file_path = arguments.get("file_path") or arguments.get("path") or arguments.get("file") or "<unknown file>"
+                    text = DOCUMENT_EXTRACTION_NOTICE.format(file_path=file_path)
+                else:
+                    text = f"[Tool Result Notice]: '{tool_name}' completed without a displayable result."
+            elif not isinstance(text, str):
+                text = json.dumps(text, default=str)
+
+        return f"[Observation Result]:\n\n{text}"
+
+    def _format_latest_observation_response(self, observations: List[Dict[str, Any]]) -> str:
+        """Render the latest user-displayable observation, not internal control flow."""
+        for observation in reversed(observations):
+            if not self._is_internal_observation_notice(observation):
+                return self._format_observation_response(observation)
+        return "[Tool Result Notice]: No user-displayable tool result was produced."
+
+    @staticmethod
+    def _is_internal_observation_notice(observation: Dict[str, Any]) -> bool:
+        result = observation.get("result") if isinstance(observation, dict) else None
+        if not isinstance(result, dict):
+            return False
+
+        candidates = [result.get("error")]
+        output = result.get("output")
+        if isinstance(output, dict):
+            candidates.extend((output.get("content"), output.get("error"), output.get("message")))
+        else:
+            candidates.append(output)
+
+        return any(
+            isinstance(value, str)
+            and value.lstrip().lower().startswith(INTERNAL_OBSERVATION_PREFIXES)
+            for value in candidates
+        )
+
+    def _retry_pruned_chat_response(
+        self,
+        task: str,
+        plan: Plan,
+        observations: List[Dict[str, Any]],
+        session_id: str,
+        timeout: Optional[float],
+    ) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
+        """Make one diversified retry after suppressing a conversational echo."""
+        try:
+            messages = self._build_messages(
+                task,
+                plan,
+                observations,
+                session_id,
+                override_prompt=CHAT_ECHO_RETRY_PROMPT,
+                intent="chat",
+            )
+            retry_message = self._call_llm(messages, [], timeout=timeout, temperature=0.4)
+            content = self._clean_retry_content(retry_message.get("content"))
+            if content and not self._is_duplicate_assistant_response(content):
+                return content, retry_message
+        except Exception as exc:
+            logger.warning("Echo-pruning retry failed: %s", exc)
+        return None, None
+
+    @staticmethod
+    def _clean_retry_content(content: Any) -> str:
+        if not content:
+            return ""
+        cleaned = str(content)
+        cleaned = re.sub(r"<think>[\s\S]*?(?:</think>|$)", "", cleaned, flags=re.IGNORECASE)
+        cleaned = cleaned.replace("</think>", "").replace("<think>", "").strip()
+        cleaned = re.sub(r"^(assistant|role:\s*assistant):?\s*\n+", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"^(?:Final Answer:|Please try again\.)\s*", "", cleaned, flags=re.IGNORECASE).strip()
+        return cleaned
+
+    def _is_duplicate_assistant_response(self, response: Any) -> bool:
+        if not isinstance(response, str) or not response.strip():
+            return False
+        if not self._chat_history or self._chat_history[-1].get("role") != "assistant":
+            return False
+        last_message = str(self._chat_history[-1].get("content", "")).strip()
+        candidate = response.strip()
+        return bool(last_message and (candidate == last_message or candidate in last_message))
+
+    @staticmethod
+    def _is_disallowed_action_greeting(content: Any) -> bool:
+        if not isinstance(content, str):
+            return False
+        normalized = " ".join(content.lower().split())
+        return any(phrase in normalized for phrase in (
+            "i am axiom",
+            "i'm axiom",
+            "i’m axiom",
+            "here is what i can do",
+            "how can i assist you today",
+        ))
 
     def _structured_tool_result(self, tool: str, arguments: Dict[str, Any], result: Dict[str, Any], success: bool) -> Dict[str, Any]:
         return {"tool": tool, "arguments": arguments if isinstance(arguments, dict) else {"input": arguments}, "result": result if isinstance(result, dict) else {"output": result}, "success": bool(success)}

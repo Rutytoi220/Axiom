@@ -214,7 +214,7 @@ class OllamaClient:
         import asyncio
         return await asyncio.to_thread(self.generate, prompt, model)
     
-    def chat(self, messages: List[Dict[str, str]], model: Optional[str] = None, timeout: Optional[float] = None) -> str:
+    def chat(self, messages: List[Dict[str, str]], model: Optional[str] = None, timeout: Optional[float] = None, temperature: Optional[float] = None) -> str:
         """Chat with Ollama using message format.
         
         Args:
@@ -248,7 +248,7 @@ class OllamaClient:
             "model": model,
             "messages": messages,
             "stream": False,
-            "temperature": self.config.temperature,
+            "temperature": temperature if temperature is not None else self.config.temperature,
             "top_p": self.config.top_p,
             "top_k": self.config.top_k,
         }
@@ -284,7 +284,7 @@ class OllamaClient:
         return await asyncio.to_thread(self.chat, messages, model)
     
     def chat_with_tools(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]],
-                        model: Optional[str] = None, timeout: Optional[float] = None) -> Dict[str, Any]:
+                        model: Optional[str] = None, timeout: Optional[float] = None, temperature: Optional[float] = None) -> Dict[str, Any]:
         """Chat with Ollama using tool/function calling.
 
         Args:
@@ -303,6 +303,7 @@ class OllamaClient:
             "messages": messages,
             "tools": tools if tools else None,
             "stream": False,
+            "temperature": temperature if temperature is not None else self.config.temperature,
         }
         # Remove None keys
         payload = {k: v for k, v in payload.items() if v is not None}

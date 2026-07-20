@@ -74,8 +74,11 @@ async def test_empty_or_scanned_pdf_safeguard(temp_dir):
         
     result = await tool.execute({"file_path": file_path})
     assert result.success is False
-    assert "Could not extract readable text" in result.error
-    assert "scanned image" in result.error
+    assert result.error == (
+        f"[Document Extraction Notice]: Zero selectable characters found in {file_path}. "
+        "This document may be encrypted, security-locked, or rendered as a flat image "
+        "scan lacking a readable text layer. Please convert via OCR."
+    )
 
 @pytest.mark.asyncio
 async def test_truncation(temp_dir):

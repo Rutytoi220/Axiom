@@ -9,6 +9,12 @@ from pathlib import Path
 
 from axiom.tools import BaseTool, ToolResult
 
+DOCUMENT_EXTRACTION_NOTICE = (
+    "[Document Extraction Notice]: Zero selectable characters found in {file_path}. "
+    "This document may be encrypted, security-locked, or rendered as a flat image "
+    "scan lacking a readable text layer. Please convert via OCR."
+)
+
 class ReadDocumentContentTool(BaseTool):
     """Safely extracts text content from various document formats."""
     
@@ -59,7 +65,7 @@ class ReadDocumentContentTool(BaseTool):
                 if alphanumeric_count < 15:
                     return ToolResult(
                         success=False,
-                        error=f" [!] Error: Could not extract readable text from {path.name}. This file may be a scanned image lacking a selectable text layer, encrypted, or corrupted. Please convert it with OCR or provide a plain text file."
+                        error=DOCUMENT_EXTRACTION_NOTICE.format(file_path=str(path))
                     )
                 
             truncated_content = self._truncate_safe(content)

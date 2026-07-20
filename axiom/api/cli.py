@@ -208,6 +208,10 @@ class CLI(cmd.Cmd):
                 else:
                     output_str = json.dumps(response.output, indent=2, default=str)
             
+            import re
+            output_str = re.sub(r"<think>[\s\S]*?(?:</think>|$)", "", output_str, flags=re.IGNORECASE)
+            output_str = output_str.replace("</think>", "").replace("<think>", "").strip()
+            
             # Store in memory
             self.memory.add_message("user", arg)
             self.memory.add_message("assistant", output_str)

@@ -26,8 +26,8 @@ class InferenceRouter:
         
         # Configure the routing matrix (model names to map to intents)
         self.model_tiers = {
-            "chat": "llama3.1:latest",          # Promoted to 8B class for multi-turn stability
-            "orchestration": "llama3.1:latest", # General Orchestration/Assistive Context
+            "chat": "qwen3:0.6b",               # Promoted to 8B class for multi-turn stability? No, user says keep qwen3:0.6b for chat
+            "orchestration": "qwen3:8b",        # General Orchestration/Assistive Context
             "code": "qwen3-coder:latest"        # Code Generation/Refactoring
         }
         self._current_active_model = None
@@ -50,6 +50,11 @@ class InferenceRouter:
         code_pattern = r'\b(python|javascript|refactor|debug|compile|class|import|traceback|pytest|git)\b|\.py\b'
         if re.search(code_pattern, user_text):
             return "code"
+            
+        # 1.5. Capability Heuristics: Trigger full orchestrator for tool discovery
+        capability_pattern = r'\b(what can you do|your capabilities|what tools|how can you help|what are you capable of)\b'
+        if re.search(capability_pattern, user_text):
+            return "orchestration"
             
         # 2. Check for File Paths, Extensions, explicit Tool Verbs, or Contextual Pronouns
         # These MUST override the short-prompt chat fallback.
