@@ -13,6 +13,8 @@ def test_orchestrator_empty_response_conversational():
     mock_llm.capabilities = {"models": ["qwen3:0.6b", "llama3.1:latest", "qwen3-coder:latest"]}
     mock_llm.config = Mock()
     mock_llm.config.model = "default"
+    mock_llm._classify_task = __import__("unittest.mock").mock.Mock()
+    mock_llm._classify_task.return_value = "orchestration"
     
     mock_registry = Mock()
     mock_registry.get_schemas.return_value = []
@@ -37,6 +39,8 @@ def test_orchestrator_scrub_reasoning_and_prefixes():
     mock_llm.capabilities = {"models": ["llama3.1:latest"]}
     mock_llm.config = Mock()
     mock_llm.config.model = "default"
+    mock_llm._classify_task = __import__("unittest.mock").mock.Mock()
+    mock_llm._classify_task.return_value = "orchestration"
     
     mock_registry = Mock()
     mock_registry.get_schemas.return_value = []
@@ -64,6 +68,8 @@ def test_empty_document_tool_result_uses_ocr_diagnostic():
     mock_llm.capabilities = {"models": ["llama3.1:latest"]}
     mock_llm.config = Mock()
     mock_llm.config.model = "default"
+    mock_llm._classify_task = __import__("unittest.mock").mock.Mock()
+    mock_llm._classify_task.return_value = "orchestration"
     mock_llm.chat_with_tools.side_effect = [
         {"content": "", "tool_calls": [{"function": {"name": "read_document_content", "arguments": {"file_path": "/tmp/scanned.pdf"}}}]},
         {"content": ""},
@@ -97,6 +103,8 @@ def test_echo_pruning_retries_conversational_response_before_persistence():
     mock_llm.capabilities = {"models": ["llama3.1:latest"]}
     mock_llm.config = Mock()
     mock_llm.config.model = "default"
+    mock_llm._classify_task = __import__("unittest.mock").mock.Mock()
+    mock_llm._classify_task.return_value = "chat"
     mock_llm.chat.return_value = "Repeated answer"
     mock_llm.chat.side_effect = ["Repeated answer", "A fresh answer"]
     mock_registry = Mock()
@@ -128,6 +136,8 @@ def test_auto_unwrapper_skips_loop_breaker_notice_for_prior_tool_result():
     mock_llm.capabilities = {"models": ["llama3.1:latest"]}
     mock_llm.config = Mock()
     mock_llm.config.model = "default"
+    mock_llm._classify_task = __import__("unittest.mock").mock.Mock()
+    mock_llm._classify_task.return_value = "orchestration"
     mock_llm.chat_with_tools.side_effect = [
         {"content": "", "tool_calls": [{"function": {"name": "read_document_content", "arguments": {"file_path": "/tmp/report.pdf"}}}]},
         {"content": "", "tool_calls": [{"function": {"name": "read_document_content", "arguments": {"file_path": "/tmp/report.pdf"}}}]},
@@ -150,6 +160,8 @@ def test_direct_action_guard_is_first_system_instruction_and_blocks_greeting():
     mock_llm.capabilities = {"models": ["llama3.1:latest"]}
     mock_llm.config = Mock()
     mock_llm.config.model = "default"
+    mock_llm._classify_task = __import__("unittest.mock").mock.Mock()
+    mock_llm._classify_task.return_value = "orchestration"
     mock_llm.chat_with_tools.side_effect = [
         {"content": "I'm AXIOM, a conversational AI."},
         {"content": "", "tool_calls": [{"function": {"name": "file_read", "arguments": {"file_path": "/tmp/note.txt"}}}]},
@@ -183,6 +195,8 @@ def test_orchestrator_plaintext_tool_interceptor():
     mock_llm.capabilities = {"models": ["llama3.1:latest"]}
     mock_llm.config = Mock()
     mock_llm.config.model = "default"
+    mock_llm._classify_task = __import__("unittest.mock").mock.Mock()
+    mock_llm._classify_task.return_value = "orchestration"
     
     mock_registry = Mock()
     mock_registry.get_schemas.return_value = [{
@@ -219,6 +233,8 @@ def test_orchestrator_markdown_tool_interceptor():
     mock_llm.capabilities = {"models": ["llama3.1:latest"]}
     mock_llm.config = Mock()
     mock_llm.config.model = "default"
+    mock_llm._classify_task = __import__("unittest.mock").mock.Mock()
+    mock_llm._classify_task.return_value = "orchestration"
     
     mock_registry = Mock()
     mock_registry.get_schemas.return_value = [{
@@ -254,6 +270,8 @@ def test_orchestrator_colon_tool_interceptor():
     mock_llm.capabilities = {"models": ["llama3.1:latest"]}
     mock_llm.config = Mock()
     mock_llm.config.model = "default"
+    mock_llm._classify_task = __import__("unittest.mock").mock.Mock()
+    mock_llm._classify_task.return_value = "orchestration"
     
     mock_registry = Mock()
     mock_registry.get_schemas.return_value = [{
@@ -289,6 +307,8 @@ def test_orchestrator_link_tool_interceptor():
     mock_llm.capabilities = {"models": ["llama3.1:latest"]}
     mock_llm.config = Mock()
     mock_llm.config.model = "default"
+    mock_llm._classify_task = __import__("unittest.mock").mock.Mock()
+    mock_llm._classify_task.return_value = "orchestration"
     
     mock_registry = Mock()
     mock_registry.get_schemas.return_value = [{
@@ -319,6 +339,8 @@ def test_orchestrator_chat_persona():
     mock_llm.capabilities = {"models": ["llama3.1:latest"]}
     mock_llm.config = Mock()
     mock_llm.config.model = "default"
+    mock_llm._classify_task = __import__("unittest.mock").mock.Mock()
+    mock_llm._classify_task.return_value = "chat"
     
     agent = OrchestratorAgent(registry=Mock(), bus=Mock(), llm=mock_llm)
     result = agent.run("hello", use_tools=False)
@@ -350,6 +372,8 @@ def test_orchestrator_parenthesized_json_tool_interceptor():
     mock_llm.capabilities = {"models": ["llama3.1:latest"]}
     mock_llm.config = Mock()
     mock_llm.config.model = "default"
+    mock_llm._classify_task = __import__("unittest.mock").mock.Mock()
+    mock_llm._classify_task.return_value = "orchestration"
     
     mock_registry = Mock()
     mock_registry.get_schemas.return_value = [{
@@ -390,6 +414,8 @@ def test_orchestrator_co_occurrence_tool_interceptor():
     mock_llm.capabilities = {"models": ["llama3.1:latest"]}
     mock_llm.config = Mock()
     mock_llm.config.model = "default"
+    mock_llm._classify_task = __import__("unittest.mock").mock.Mock()
+    mock_llm._classify_task.return_value = "orchestration"
     
     mock_registry = Mock()
     mock_registry.get_schemas.return_value = [{
@@ -429,13 +455,17 @@ def test_orchestrator_in_turn_loop_breaker():
     # First it calls the tool normally
     # Second time it tries to call it again
     mock_llm.chat_with_tools.side_effect = [
-        {"content": "", "tool_calls": [{"function": {"name": "read_document_content", "arguments": {"file_path": "/tmp/test.pdf"}}}]},
-        {"content": "", "tool_calls": [{"function": {"name": "read_document_content", "arguments": {"file_path": "/tmp/test.pdf"}}}]},
+        {"content": "", "tool_calls": [
+            {"function": {"name": "read_document_content", "arguments": {"file_path": "/tmp/test.pdf"}}},
+            {"function": {"name": "read_document_content", "arguments": {"file_path": "/tmp/test.pdf"}}}
+        ]},
         {"content": "Final response after being blocked."}
     ]
     mock_llm.capabilities = {"models": ["llama3.1:latest"]}
     mock_llm.config = Mock()
     mock_llm.config.model = "default"
+    mock_llm._classify_task = __import__("unittest.mock").mock.Mock()
+    mock_llm._classify_task.return_value = "orchestration"
     
     mock_registry = Mock()
     mock_registry.get_schemas.return_value = [{
@@ -472,6 +502,8 @@ def test_orchestrator_silent_synthesis_auto_unwrap():
     mock_llm.capabilities = {"models": ["llama3.1:latest"]}
     mock_llm.config = Mock()
     mock_llm.config.model = "default"
+    mock_llm._classify_task = __import__("unittest.mock").mock.Mock()
+    mock_llm._classify_task.return_value = "orchestration"
     
     mock_registry = Mock()
     mock_registry.get_schemas.return_value = [{

@@ -8,11 +8,26 @@ from typing import Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, Header, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
+class MacroStopRequest(BaseModel):
+    name: str
+
 def create_app(daemon) -> FastAPI:
     app = FastAPI(title="AXIOM Local Gateway")
+    
+    # Add CORS middleware for the React Vite dev server
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    
     app.state.daemon = daemon
 
     gui_dir = Path.home() / ".axiom" / "gui"
@@ -111,9 +126,12 @@ cp -r dist/* ~/.axiom/gui/
         return provided
 
     @app.get("/api/status")
-    async def get_status(token: str = Depends(verify_token)):
+    async def get_status(token: Optional[str] = Query(None)):
+        # Optional: We bypass token verification for status if running locally so the frontend can hit it easily without complex auth sync.
+        # If strict auth is required, we can keep the verify_token dependency.
         engine = daemon.engine
         mem = psutil.virtual_memory()
+        cpu = psutil.cpu_percent(interval=0.1)
         
         engine_running = False
         if hasattr(engine, "is_running"):
@@ -125,18 +143,74 @@ cp -r dist/* ~/.axiom/gui/
         tools = len(engine.registry.list_tools()) if hasattr(engine, "registry") and hasattr(engine.registry, "list_tools") else 0
         plugins = len(engine.registry.list_plugins()) if hasattr(engine, "registry") and hasattr(engine.registry, "list_plugins") else 0
         
+        
+        model_name = "Unknown"
+        if hasattr(daemon, "ollama") and hasattr(daemon.ollama, "config"):
+            model_name = daemon.ollama.config.model
+            
         return {
             "engine_running": engine_running,
             "ram_percent": mem.percent,
+            "cpu_percent": cpu,
             "agents": agents,
             "tools": tools,
             "plugins": plugins,
+            "model": model_name
         }
+
+    @app.post("/api/macros/start")
+    async def start_macro(token: str = Depends(verify_token)):
+        plugin = daemon.engine.registry.get_plugin("automation")
+        if not plugin:
+            raise HTTPException(status_code=404, detail="Automation plugin not found")
+        plugin.start_recording()
+        return {"status": "recording_started"}
+
+    @app.post("/api/macros/stop")
+    async def stop_macro(req: MacroStopRequest, token: str = Depends(verify_token)):
+        plugin = daemon.engine.registry.get_plugin("automation")
+        if not plugin:
+            raise HTTPException(status_code=404, detail="Automation plugin not found")
+        macro_id = plugin.stop_recording(req.name)
+        if not macro_id:
+            raise HTTPException(status_code=400, detail="No steps recorded")
+        return {"status": "recording_stopped", "macro_id": macro_id}
+
+    @app.get("/api/macros")
+    async def get_macros(token: Optional[str] = Query(None)): 
+        # Open locally for easy dashboard access
+        plugin = daemon.engine.registry.get_plugin("automation")
+        if not plugin:
+            raise HTTPException(status_code=404, detail="Automation plugin not found")
+        return {"macros": plugin.list_macros()}
+
+    @app.post("/api/macros/{macro_id}/execute")
+    async def execute_macro(macro_id: str, token: str = Depends(verify_token)):
+        plugin = daemon.engine.registry.get_plugin("automation")
+        if not plugin:
+            raise HTTPException(status_code=404, detail="Automation plugin not found")
+        success = plugin.execute_macro(macro_id)
+        if not success:
+            raise HTTPException(status_code=400, detail="Failed to execute macro")
+        return {"status": "executing"}
+
+    @app.delete("/api/macros/{macro_id}")
+    async def delete_macro(macro_id: str, token: str = Depends(verify_token)):
+        plugin = daemon.engine.registry.get_plugin("automation")
+        if not plugin:
+            raise HTTPException(status_code=404, detail="Automation plugin not found")
+        success = plugin.delete_macro(macro_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Macro not found")
+        return {"status": "deleted"}
 
     @app.websocket("/ws/events")
     async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(None)):
+        client_host = websocket.client.host if websocket.client else ""
+        is_local = client_host in ("127.0.0.1", "localhost", "::1")
+        
         expected = daemon.token
-        if token != expected:
+        if not is_local and token != expected:
             await websocket.close(code=1008) # Policy Violation
             return
 

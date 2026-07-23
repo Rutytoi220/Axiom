@@ -21,8 +21,36 @@ from axiom.llm.ollama_client import OllamaClient, OllamaConfig
 import subprocess
 import json
 import os
+import re
 
 logger = logging.getLogger(__name__)
+
+class TracebackSanitizer:
+    @staticmethod
+    def sanitize(raw_log: str) -> str:
+        """Strips boilerplate Python frames and extracts high-signal error payloads."""
+        # Split into lines
+        lines = raw_log.splitlines()
+        
+        # Keep only the last 50 lines if it's too long
+        if len(lines) > 50:
+            lines = lines[-50:]
+            
+        clean_lines = []
+        for line in lines:
+            # Skip pytest core, importlib, pluggy, and standard library boilerplate
+            if any(ignore in line for ignore in ['/pluggy/', '/pytest/', '/importlib/', '/site-packages/']):
+                continue
+            clean_lines.append(line)
+            
+        sanitized = "\\n".join(clean_lines)
+        
+        # Try to find the specific exception type and file
+        match = re.search(r'([A-Za-z]+Error:.*)', sanitized)
+        if match:
+            return f"{sanitized[-1000:]}\\n\\n[Sanitizer Extracted]: {match.group(1)}"
+            
+        return sanitized[-1000:]
 
 
 @dataclass
@@ -200,10 +228,13 @@ class SWEBenchHarness:
                             pass
             context_str = "\n".join(context)
             
+            # Sanitize the traceback
+            sanitized_traceback = TracebackSanitizer.sanitize(failure_log)
+            
             # Generate proposed fix
             prompt = (
                 "You are an autonomous repair agent. The following test suite failed:\n"
-                f"TRACEBACK:\n{failure_log[-2000:]}\n\n"
+                f"TRACEBACK:\n{sanitized_traceback}\n\n"
                 f"CODE CONTEXT:\n{context_str}\n\n"
                 "Provide a JSON array of tool calls using the 'write_file' tool to fix the bug. "
                 "Output ONLY a valid JSON array, for example:\n"
@@ -236,7 +267,7 @@ class SWEBenchHarness:
             consensus_engine = ConsensusEngine(self.event_bus)
             consensus_reached = await consensus_engine.run_debate(
                 task="Fix the failing pytest suite",
-                context=failure_log[-1000:],
+                context=sanitized_traceback,
                 pending_tools=pending_tools
             )
             

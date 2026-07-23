@@ -8,7 +8,8 @@ from axiom.core.registry import Registry
 from axiom.core.context import ExecutionContext
 from axiom.core.recorder import FlightRecorder
 import os
-from axiom.perception.watcher import ProactiveWatcher
+from axiom.perception.watcher import ProactiveWatcher, OSWatcher
+from axiom.perception.audio_queue import AudioDaemon
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,10 @@ class Engine:
         # Proactive Kernel
         workspaces = [os.getcwd()]
         self.proactive_watcher = ProactiveWatcher(self.event_bus, workspaces)
+        self.os_watcher = OSWatcher(self.event_bus)
+        
+        # Audio Daemon
+        self.audio_daemon = AudioDaemon()
         
         self._setup_internal_handlers()
     
@@ -43,6 +48,39 @@ class Engine:
         """Setup internal event handlers."""
         self.event_bus.subscribe("error.handler", self._handle_error)
         self.event_bus.subscribe("system.shutdown", self._handle_shutdown)
+        self.event_bus.subscribe("llm.response.completed", self._handle_llm_response)
+        self.event_bus.subscribe("system.anomaly", self._handle_system_anomaly)
+
+    def _handle_system_anomaly(self, event: Event) -> None:
+        """Handle system anomalies by consulting SmartRouter and sending to TTS."""
+        anomaly_type = event.data.get("type", "unknown")
+        details = event.data.get("details", "")
+        
+        try:
+            from axiom.llm.universal_client import UniversalLLMClient
+            from axiom.engine.router import SmartRouter, IntentCategory
+            
+            # Use isolated instance so we don't interfere with active chats
+            llm_client = UniversalLLMClient()
+            router = SmartRouter(llm_client=llm_client, event_bus=self.event_bus)
+            
+            prompt = f"System anomaly detected: {details}. Provide a 1-sentence recommended fix. Do not explain, just give the command or action to fix it."
+            messages = [{"role": "user", "content": prompt}]
+            
+            logger.info(f"Routing anomaly '{anomaly_type}' to SmartRouter SYSTEM intent...")
+            response = router.chat(messages, model=router.model_tiers[IntentCategory.SYSTEM])
+            
+            if response:
+                logger.warning(f"OSWatcher Fix Recommended: {response}")
+                self.audio_daemon.send_tts(response)
+        except Exception as e:
+            logger.error(f"Failed to process system anomaly: {e}")
+
+    def _handle_llm_response(self, event: Event) -> None:
+        """Push LLM responses to TTS queue."""
+        response_text = event.data.get("response", event.data.get("text", ""))
+        if response_text:
+            self.audio_daemon.send_tts(response_text)
     
     def _handle_error(self, event: Event) -> None:
         """Handle error events."""
@@ -63,6 +101,10 @@ class Engine:
         
         # Start proactive watcher (respects config.proactive_kernel internally)
         self.proactive_watcher.start()
+        self.os_watcher.start()
+        
+        # Start audio daemon
+        self.audio_daemon.start()
         
         # Log engine started event
         self.memory.log_event("engine.started", data={"started_at": self.started_at}, source="Engine")
@@ -116,6 +158,7 @@ class Engine:
         )
         self.event_bus.publish(shutdown_event)
         
+        self.os_watcher.stop()
         self.recorder.stop()
     
     def is_running(self) -> bool:

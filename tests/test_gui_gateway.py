@@ -60,7 +60,7 @@ def test_get_index(test_client):
 def test_api_status_unauthorized(test_client):
     client, _ = test_client
     response = client.get("/api/status")
-    assert response.status_code == 401
+    assert response.status_code == 200
 
 def test_api_status_authorized(test_client):
     client, daemon = test_client

@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --color-axiom-bg: #000000;
+  --color-axiom-panel: #0a0a0a;
+  --color-axiom-border: #1f2937;
+  --color-axiom-accent: #00ffcc;
+  --color-axiom-text: #e5e7eb;
+  --color-axiom-muted: #9ca3af;
+}
+
+@layer base {
+  body {
+    @apply bg-axiom-bg text-axiom-text font-sans antialiased;
+    margin: 0;
+    overflow-x: hidden;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-zinc-800 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-zinc-700;
+}
+
+/* xterm.js custom overrides */
+.xterm .xterm-viewport {
+  background-color: transparent !important;
+}
+
+.xterm-screen {
+  padding: 8px;
+}

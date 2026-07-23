@@ -1,93 +1,127 @@
 """Dynamic Inference Router for AXIOM v2.
 
 Routes incoming prompts to the most efficient Ollama model based on task
-complexity (Tier 1 vs Tier 2 vs Tier 3). Intercepts routing if telemetry
-indicates a low-memory (OOM) situation and forces a graceful downgrade.
+complexity using an LLM-driven micro-model classification.
 """
 
 import logging
 from typing import Dict, Any, List, Optional
 import time
+from enum import Enum
+from pydantic import BaseModel
+import litellm
 
-from axiom.llm.ollama_client import OllamaClient, OllamaConfig
+from axiom.llm.universal_client import UniversalLLMClient
 from axiom.engine.telemetry import HardwareTelemetryDaemon
 from axiom.engine.cloud_adapter import CloudAdapter
 from axiom.config import get_config
 
 logger = logging.getLogger(__name__)
 
-class InferenceRouter:
-    """Smart wrapper around OllamaClient that dynamically routes prompts."""
+class IntentCategory(str, Enum):
+    CODE = "CODE"
+    CHAT = "CHAT"
+    VISION = "VISION"
+    SYSTEM = "SYSTEM"
+    REASONING = "REASONING"
 
-    def __init__(self, llm_client: OllamaClient, telemetry_daemon: Optional[HardwareTelemetryDaemon] = None):
+class RouterDecision(BaseModel):
+    category: IntentCategory
+
+class SmartRouter:
+    """Smart wrapper around UniversalLLMClient that dynamically routes prompts."""
+
+    def __init__(self, llm_client: UniversalLLMClient, telemetry_daemon: Optional[HardwareTelemetryDaemon] = None, event_bus=None):
         self.llm_client = llm_client
         self.telemetry = telemetry_daemon
+        self.event_bus = event_bus
         self.cloud_adapter = CloudAdapter()
         
-        # Configure the routing matrix (model names to map to intents)
+        # Configure the routing matrix (provider/model mapping to intents)
         self.model_tiers = {
-            "chat": "qwen3:0.6b",               # Promoted to 8B class for multi-turn stability? No, user says keep qwen3:0.6b for chat
-            "orchestration": "qwen3:8b",        # General Orchestration/Assistive Context
-            "code": "qwen3-coder:latest"        # Code Generation/Refactoring
+            IntentCategory.CHAT: "ollama/llama3.1:latest",               
+            IntentCategory.SYSTEM: "ollama/qwen3:8b",        
+            IntentCategory.CODE: "ollama/qwen3-coder:latest",
+            IntentCategory.VISION: "gemini/gemini-1.5-flash",
+            IntentCategory.REASONING: "ollama/laguna-xs-2.1:q4_K_M"
         }
         self._current_active_model = None
 
-    def _classify_task(self, messages: List[Dict[str, Any]], tool_schemas: Optional[List[Dict[str, Any]]] = None) -> str:
-        """Classify the prompt complexity into a Task Intent."""
+    def _has_image(self, messages: List[Dict[str, Any]]) -> bool:
+        """Check if any message contains an image payload."""
+        for msg in messages:
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "image_url":
+                        return True
+        return False
+
+    def _classify_task(self, messages: List[Dict[str, Any]], tool_schemas: Optional[List[Dict[str, Any]]] = None) -> IntentCategory:
+        """Classify the prompt complexity into a Task Intent using a micro-model."""
         if not messages:
-            return "chat"
-        # Isolate user text for accurate heuristic checking without system prompt pollution
-        user_messages = [m.get("content", "") for m in messages if isinstance(m.get("content"), str) and m.get("role") == "user"]
-        user_text = "\n".join(user_messages).lower()
-        
-        # Fallback to full text if no user messages exist
+            return IntentCategory.CHAT
+            
+        if self._has_image(messages):
+            return IntentCategory.VISION
+
+        user_messages = [m.get("content", "") for m in messages if m.get("role") == "user"]
+        # Handle cases where content is a list of dicts (e.g. multimodal)
+        user_texts = []
+        for content in user_messages:
+            if isinstance(content, str):
+                user_texts.append(content)
+            elif isinstance(content, list):
+                user_texts.extend([p.get("text", "") for p in content if p.get("type") == "text"])
+                
+        user_text = "\n".join(user_texts)
+
         if not user_text:
-            user_text = "\n".join([m.get("content", "") for m in messages if isinstance(m.get("content"), str)]).lower()
-        
-        import re
-        
-        # 1. Code Heuristics: Only trigger on explicit keywords in user prompt
-        code_pattern = r'\b(python|javascript|refactor|debug|compile|class|import|traceback|pytest|git)\b|\.py\b'
-        if re.search(code_pattern, user_text):
-            return "code"
-            
-        # 1.5. Capability Heuristics: Trigger full orchestrator for tool discovery
-        capability_pattern = r'\b(what can you do|your capabilities|what tools|how can you help|what are you capable of)\b'
-        if re.search(capability_pattern, user_text):
-            return "orchestration"
-            
-        # 2. Check for File Paths, Extensions, explicit Tool Verbs, or Contextual Pronouns
-        # These MUST override the short-prompt chat fallback.
-        path_ext_pattern = r'(/home/|~/|\./|\.pdf\b|\.txt\b|\.docx\b|\.csv\b|\.json\b|\.sh\b|\.md\b)'
-        tool_verb_pattern = r'\b(read|open|delete|write|launch|echo|screen|status|file|run|search|test|fix|show|close)\b'
-        contextual_pronoun_pattern = r'\b(the file|that document|it|the pdf)\b'
-        
-        has_path_or_verb = bool(
-            re.search(path_ext_pattern, user_text) or 
-            re.search(tool_verb_pattern, user_text) or
-            re.search(contextual_pronoun_pattern, user_text)
+            return IntentCategory.SYSTEM
+
+        system_prompt = (
+            "You are a semantic intent router. Classify the user's request into one of the following categories:\n"
+            "CODE: For programming, refactoring, debugging, or execution.\n"
+            "CHAT: For general conversation, greetings, or short chat.\n"
+            "VISION: If the user explicitly asks to look at their screen or an image.\n"
+            "SYSTEM: For orchestrating tools, reading files, or complex multi-step OS tasks.\n"
+            "REASONING: For deep logical puzzles, math, or complex analysis requiring advanced chain-of-thought.\n"
+            "Output strictly valid JSON conforming to the requested schema."
         )
-            
-        # 3. Chat Heuristics: Very short prompt (<15 words) and NO explicit tool keywords or paths
-        word_count = len(user_text.split())
-        if word_count < 15 and not has_path_or_verb:
-            return "chat"
-            
-        # 4. Orchestration: Default fallback for general queries
-        return "orchestration"
+
+        try:
+            # Synchronous call to micro-model
+            response = litellm.completion(
+                model="ollama/qwen3:0.6b",
+                api_base="http://localhost:11434",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"User Request: {user_text}"}
+                ],
+                temperature=0.0,
+                max_tokens=60,
+                response_format=RouterDecision
+            )
+            content = response.choices[0].message.content
+            # litellm structured output parsing usually returns JSON string of the object
+            import json
+            decision = RouterDecision.model_validate_json(content)
+            return decision.category
+        except Exception as e:
+            logger.warning(f"SmartRouter classification failed: {e}. Falling back to SYSTEM intent.")
+            return IntentCategory.SYSTEM
 
     def _route_request(self, messages: List[Dict[str, Any]], tool_schemas: Optional[List[Dict[str, Any]]] = None) -> str:
-        """Determine which model to use, considering telemetry downgrades."""
+        """Determine which model to use."""
         target_intent = self._classify_task(messages, tool_schemas)
         
-        if target_intent == "code":
+        if target_intent == IntentCategory.CODE:
             # Check for OOM conditions before scheduling a Code task
             if self.telemetry and self.telemetry.latest_state.get("warning"):
                 ram_avail = self.telemetry.latest_state.get("ram_available_percent", 0)
                 
                 config = get_config()
                 if getattr(config, "allow_cloud_fallback", False) and self.cloud_adapter.is_configured:
-                    print("\n[!] Local VRAM exhausted (<15%). Bursting Code task to Cloud Fallback...\n")
                     logger.warning(f"Local VRAM exhausted ({ram_avail:.1f}%). Bursting to Cloud Fallback.")
                     return "cloud"
                 else:
@@ -95,28 +129,21 @@ class InferenceRouter:
                         f"Emergency Downgrade: Code task requested, but RAM is critically low ({ram_avail:.1f}%). "
                         "Downgrading to Orchestration to prevent OOM crash."
                     )
-                    target_intent = "orchestration"
-                
+                    target_intent = IntentCategory.SYSTEM
                 
         target_model_name = self.model_tiers.get(target_intent)
-        
-        # Verify the target model is actually installed
-        capabilities = getattr(self.llm_client, "capabilities", {})
-        installed_models = capabilities.get("models", [])
-        
-        # If installed_models is populated but our target isn't there, fall back to the main config model
-        if installed_models and target_model_name not in installed_models and f"{target_model_name}:latest" not in installed_models:
-            return getattr(getattr(self.llm_client, "config", None), "model", "default")
-            
-        selected_model = target_model_name or getattr(getattr(self.llm_client, "config", None), "model", "default")
+        selected_model = target_model_name or getattr(getattr(self.llm_client, "config", None), "model", "ollama/qwen3:8b")
         
         # Log mid-flight model swapping if it changes
         if self._current_active_model and self._current_active_model != selected_model:
-            logger.info(f"Mid-Flight Context Router Swapping Model: {self._current_active_model} -> {selected_model} (Intent: {target_intent})")
+            logger.info(f"SmartRouter Swapping Model: {self._current_active_model} -> {selected_model} (Intent: {target_intent.value})")
         elif not self._current_active_model:
-            logger.info(f"Context Router initializing with Model: {selected_model} (Intent: {target_intent})")
+            logger.info(f"SmartRouter initializing with Model: {selected_model} (Intent: {target_intent.value})")
             
         self._current_active_model = selected_model
+        if self.event_bus:
+            from axiom.core.events import Event
+            self.event_bus.publish(Event("model.routed", "SmartRouter", {"target": selected_model, "intent": target_intent.value}))
         return selected_model
 
     def chat(self, messages: List[Dict[str, Any]], **kwargs) -> str:

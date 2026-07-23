@@ -55,6 +55,8 @@ def test_recursive_tool_loop(tmp_path):
     agent = OrchestratorAgent(registry=engine.registry, bus=engine.event_bus, memory=memory)
     llm = MockLoopingLLM()
     agent.set_llm(llm)
+    llm._classify_task = __import__("unittest.mock").mock.Mock()
+    llm._classify_task.return_value = "orchestration"
     
     # We must register a dummy shell tool so it doesn't fail on "Tool not found"
     class DummyShell:
@@ -125,6 +127,8 @@ def test_context_thrashing(tmp_path):
     agent = OrchestratorAgent(registry=engine.registry, bus=engine.event_bus, memory=memory)
     llm = MockThrashingLLM()
     agent.set_llm(llm)
+    llm._classify_task = __import__("unittest.mock").mock.Mock()
+    llm._classify_task.return_value = "orchestration"
     
     class DummyHugeReader:
         name = "read_huge_file"

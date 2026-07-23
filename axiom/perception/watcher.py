@@ -160,3 +160,94 @@ class ProactiveWatcher:
             self.observer.join(timeout=2.0)
         self.governor.stop()
         logger.info("Proactive OS Perception Kernel stopped.")
+
+
+class OSWatcher:
+    """Autonomous background Linux watchdog for system anomalies."""
+    
+    def __init__(self, event_bus: EventBus):
+        self.event_bus = event_bus
+        self._running = False
+        self._thread = None
+        self._cooldowns = {"memory": 0.0, "disk": 0.0, "cpu": 0.0}
+        self._cooldown_seconds = 300.0
+        self._cpu_history = []
+        self._cpu_window_seconds = 10
+
+    def start(self) -> bool:
+        """Start the autonomous OS watcher."""
+        config = get_config()
+        if not getattr(config, "proactive_kernel", False):
+            logger.info("OSWatcher is DISABLED by configuration.")
+            return False
+            
+        if self._running:
+            return True
+            
+        logger.info("Starting OSWatcher daemon...")
+        self._running = True
+        self._thread = threading.Thread(target=self._monitor_loop, daemon=True, name="OSWatcher")
+        self._thread.start()
+        return True
+
+    def stop(self):
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=2.0)
+        logger.info("OSWatcher daemon stopped.")
+
+    def _monitor_loop(self):
+        psutil.cpu_percent(interval=None)
+        
+        while self._running:
+            time.sleep(1.0)
+            now = time.time()
+            
+            # 1. Memory Check
+            mem = psutil.virtual_memory()
+            mem_percent = mem.percent
+            mem_free_percent = (mem.available / mem.total) * 100
+            
+            if (mem_percent > 85.0 or mem_free_percent < 15.0) and (now - self._cooldowns["memory"] > self._cooldown_seconds):
+                total_gb = mem.total / (1024**3)
+                used_gb = (mem.total - mem.available) / (1024**3)
+                details = f"RAM at {mem_percent:.1f}% ({used_gb:.1f}/{total_gb:.1f} GB)"
+                self._dispatch_anomaly("high_memory", details)
+                self._cooldowns["memory"] = now
+
+            # 2. Disk Check
+            try:
+                disk = psutil.disk_usage("/")
+                free_gb = disk.free / (1024**3)
+                if free_gb < 5.0 and (now - self._cooldowns["disk"] > self._cooldown_seconds):
+                    details = f"Disk space on / is critically low: {free_gb:.1f} GB remaining."
+                    self._dispatch_anomaly("low_disk", details)
+                    self._cooldowns["disk"] = now
+            except Exception as e:
+                logger.debug(f"Failed to check disk usage: {e}")
+
+            # 3. CPU Check
+            cpu = psutil.cpu_percent(interval=None)
+            self._cpu_history.append(cpu)
+            if len(self._cpu_history) > self._cpu_window_seconds:
+                self._cpu_history.pop(0)
+                
+            if len(self._cpu_history) == self._cpu_window_seconds:
+                avg_cpu = sum(self._cpu_history) / len(self._cpu_history)
+                if avg_cpu > 90.0 and (now - self._cooldowns["cpu"] > self._cooldown_seconds):
+                    details = f"CPU usage sustained at {avg_cpu:.1f}% over the last 10 seconds."
+                    self._dispatch_anomaly("high_cpu", details)
+                    self._cooldowns["cpu"] = now
+
+    def _dispatch_anomaly(self, anomaly_type: str, details: str):
+        from axiom.core.events import Event
+        logger.warning(f"OSWatcher detected anomaly [{anomaly_type}]: {details}")
+        event = Event(
+            event_type="system.anomaly",
+            source="OSWatcher",
+            data={
+                "type": anomaly_type,
+                "details": details
+            }
+        )
+        self.event_bus.publish(event)

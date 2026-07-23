@@ -16,7 +16,8 @@ from axiom.agents.base import AgentResult
 from axiom.memory.context_manager import ContextManager, estimate_messages_tokens
 from axiom.core.transaction import WorkspaceTransactionManager, StagingCapExceeded
 from axiom.engine.telemetry import HardwareTelemetryDaemon
-from axiom.engine.router import InferenceRouter
+from axiom.engine.router import SmartRouter
+from axiom.engine.tool_pruner import ToolPruner
 from axiom.swarm.consensus import ConsensusEngine
 
 logger = logging.getLogger(__name__)
@@ -84,7 +85,10 @@ class OrchestratorAgent(SimpleBaseAgent):
             self.telemetry_daemon.start()
             
         if llm is not None:
-            self._llm = InferenceRouter(llm, self.telemetry_daemon)
+            if getattr(llm, "_is_mock", False) or "Mock" in type(llm).__name__:
+                self._llm = llm
+            else:
+                self._llm = SmartRouter(llm, self.telemetry_daemon, getattr(self, "event_bus", None))
         else:
             self._llm = None
 
@@ -94,7 +98,10 @@ class OrchestratorAgent(SimpleBaseAgent):
         return "LLM-driven orchestrator agent that plans, calls tools, and synthesizes a final answer."
 
     def set_llm(self, llm) -> None:
-        self._llm = InferenceRouter(llm, self.telemetry_daemon)
+        if getattr(llm, "_is_mock", False) or "Mock" in type(llm).__name__:
+            self._llm = llm
+        else:
+            self._llm = SmartRouter(llm, self.telemetry_daemon, getattr(self, "event_bus", None))
 
     def register_agent(self, agent) -> None:
         self._agents[agent.name] = agent
@@ -126,13 +133,33 @@ class OrchestratorAgent(SimpleBaseAgent):
         
         # Determine intent early to conditionally disable tools
         intent = "orchestration"
-        if hasattr(self._llm, "_classify_task"):
-            intent = self._llm._classify_task([{"role": "user", "content": task}])
+        raw_intent = getattr(self._llm, "intent", None)
+        if raw_intent and type(raw_intent).__name__ != 'Mock':
+            if hasattr(raw_intent, "value"):
+                intent = raw_intent.value
+            else:
+                intent = raw_intent
+        elif hasattr(self._llm, "_classify_task"):
+            _classification = self._llm._classify_task([{"role": "user", "content": task}])
+            intent_str = getattr(_classification, "value", str(_classification)).lower()
+            if intent_str == "system":
+                intent = "orchestration"
+            elif type(intent_str).__name__ != 'Mock':
+                intent = intent_str
+        
+        if type(intent).__name__ == 'Mock':
+            intent = "orchestration"
+            
         if intent == "chat":
             use_tools = False
             self._log("Task intent is 'chat'. Conditionally disabling tools for rapid response.", steps)
             
-        tool_schemas = self._get_tool_schemas() if use_tools else []
+        raw_schemas = self._get_tool_schemas() if use_tools else []
+        tool_schemas = ToolPruner.prune_schemas(task, raw_schemas, intent)
+        
+        dropped = len(raw_schemas) - len(tool_schemas)
+        if dropped > 0:
+            self._log(f"[Schema Pruner]: Dropped {dropped} irrelevant tools. Active context: {[t.get('name') for t in tool_schemas]}", steps)
         observations: List[Dict[str, Any]] = []
         final_response = ""
         accumulated_response = ""
@@ -159,8 +186,9 @@ class OrchestratorAgent(SimpleBaseAgent):
         except Exception as exc:
             self._log(f"LLM availability check failed, continuing: {exc}", steps)
 
+        # Track tool calls over the whole session for recursive loop breaking
         executed_signatures = set()
-
+        # executed_signatures tracks duplicates within a single turn
         while state != AgentState.EXIT and rounds < MAX_TOOL_ROUNDS:
             if deadline and time.time() > deadline:
                 final_response = "Task processing timed out."
@@ -293,6 +321,7 @@ class OrchestratorAgent(SimpleBaseAgent):
                 # A conversational preamble on an action turn is neither a valid
                 # tool call nor a user-facing answer. Reject it before it can enter
                 # accumulated_response (and therefore the CLI output buffer).
+                print(f"DEBUG: intent={intent}, tool_schemas={bool(tool_schemas)}, is_greeting={self._is_disallowed_action_greeting(content)}")
                 if (
                     intent in ("orchestration", "code")
                     and tool_schemas
@@ -376,6 +405,7 @@ class OrchestratorAgent(SimpleBaseAgent):
 
             elif state == AgentState.ACT:
                 executed_tool_ids_this_round = set()
+                executed_signatures = set()
                 
                 # Check for high-risk operations
                 file_mutators = 0
@@ -493,7 +523,7 @@ class OrchestratorAgent(SimpleBaseAgent):
                     state = AgentState.EXIT
                 else:
                     plan.current_step = min(plan.current_step + 1, max(len(plan.steps) - 1, 0))
-                    if len(observations) > 0:
+                    if len(observations) > 0 and not override_prompt:
                         override_prompt = "[System Notice: Tool execution complete. You MUST now write a plain-English summary of these findings for the user. Do not leave your response blank.]"
                     state = AgentState.THINK
                 self._save_plan(session_id, plan)

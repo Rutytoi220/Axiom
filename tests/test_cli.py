@@ -101,7 +101,7 @@ def test_do_status_reports_system_state_without_ollama(cli, capsys, monkeypatch)
 
     captured = capsys.readouterr()
     assert "AXIOM System Status" in captured.out
-    assert "Not available (Ollama not running)" in captured.out
+    assert "LLM & Routing:" in captured.out
     assert "Tools: " in captured.out
     assert "Agents: " in captured.out
     assert "Plugins: " in captured.out

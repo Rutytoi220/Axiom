@@ -8,9 +8,10 @@ from pathlib import Path
 from typing import Optional
 from axiom.core import Engine, shutdown_bridge
 from axiom.memory import SyncMemoryStore
-from axiom.llm import OllamaClient, OllamaConfig
+from axiom.llm.universal_client import UniversalLLMClient
 from axiom.agents.orchestrator_agent import OrchestratorAgent
 from axiom.tool_registry import ToolRegistry
+from axiom.tools.mcp_hub import MCPHub
 from axiom.tools import (
     EchoTool,
     ShellTool,
@@ -50,7 +51,7 @@ class CLI(cmd.Cmd):
         if "AXIOM_MODEL" in os.environ:
             config.ollama_model = os.environ["AXIOM_MODEL"]
             
-        self.ollama = OllamaClient(OllamaConfig(model=config.ollama_model, embedding_model=config.embedding_model))
+        self.ollama = UniversalLLMClient(default_model=config.ollama_model)
         
         # Validate dynamic models
         from axiom.core.config_service import initialize_model_config
@@ -66,6 +67,7 @@ class CLI(cmd.Cmd):
         self.engine = Engine(memory=self.memory)
         
         self.tool_registry = ToolRegistry(self.engine.registry)
+        self.mcp_hub = MCPHub(self.engine.registry)
         self.orchestrator = OrchestratorAgent(self.tool_registry, self.engine.event_bus, self.memory_store, llm=self.ollama)
         self._event_log = []
         self._closed = False
@@ -166,7 +168,7 @@ class CLI(cmd.Cmd):
         """Initialize plugins."""
         plugins = [
             NXBTPlugin(),
-            AutomationPlugin()
+            AutomationPlugin(engine=self.engine)
         ]
         
         for plugin in plugins:
@@ -445,14 +447,24 @@ class CLI(cmd.Cmd):
         print(f"  Running: {self.engine.is_running()}")
         
         # LLM status
-        print(f"\nLLM (Ollama):")
-        print(f"  Available: {self.ollama.is_available()}")
-        if self.ollama.is_available():
-            models = self.ollama.list_models()
-            print(f"  Models available: {len(models)}")
-            print(f"  Current model: {self.ollama.config.model}")
-        else:
-            print("  Status: Not available (Ollama not running)")
+        print(f"\nLLM & Routing:")
+        print(f"  Router: SmartRouter (qwen3:0.6b micro-model)")
+        print(f"  Current model: {self.ollama.config.model}")
+        provider = self.ollama.config.model.split("/")[0] if "/" in self.ollama.config.model else "ollama"
+        print(f"  Provider: {provider}")
+        
+        # Vision status
+        from axiom.perception.vision_pipeline import VisionPipeline
+        vp = VisionPipeline()
+        print(f"\nVision Pipeline:")
+        print(f"  Enabled: {vp.is_available}")
+        if vp.is_available:
+            print(f"  Set-of-Mark Grid: Active")
+        
+        mcp_status = self.mcp_hub.get_status()
+        print(f"\nMCP Hub:")
+        print(f"  Connected Servers: {len(mcp_status['connected_servers'])}")
+        print(f"  Bridged Tools: {mcp_status['bridged_tools_count']}")
         
         # Memory status
         print(f"\nMemory:")
@@ -470,6 +482,69 @@ class CLI(cmd.Cmd):
         print(f"  Plugins: {len(plugins)}")
         
         print("\n" + "="*60 + "\n")
+
+    def do_model(self, arg: str) -> None:
+        """Switch active model mid-flight: /model <provider/model_name>"""
+        if not arg.strip():
+            print("Usage: /model <provider/model_name>")
+            return
+        new_model = arg.strip()
+        self.ollama.config.model = new_model
+        # Save to config.json
+        from axiom.config import get_config
+        config = get_config()
+        config.ollama_model = new_model
+        config.save()
+        print(f"[✓] Active Model set to: {new_model}")
+        
+        from axiom.core.events import Event
+        self.engine.event_bus.publish(Event(event_type="ui.model_changed", source="CLI", data={"model": new_model}))
+
+    def do_provider(self, arg: str) -> None:
+        """Switch API gateway and prompt for keys: /provider <name>"""
+        if not arg.strip():
+            print("Usage: /provider <name>")
+            return
+        provider = arg.strip().upper()
+        if f"{provider}_API_KEY" not in os.environ:
+            import getpass
+            key = getpass.getpass(f"Enter {provider}_API_KEY: ")
+            os.environ[f"{provider}_API_KEY"] = key
+        print(f"[✓] Provider {provider} is now active.")
+
+    def do_mcp(self, arg: str) -> None:
+        """Manage MCP servers: /mcp list | /mcp add <name> <command_or_url> [args...]"""
+        parts = arg.strip().split()
+        if not parts:
+            print("Usage: /mcp list | /mcp add <name> <command_or_url> [args...]")
+            return
+        cmd = parts[0].lower()
+        if cmd == "list":
+            status = self.mcp_hub.get_status()
+            print(f"\nMCP Servers ({len(status['connected_servers'])} connected):")
+            for s in status['connected_servers']:
+                if isinstance(s, dict):
+                    print(f" - {s['name']} [{s['type']}] ({s['status']})")
+                else:
+                    print(f" - {s}")
+            print(f"Total Bridged Tools: {status['bridged_tools_count']}\n")
+        elif cmd == "add":
+            if len(parts) < 3:
+                print("Usage: /mcp add <name> <command_or_url> [args...]")
+                return
+            name = parts[1]
+            command = parts[2]
+            args = parts[3:]
+            is_url = command.startswith("http://") or command.startswith("https://")
+            target_type = "URL" if is_url else "command"
+            print(f"Adding MCP server '{name}' via {target_type} '{command}'...")
+            success = self.mcp_hub.add_server(name, command, args)
+            if success:
+                print(f"[✓] MCP Server '{name}' added successfully.")
+            else:
+                print(f"[✗] Failed to add MCP server '{name}'.")
+        else:
+            print("Unknown mcp command.")
     
     def do_history(self, arg: str) -> None:
         """Show conversation history"""
@@ -911,3 +986,40 @@ def run_cli() -> None:
         cli.close()
     else:
         cli.close()
+
+if __name__ == "__main__":
+    import logging.config
+    from pathlib import Path
+
+    log_path = Path.home() / ".axiom" / "daemon.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    logging_config = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "standard": {
+                "format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+            },
+        },
+        "handlers": {
+            "file": {
+                "level": "DEBUG",
+                "class": "logging.FileHandler",
+                "filename": str(log_path),
+                "formatter": "standard",
+            },
+            "console": {
+                "level": "WARNING",
+                "class": "logging.StreamHandler",
+                "formatter": "standard",
+            },
+        },
+        "root": {
+            "handlers": ["file", "console"],
+            "level": "DEBUG",
+        },
+    }
+    logging.config.dictConfig(logging_config)
+    
+    run_cli()

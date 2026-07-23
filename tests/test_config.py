@@ -10,7 +10,7 @@ class TestAxiomConfigDefaults:
         assert config.debug is False
         assert config.log_level == "INFO"
         assert config.ollama_base_url == "http://localhost:11434"
-        assert config.ollama_model == "llama3.1:latest"
+        assert config.ollama_model == "qwen3:8b"
         assert config.db_path == "axiom.db"
         assert config.sandbox_mode is True
 
