@@ -22,6 +22,12 @@ class AudioDaemon:
 
     def _run_loops(self):
         """Runs inside the child process to prevent GIL locking."""
+        import sys
+        import os
+        
+        # Redirect stdin so this child process doesn't compete with the main REPL prompt
+        sys.stdin = open(os.devnull, 'r')
+        
         from axiom.perception.voice_out import tts_loop
         from axiom.perception.voice_in import stt_loop
         import threading

@@ -18,7 +18,10 @@ class FakeEmbeddingProvider:
 
     def embed(self, text: str, model: Optional[str] = None) -> List[float]:
         self.embed_calls.append(text)
-        return self._vectors.get(text, [])
+        vec = self._vectors.get(text, [])
+        if vec:
+            return vec + [0.0] * (768 - len(vec))
+        return []
 
 
 class ExplodingEmbeddingProvider:

@@ -1,0 +1,1 @@
+{"problem_statement": "Bug 3: fix addition", "repo_path": "tests/fixtures/swe_bugs/repo3", "test_command": "pytest"}

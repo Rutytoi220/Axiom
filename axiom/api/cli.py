@@ -21,6 +21,7 @@ from axiom.tools import (
 )
 from axiom.legacy_wrapper import create_legacy_tools
 from axiom.plugins import NXBTPlugin, AutomationPlugin
+from axiom.plugins.visual_automation import VisualAutomationPlugin
 from axiom.memory.sleep_cycle import SleepCycleDaemon
 
 logging.basicConfig(
@@ -74,14 +75,19 @@ class CLI(cmd.Cmd):
         self._subscribe_events()
         self._init_system()
         
-        # Start Sleep Cycle Daemon
-        self.sleep_daemon = SleepCycleDaemon(self.engine.event_bus, self.memory, self.ollama)
-        self.sleep_daemon.start()
+        # Start Sleep Cycle Daemon and Routine Engine only in MainProcess
+        import multiprocessing
+        if multiprocessing.current_process().name == 'MainProcess':
+            self.sleep_daemon = SleepCycleDaemon(self.engine.event_bus, self.memory, self.ollama)
+            self.sleep_daemon.start()
 
-        # Start Routine Engine
-        from axiom.core.routine import RoutineEngine
-        self.routine_engine = RoutineEngine(self)
-        self.routine_engine.start()
+            # Start Routine Engine
+            from axiom.core.routine import RoutineEngine
+            self.routine_engine = RoutineEngine(self)
+            self.routine_engine.start()
+        else:
+            self.sleep_daemon = None
+            self.routine_engine = None
     
     def _subscribe_events(self) -> None:
         """Capture events via pub/sub instead of monkey-patching the event bus."""
@@ -168,7 +174,8 @@ class CLI(cmd.Cmd):
         """Initialize plugins."""
         plugins = [
             NXBTPlugin(),
-            AutomationPlugin(engine=self.engine)
+            AutomationPlugin(engine=self.engine),
+            VisualAutomationPlugin(engine=self.engine)
         ]
         
         for plugin in plugins:
@@ -322,6 +329,7 @@ class CLI(cmd.Cmd):
         
         try:
             from axiom.evals.swe_harness import SWEBenchHarness
+            from pathlib import Path
             harness = SWEBenchHarness(self.engine)
             report = self._run_async(harness.run_suite())
             
@@ -339,6 +347,51 @@ class CLI(cmd.Cmd):
         except Exception as e:
             print(f"\nError running evaluation: {e}\n")
             logger.exception(f"Error in do_eval: {e}")
+
+    def do_benchmark(self, arg: str) -> None:
+        """Run the Autonomous SWE-Bench Benchmark Engine: benchmark run <path_to_issue_json>"""
+        if not arg.startswith("run "):
+            print("Usage: benchmark run <path_to_issue_json>")
+            return
+            
+        path = arg.replace("run ", "").strip()
+        print(f"\n[Starting SWE-Bench Evaluation Loop for {path}...]")
+        
+        try:
+            from axiom.evals.swe_runner import SWERunner
+            runner = SWERunner(self.engine)
+            problem = runner.ingest_problem(path)
+            
+            print(f"Problem: {problem.problem_statement[:50]}...")
+            
+            result = self._run_async(runner.run_evaluation(problem))
+            print("\n=== BENCHMARK TELEMETRY ===")
+            print(result)
+        except Exception as e:
+            print(f"\nBenchmark failed: {e}\n")
+
+    def do_gui(self, arg: str) -> None:
+        """Trigger a single-turn visual desktop action: gui act <instruction>"""
+        if not arg.startswith("act "):
+            print('Usage: gui act "<instruction>"')
+            return
+            
+        instruction = arg.replace("act ", "").strip().strip('"').strip("'")
+        print(f"\n[Executing GUI Action: {instruction}...]")
+        
+        try:
+            plugin = self.engine.registry.get_plugin("visual_automation")
+            if not plugin:
+                print("Error: Visual Automation Plugin is not loaded.")
+                return
+                
+            success = plugin.execute_visual_task(instruction)
+            if success:
+                print("[✓] GUI Action Completed successfully.")
+            else:
+                print("[!] GUI Action Failed.")
+        except Exception as e:
+            print(f"\nGUI action failed: {e}\n")
 
     def do_repair(self, arg: str) -> None:
         """Trigger the Autonomous Self-Healing Engine on a directory: repair <path>"""

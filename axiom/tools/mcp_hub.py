@@ -152,7 +152,11 @@ class MCPHub:
                         
                     future.set_result(True)
                 except Exception as e:
-                    logger.error(f"Failed to initialize SSE client {name}: {e}")
+                    import httpx
+                    if isinstance(e, (httpx.ConnectError, httpx.TimeoutException, asyncio.TimeoutError)):
+                        logger.debug(f"Failed to initialize SSE client {name} (Unreachable): {e}")
+                    else:
+                        logger.debug(f"Failed to initialize SSE client {name}: {e}")
                     future.set_exception(e)
             
             asyncio.run_coroutine_threadsafe(_init_client(), self._loop)
@@ -160,7 +164,11 @@ class MCPHub:
             
             logger.info(f"Connected to MCP server '{name}' via SSE.")
         except Exception as e:
-            logger.error(f"Failed to start MCP SSE server '{name}': {e}")
+            import httpx
+            if isinstance(e, (httpx.ConnectError, httpx.TimeoutException, concurrent.futures.TimeoutError)):
+                logger.warning(f"Skipping MCP SSE server '{name}' (Unreachable): {e}")
+            else:
+                logger.warning(f"Failed to start MCP SSE server '{name}': {e}")
             if name in self.servers:
                 del self.servers[name]
             if name in self._sse_clients:

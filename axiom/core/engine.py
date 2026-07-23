@@ -100,11 +100,12 @@ class Engine:
         self.recorder.start()
         
         # Start proactive watcher (respects config.proactive_kernel internally)
-        self.proactive_watcher.start()
-        self.os_watcher.start()
-        
-        # Start audio daemon
-        self.audio_daemon.start()
+        import multiprocessing
+        if multiprocessing.current_process().name == 'MainProcess':
+            self.proactive_watcher.start()
+            self.os_watcher.start()
+            # Start audio daemon
+            self.audio_daemon.start()
         
         # Log engine started event
         self.memory.log_event("engine.started", data={"started_at": self.started_at}, source="Engine")

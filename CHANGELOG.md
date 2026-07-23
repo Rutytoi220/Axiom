@@ -1,30 +1,18 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+## [1.0.0] - 2026-07-23
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [Unreleased]
 ### Added
-- GitHub issue templates and release workflows.
-- `CHANGELOG.md`, `LICENSE`, and `CONTRIBUTING.md`.
-
-## [1.0.0] - 2026-07-18
-### Added
-- Initial public release of AXIOM.
-- Event-driven orchestrator loop with local Ollama integration.
-- Unified asynchronous SQLite memory store (`aiosqlite`) with WAL mode.
-- Interactive CLI built with `cmd.Cmd`.
-- Secure `ShellTool` with user confirmation prompts.
-- Built-in file read/write tools.
-- Token-aware context management.
-
-### Fixed
-- Out of memory protection with default `llama3:8b` fallback.
-- CLI interrupts gracefully handling ghost tasks in the async bridge.
-- Packaging dependencies (`aiosqlite`, `psutil`, etc.).
+- **MCP Server Federation**: Added Server-Sent Events (SSE) transport layer for remote MCP server connections.
+- **Desktop Automation Macro Recorder**: Added visual dashboard for macro recording and live replay states over WebSocket EventBus.
+- **Autonomous SWE-Bench Benchmark Engine**: Integrated `swe_harness.py` with multi-agent consensus loop.
+- **Visual GUI Automation Loop**: Bridged Set-of-Mark vision pipeline with desktop automation engine.
+- **Type Hardening**: Comprehensive strict type annotations across the `axiom/` core library.
+- **System Hardening**: Graceful degradation under heavy load, robust Qdrant initialization lock management, and concurrent task isolation.
 
 ### Changed
-- Standardized packaging exclusively around `pyproject.toml`, removing legacy `setup.py`.
-- Restructured codebase, moving starter templates to `examples/` and verifiers to `scripts/`.
+- Refactored `axiom/perception/vision_pipeline.py` to use `mss` as a fallback on Linux if `pygetwindow` fails.
+- Fixed IO deadlocks by isolating daemon imports from the `CLI` entrypoint.
+
+### Removed
+- Unused eager imports in `axiom/__init__.py`.

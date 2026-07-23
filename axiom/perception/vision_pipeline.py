@@ -12,10 +12,14 @@ from typing import Optional
 try:
     import mss
     from PIL import Image, ImageDraw, ImageFont
-    import pygetwindow as gw
-except (ImportError, NotImplementedError) as e:
-    logging.getLogger(__name__).warning(f"VisionPipeline dependencies missing or unsupported: {e}")
+except ImportError as e:
+    logging.getLogger(__name__).warning(f"VisionPipeline core dependencies missing: {e}")
     mss = None
+
+try:
+    import pygetwindow as gw
+except (ImportError, NotImplementedError, Exception) as e:
+    logging.getLogger(__name__).debug(f"pygetwindow not available (Linux fallback enabled): {e}")
     gw = None
 
 logger = logging.getLogger(__name__)
@@ -89,16 +93,17 @@ class VisionPipeline:
         
         # Try to find the active window
         try:
-            active_win = gw.getActiveWindow()
-            if active_win is not None:
-                # bounding box: left, top, width, height
-                monitor = {
-                    "top": int(active_win.top),
-                    "left": int(active_win.left),
-                    "width": int(active_win.width),
-                    "height": int(active_win.height)
-                }
-        except Exception as e:
+            if gw is not None:
+                active_win = gw.getActiveWindow()
+                if active_win is not None:
+                    # bounding box: left, top, width, height
+                    monitor = {
+                        "top": int(active_win.top),
+                        "left": int(active_win.left),
+                        "width": int(active_win.width),
+                        "height": int(active_win.height)
+                    }
+        except (ImportError, NotImplementedError, Exception) as e:
             logger.debug(f"Failed to get active window: {e}")
 
         try:

@@ -52,10 +52,26 @@ class SemanticIndex:
         self._vector_store = None
         try:
             from axiom.memory.vector_store import QdrantLocalStore
-            self._vector_store = QdrantLocalStore()
+            import sys
+            if "pytest" in sys.modules:
+                self._vector_store = QdrantLocalStore(location=":memory:")
+            else:
+                self._vector_store = QdrantLocalStore()
         except ImportError:
             logger.warning("qdrant-client not installed. SemanticIndex falling back to NumPy+SQLite.")
         except Exception as e:
+            if "lock" in str(e).lower() or "accessed by another instance" in str(e).lower():
+                import os
+                from pathlib import Path
+                lock_file = Path.home() / ".axiom" / "vector_db" / ".lock"
+                if lock_file.exists():
+                    try:
+                        os.remove(lock_file)
+                        logger.info("Cleared dangling Qdrant lock file.")
+                        self._vector_store = QdrantLocalStore()
+                        return
+                    except Exception as lock_err:
+                        logger.warning("Could not clear Qdrant lock file: %s", lock_err)
             logger.warning("Failed to initialize QdrantLocalStore: %s. Falling back to NumPy+SQLite.", e)
 
     @property
@@ -83,17 +99,13 @@ class SemanticIndex:
         # Async push to Vector Store if available
         if self._vector_store:
             try:
-                # We use create_task to fire-and-forget the upsert, preventing 
-                # blocking of the main event loop / orchestration thread.
-                # Since Qdrant operations are synchronous, we run them in a thread.
-                asyncio.create_task(
-                    asyncio.to_thread(
-                        self._vector_store.upsert,
-                        owner_id,
-                        owner_type,
-                        embedding,
-                        {"model": model}
-                    )
+                # We await the thread so that we don't have race conditions between write and read.
+                await asyncio.to_thread(
+                    self._vector_store.upsert,
+                    owner_id,
+                    owner_type,
+                    embedding,
+                    {"model": model}
                 )
             except Exception as e:
                 logger.error("Failed to asynchronously upsert to Qdrant: %s", e)

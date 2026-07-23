@@ -48,7 +48,7 @@ dev = [
 ]
 
 [project.scripts]
-axiom = "axiom.api.cli:run_cli"
+axiom = "axiom.api.cli:main"
 
 [tool.black]
 line-length = 100
@@ -68,7 +68,7 @@ disallow_untyped_defs = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "--cov=axiom --cov-report=html"
+addopts = "--cov=axiom --cov-report=html --ignore=tests/fixtures"
 asyncio_mode = "auto"
 
 [tool.setuptools.packages.find]

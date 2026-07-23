@@ -21,12 +21,14 @@ async def memory_store(tmp_path):
         def embed(self, text, model=None):
             # Deterministic simple vectors for testing
             if "apple" in text:
-                return [1.0, 0.0, 0.0]
+                vec = [1.0, 0.0, 0.0]
             elif "banana" in text:
-                return [0.99, 0.1, 0.0] # High similarity to apple
+                vec = [0.99, 0.1, 0.0] # High similarity to apple
             elif "dog" in text:
-                return [0.0, 1.0, 0.0]
-            return [0.0, 0.0, 1.0]
+                vec = [0.0, 1.0, 0.0]
+            else:
+                vec = [0.0, 0.0, 1.0]
+            return vec + [0.0] * (768 - len(vec))
             
     store.semantic._provider = DummyProvider()
     yield store
@@ -38,8 +40,8 @@ async def test_compactor_deduplicates(memory_store):
     
     # Store two very similar memories manually to bypass any LLM calls
     # One is older, one is newer
-    vec1 = [1.0, 0.0, 0.0]
-    vec2 = [0.99, 0.1, 0.0]
+    vec1 = [1.0, 0.0, 0.0] + [0.0] * 765
+    vec2 = [0.99, 0.1, 0.0] + [0.0] * 765
     
     await memory_store.set("mem1", "apple is red", tags=[])
     await memory_store.set("mem2", "banana is yellow", tags=[])
@@ -75,8 +77,8 @@ async def test_compactor_deduplicates(memory_store):
 async def test_semantic_search_decay(memory_store):
     db = memory_store._conn()
     
-    vec1 = [1.0, 0.0, 0.0]
-    vec2 = [1.0, 0.0, 0.0]
+    vec1 = [1.0, 0.0, 0.0] + [0.0] * 765
+    vec2 = [1.0, 0.0, 0.0] + [0.0] * 765
     
     await memory_store.set("mem_new", "apple", tags=[])
     await memory_store.set("mem_old", "apple old", tags=[])
@@ -97,7 +99,7 @@ async def test_semantic_search_decay(memory_store):
     await db.execute("UPDATE memories SET created_at = ? WHERE key = 'mem_new'", (new_str,))
     await db.commit()
     
-    results = await memory_store.semantic.search(db, [1.0, 0.0, 0.0], owner_type="memory")
+    results = await memory_store.semantic.search(db, [1.0, 0.0, 0.0] + [0.0] * 765, owner_type="memory")
     
     assert len(results) == 2
     

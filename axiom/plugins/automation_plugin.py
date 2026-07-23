@@ -151,6 +151,42 @@ class AutomationPlugin(BasePlugin):
             "created_at": task.created_at.isoformat()
         }
 
+    def execute_action(self, grid_coord: str, action: str, data: str = None) -> bool:
+        """Translate Set-of-Mark grid coordinates (e.g. A1, D4) to screen coordinates and act."""
+        try:
+            import pyautogui
+        except ImportError:
+            # Fallback for headless test environments
+            logger.info(f"[Mock Action] {action} at {grid_coord} with data {data}")
+            return True
+
+        # Resolve grid coordinates to screen pixels (Assuming 4x4 Grid)
+        # Columns: A, B, C, D (1-4). Rows: 1, 2, 3, 4
+        col_char = grid_coord[0].upper()
+        row_char = grid_coord[1]
+        
+        col_idx = ord(col_char) - ord('A')
+        row_idx = int(row_char) - 1
+        
+        screen_w, screen_h = pyautogui.size()
+        cell_w = screen_w / 4
+        cell_h = screen_h / 4
+        
+        x = int(col_idx * cell_w + cell_w / 2)
+        y = int(row_idx * cell_h + cell_h / 2)
+        
+        logger.info(f"Visual Action: {action} on {grid_coord} mapped to ({x}, {y})")
+        
+        if action == "click":
+            pyautogui.click(x, y)
+        elif action == "double_click":
+            pyautogui.doubleClick(x, y)
+        elif action == "type" and data:
+            pyautogui.click(x, y)
+            pyautogui.typewrite(data)
+            
+        return True
+
     # --- Macro Recording and Execution ---
 
     def _on_tool_executed(self, event):

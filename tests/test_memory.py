@@ -686,11 +686,11 @@ class TestSemanticSearch:
             store = MemoryStore(db_path=str(Path(tmpdir) / "test.db"))
             await store.initialize()
 
-            await store.store_embedding("msg1", "message", [1.0, 0.0, 0.0], model="test")
-            await store.store_embedding("msg2", "message", [0.9, 0.1, 0.0], model="test")
-            await store.store_embedding("msg3", "message", [0.0, 0.0, 1.0], model="test")
+            await store.store_embedding("msg1", "message", [1.0, 0.0, 0.0] + [0.0]*765, model="test")
+            await store.store_embedding("msg2", "message", [0.9, 0.1, 0.0] + [0.0]*765, model="test")
+            await store.store_embedding("msg3", "message", [0.0, 0.0, 1.0] + [0.0]*765, model="test")
 
-            results = await store.search_similar([1.0, 0.0, 0.0], owner_type="message", top_k=2)
+            results = await store.search_similar([1.0, 0.0, 0.0] + [0.0]*765, owner_type="message", top_k=2)
             assert len(results) == 2
             assert results[0]["owner_id"] == "msg1"
             assert results[0]["similarity"] > results[1]["similarity"]
@@ -703,10 +703,10 @@ class TestSemanticSearch:
             store = MemoryStore(db_path=str(Path(tmpdir) / "test.db"))
             await store.initialize()
 
-            await store.store_embedding("m1", "message", [1.0, 0.0])
-            await store.store_embedding("e1", "event", [1.0, 0.0])
+            await store.store_embedding("m1", "message", [1.0, 0.0] + [0.0]*766)
+            await store.store_embedding("e1", "event", [1.0, 0.0] + [0.0]*766)
 
-            results = await store.search_similar([1.0, 0.0], owner_type="message")
+            results = await store.search_similar([1.0, 0.0] + [0.0]*766, owner_type="message")
             assert len(results) == 1
             assert results[0]["owner_type"] == "message"
 

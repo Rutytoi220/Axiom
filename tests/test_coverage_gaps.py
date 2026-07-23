@@ -404,10 +404,10 @@ class TestSemanticIndex:
                 )
                 await conn.commit()
 
-                await idx.store(conn, "doc1", "document", [1.0, 0.0, 0.0], model="test")
-                await idx.store(conn, "doc2", "document", [0.0, 1.0, 0.0], model="test")
+                await idx.store(conn, "doc1", "document", [1.0, 0.0, 0.0] + [0.0] * 765, model="test")
+                await idx.store(conn, "doc2", "document", [0.0, 1.0, 0.0] + [0.0] * 765, model="test")
 
-                results = await idx.search(conn, [0.9, 0.1, 0.0], owner_type="document", top_k=2)
+                results = await idx.search(conn, [0.9, 0.1, 0.0] + [0.0] * 765, owner_type="document", top_k=2)
                 assert len(results) == 2
                 assert results[0]["owner_id"] == "doc1"
                 assert results[0]["similarity"] > results[1]["similarity"]
@@ -430,16 +430,14 @@ class TestSemanticIndex:
                     "created_at DATETIME DEFAULT CURRENT_TIMESTAMP)"
                 )
                 await conn.execute(
-                    "INSERT INTO embeddings (owner_id, owner_type, embedding_json, model) "
-                    "VALUES ('m1', 'message', '[1,0,0]', '')"
+                    f"INSERT INTO embeddings (owner_id, owner_type, embedding_json, model) VALUES ('m1', 'message', '{[1,0,0] + [0]*765}', '')"
                 )
                 await conn.execute(
-                    "INSERT INTO embeddings (owner_id, owner_type, embedding_json, model) "
-                    "VALUES ('d1', 'document', '[1,0,0]', '')"
+                    f"INSERT INTO embeddings (owner_id, owner_type, embedding_json, model) VALUES ('d1', 'document', '{[1,0,0] + [0]*765}', '')"
                 )
                 await conn.commit()
 
-                results = await idx.search(conn, [1.0, 0.0, 0.0], owner_type="message")
+                results = await idx.search(conn, [1.0, 0.0, 0.0] + [0.0] * 765, owner_type="message")
                 assert len(results) == 1
                 assert results[0]["owner_type"] == "message"
 
@@ -462,7 +460,7 @@ class TestSemanticIndex:
                 )
                 await conn.commit()
 
-                results = await idx.search(conn, [1.0, 0.0])
+                results = await idx.search(conn, [1.0, 0.0] + [0.0] * 766)
                 assert results == []
 
         asyncio.run(run())
