@@ -19,7 +19,7 @@ class ShellAgent(BaseAgent):
     - "shell <cmd>"
     """
     
-    def __init__(self, name: str = "shell_agent", description: str = None,
+    def __init__(self, name: str = "shell_agent", description: str | None = None,
                  event_bus=None, tool_registry=None, shell_tool: Optional[ShellTool] = None):
         """
         Initialize shell agent.
@@ -54,7 +54,7 @@ class ShellAgent(BaseAgent):
             AgentResult with command output
         """
         context = context or {}
-        steps = []
+        steps: list[str] = []
         
         try:
             # Parse command from task

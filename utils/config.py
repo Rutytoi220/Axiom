@@ -7,7 +7,7 @@ import json
 import os
 from pathlib import Path
 
-_CONFIG = None
+_CONFIG: dict | None = None
 
 
 def get_config() -> dict:

@@ -29,7 +29,7 @@ class OrchestratorAgent(BaseAgent):
         (r"(?:list|ls|dir)[\s:]+(.+)", "file_agent", 1),
     ]
     
-    def __init__(self, name: str = "orchestrator", description: str = None, 
+    def __init__(self, name: str = "orchestrator", description: str | None = None, 
                  event_bus=None, tool_registry=None, agent_registry=None):
         """
         Initialize orchestrator agent.
@@ -64,8 +64,8 @@ class OrchestratorAgent(BaseAgent):
             AgentResult with synthesized output
         """
         context = context or {}
-        steps = []
-        results = {}
+        steps: List[str] = []
+        results: Dict[str, AgentResult] = {}
         memory_keys = []
         
         try:
@@ -95,7 +95,8 @@ class OrchestratorAgent(BaseAgent):
                 
                 agent_name = subtask.get("agent", "unknown")
                 subtask_desc = subtask.get("description", "unnamed")
-                results[subtask_desc] = result
+                if result:
+                    results[subtask_desc] = result
                 
                 if result and result.memory_keys_used:
                     memory_keys.extend(result.memory_keys_used)
@@ -236,7 +237,7 @@ class OrchestratorAgent(BaseAgent):
         Returns:
             Synthesized output
         """
-        synthesis = {
+        synthesis: Dict[str, Any] = {
             "subtask_results": {},
             "all_successful": True,
             "total_subtasks": len(results),

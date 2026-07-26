@@ -17,7 +17,7 @@ logger = get_logger(__name__)
 
 
 class Agent:
-    def __init__(self, model: str = None, system_prompt: str = None):
+    def __init__(self, model: str | None = None, system_prompt: str | None = None):
         cfg = get_config() or {}
         self.model = model or cfg.get('ollama', {}).get('model', 'llama2')
         # system_prompt may be provided programmatically or read from config

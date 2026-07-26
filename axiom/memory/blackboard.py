@@ -18,43 +18,83 @@ Usage::
     all_artifacts = bb.list_keys("session_1", "coder_agent")
     bb.purge_session("session_1")
 """
-
 from __future__ import annotations
-
 import logging
 import threading
 from typing import Any, Dict, List, Optional
-
 logger = logging.getLogger(__name__)
-
 
 class BlackboardNamespace:
     """A single agent's scratchpad within a session."""
 
     def __init__(self, session_id: str, agent_id: str):
+        """Auto-generated docstring.
+
+Args:
+    session_id: Argument.
+    agent_id: Argument.
+
+Returns:
+    Return value.
+"""
         self.session_id = session_id
         self.agent_id = agent_id
         self._store: Dict[str, Any] = {}
 
     @property
     def uri_prefix(self) -> str:
-        return f"blackboard://{self.session_id}/{self.agent_id}"
+        """Auto-generated docstring.
+
+
+Returns:
+    Return value.
+"""
+        return f'blackboard://{self.session_id}/{self.agent_id}'
 
     def write(self, key: str, value: Any) -> None:
-        self._store[key] = value
-        logger.debug("Blackboard WRITE %s/%s", self.uri_prefix, key)
+        """Auto-generated docstring.
 
-    def read(self, key: str, default: Any = None) -> Any:
+Args:
+    key: Argument.
+    value: Argument.
+
+Returns:
+    Return value.
+"""
+        self._store[key] = value
+        logger.debug('Blackboard WRITE %s/%s', self.uri_prefix, key)
+
+    def read(self, key: str, default: Any=None) -> Any:
+        """Auto-generated docstring.
+
+Args:
+    key: Argument.
+    default: Argument.
+
+Returns:
+    Return value.
+"""
         return self._store.get(key, default)
 
     def list_keys(self) -> List[str]:
+        """Auto-generated docstring.
+
+
+Returns:
+    Return value.
+"""
         return list(self._store.keys())
 
     def clear(self) -> None:
+        """Auto-generated docstring.
+
+
+Returns:
+    Return value.
+"""
         count = len(self._store)
         self._store.clear()
-        logger.debug("Blackboard: cleared %d entries from namespace %s", count, self.uri_prefix)
-
+        logger.debug('Blackboard: cleared %d entries from namespace %s', count, self.uri_prefix)
 
 class BlackboardStore:
     """Thread-safe, session-partitioned ephemeral key-value store.
@@ -65,13 +105,14 @@ class BlackboardStore:
     """
 
     def __init__(self):
-        # Nested: {session_id: {agent_id: BlackboardNamespace}}
+        """Auto-generated docstring.
+
+
+Returns:
+    Return value.
+"""
         self._sessions: Dict[str, Dict[str, BlackboardNamespace]] = {}
         self._lock = threading.RLock()
-
-    # ------------------------------------------------------------------
-    # Namespace helpers
-    # ------------------------------------------------------------------
 
     def _get_namespace(self, session_id: str, agent_id: str) -> BlackboardNamespace:
         """Return (or create) the namespace for (session_id, agent_id)."""
@@ -81,12 +122,8 @@ class BlackboardStore:
             if agent_id not in self._sessions[session_id]:
                 ns = BlackboardNamespace(session_id, agent_id)
                 self._sessions[session_id][agent_id] = ns
-                logger.debug("Blackboard: created namespace %s", ns.uri_prefix)
+                logger.debug('Blackboard: created namespace %s', ns.uri_prefix)
             return self._sessions[session_id][agent_id]
-
-    # ------------------------------------------------------------------
-    # Primary API
-    # ------------------------------------------------------------------
 
     def write(self, session_id: str, agent_id: str, key: str, value: Any) -> None:
         """Write an artifact to the named namespace.
@@ -99,7 +136,7 @@ class BlackboardStore:
         """
         self._get_namespace(session_id, agent_id).write(key, value)
 
-    def read(self, session_id: str, agent_id: str, key: str, default: Any = None) -> Any:
+    def read(self, session_id: str, agent_id: str, key: str, default: Any=None) -> Any:
         """Read an artifact from a namespace.
 
         Args:
@@ -153,19 +190,12 @@ class BlackboardStore:
         """
         with self._lock:
             session = self._sessions.pop(session_id, {})
-            total = sum(len(ns.list_keys()) for ns in session.values())
+            total = sum((len(ns.list_keys()) for ns in session.values()))
             for ns in session.values():
                 ns.clear()
-            logger.info(
-                "Blackboard: purged session '%s' (%d namespaces, %d artifacts freed).",
-                session_id, len(session), total
-            )
+            logger.info("Blackboard: purged session '%s' (%d namespaces, %d artifacts freed).", session_id, len(session), total)
             return total
-
-    # ------------------------------------------------------------------
-    # URI helper
-    # ------------------------------------------------------------------
 
     def uri(self, session_id: str, agent_id: str, key: str) -> str:
         """Build the canonical URI for an artifact."""
-        return f"blackboard://{session_id}/{agent_id}/{key}"
+        return f'blackboard://{session_id}/{agent_id}/{key}'

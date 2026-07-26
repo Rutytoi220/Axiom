@@ -37,7 +37,7 @@ class OllamaClient:
             config: OllamaConfig instance with connection settings
         """
         self.config = config or OllamaConfig()
-        self.capabilities = {"chat": None, "generate": None, "models": []}
+        self.capabilities: dict[str, Any] = {"chat": None, "generate": None, "models": []}
     
     def _detect_capabilities(self) -> None:
         """Probe API to detect models and supported endpoints."""
@@ -333,7 +333,7 @@ class OllamaClient:
         Returns:
             Embedding vector as list of floats
         """
-        model = self.normalize_model(model or getattr(self.config, "embedding_model", self.config.model))
+        model = self.normalize_model(str(model or getattr(self.config, "embedding_model", self.config.model)))
         
         payload = {
             "model": model,

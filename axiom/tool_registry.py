@@ -4,7 +4,7 @@
 
 - The dict-parameter family (``EchoTool``, ``ShellTool``, ``FileReadTool``,
   ``FileWriteTool``, ``SystemInfoTool``, ``FileTool``) whose ``execute``
-  methods are ``async def execute(self, params: Dict[str, Any])``.
+  methods are ``async def execute(self, params: Dict[str, Any])``.  # type: ignore[override]
 - The legacy keyword-argument family (``ShellCommandTool``, ``ReadFileTool``,
   ``WriteFileTool``, ``PythonExecTool``) whose ``execute`` methods are
   synchronous and accept explicit keyword parameters.
@@ -25,18 +25,13 @@ the Engine's registry are immediately visible through this adapter, and
 vice-versa.  When no ``core_registry`` is provided, an isolated instance
 is created for backwards compatibility.
 """
-
 from __future__ import annotations
-
 import threading
 from typing import Any, Dict, List, Optional
-
 from axiom.tools import BaseTool, ToolResult
-
 
 class ToolRegistryError(Exception):
     """Raised when a tool registry operation is invalid."""
-
 
 class ToolRegistry:
     """Thread-safe registry and invocation surface for AXIOM tools.
@@ -48,6 +43,14 @@ class ToolRegistry:
     """
 
     def __init__(self, core_registry=None) -> None:
+        """Auto-generated docstring.
+
+Args:
+    core_registry: Argument.
+
+Returns:
+    Return value.
+"""
         from axiom.core.registry import Registry as CoreRegistry
         self._core_registry = core_registry or CoreRegistry()
         self._lock = threading.RLock()
@@ -55,12 +58,10 @@ class ToolRegistry:
     def register(self, tool: BaseTool) -> None:
         """Register ``tool`` using its own ``tool_id`` as the registry key."""
         if not isinstance(tool, BaseTool):
-            raise ToolRegistryError(
-                f"Component must be an instance of BaseTool, got {type(tool).__name__}"
-            )
+            raise ToolRegistryError(f'Component must be an instance of BaseTool, got {type(tool).__name__}')
         tool_id = tool.tool_id
         if not tool_id:
-            raise ToolRegistryError("Tool must define a non-empty tool_id")
+            raise ToolRegistryError('Tool must define a non-empty tool_id')
         self.register_tool(tool_id, tool)
 
     def register_tool(self, tool_id: str, tool: BaseTool) -> None:
@@ -71,11 +72,9 @@ class ToolRegistry:
         callers such as the CLI.
         """
         if not tool_id:
-            raise ToolRegistryError("tool_id cannot be empty")
+            raise ToolRegistryError('tool_id cannot be empty')
         if not isinstance(tool, BaseTool):
-            raise ToolRegistryError(
-                f"Component must be an instance of BaseTool, got {type(tool).__name__}"
-            )
+            raise ToolRegistryError(f'Component must be an instance of BaseTool, got {type(tool).__name__}')
         with self._lock:
             if self._core_registry.has_tool(tool_id):
                 raise ToolRegistryError(f"Tool '{tool_id}' is already registered")
@@ -98,30 +97,35 @@ class ToolRegistry:
         return self._core_registry.list_tools()
 
     def __contains__(self, tool_id: str) -> bool:
+        """Auto-generated docstring.
+
+Args:
+    tool_id: Argument.
+
+Returns:
+    Return value.
+"""
         return self._core_registry.has_tool(tool_id)
 
     def __len__(self) -> int:
+        """Auto-generated docstring.
+
+
+Returns:
+    Return value.
+"""
         return len(self._core_registry.list_tools())
 
     def get_schemas(self) -> List[Dict[str, Any]]:
         """Return OpenAI-compatible function-calling schemas for every tool."""
         schemas: List[Dict[str, Any]] = []
         for tool_id, tool in self.list_tools().items():
-            if not hasattr(tool, "description") or not hasattr(tool, "schema"):
+            if not hasattr(tool, 'description') or not hasattr(tool, 'schema'):
                 continue
-            schemas.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": tool_id,
-                        "description": tool.description or tool_id,
-                        "parameters": tool.schema or {"type": "object", "properties": {}},
-                    },
-                }
-            )
+            schemas.append({'type': 'function', 'function': {'name': tool_id, 'description': tool.description or tool_id, 'parameters': tool.schema or {'type': 'object', 'properties': {}}}})
         return schemas
 
-    def execute(self, tool_id: str, **arguments: Any) -> ToolResult:
+    def execute(self, tool_id: str, **arguments: Any) -> ToolResult:  # type: ignore[override]
         """Execute a registered tool safely, regardless of its calling convention.
 
         Delegates to :meth:`BaseTool.__call__`, which adapts to both the
@@ -132,10 +136,10 @@ class ToolRegistry:
         """
         tool = self.get_tool(tool_id)
         if tool is None:
-            return ToolResult(success=False, error=f"Tool not found: {tool_id}")
+            return ToolResult(success=False, error=f'Tool not found: {tool_id}')
         try:
             return tool(**arguments)
-        except Exception as exc:  # Defensive: tools must not crash the registry.
+        except Exception as exc:
             return ToolResult(success=False, error=str(exc))
 
     async def execute_async(self, tool_id: str, **arguments: Any) -> ToolResult:
@@ -147,25 +151,17 @@ class ToolRegistry:
         import asyncio
         import inspect
         from axiom.tools import ToolResult
-
         tool = self.get_tool(tool_id)
         if tool is None:
-            return ToolResult(success=False, error=f"Tool not found: {tool_id}")
-
+            return ToolResult(success=False, error=f'Tool not found: {tool_id}')
         try:
-            # Handle parameter adaptation similar to BaseTool.__call__
             sig = inspect.signature(tool.execute)
             params_list = list(sig.parameters.values())
-            single_dict_param = len(params_list) == 1 and (
-                params_list[0].annotation == Dict[str, Any]
-                or params_list[0].name in ("params", "arguments", "kwargs")
-            )
-            
+            single_dict_param = len(params_list) == 1 and (params_list[0].annotation == Dict[str, Any] or params_list[0].name in ('params', 'arguments', 'kwargs'))
             if single_dict_param:
                 result = tool.execute(arguments)
             else:
                 result = tool.execute(**arguments)
-
             if asyncio.iscoroutine(result):
                 return await result
             return result

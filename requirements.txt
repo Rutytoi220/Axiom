@@ -5,3 +5,5 @@ pillow==10.1.0
 pyautogui==0.9.53
 numpy==1.24.3
 psutil
+rich>=13.0.0
+prompt_toolkit>=3.0.0

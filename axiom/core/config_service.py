@@ -29,7 +29,7 @@ def initialize_model_config(config: AxiomConfig, ollama: OllamaClient) -> None:
             print(f"\n[!] WARNING: Configured reasoning model '{config.ollama_model}' is not installed.")
             
             # Prefer llama3.1:latest, then qwen3:8b, else the first available
-            candidates = ["llama3.1:latest", "qwen3:8b", "qwen3-coder:latest"]
+            candidates = ["llama3.1:latest", "qwen3:8b", "qwen3-vl:2b"]
             swapped = False
             for candidate in candidates:
                 if candidate in installed_models:

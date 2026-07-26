@@ -21,13 +21,13 @@ logger = get_logger(__name__)
 class VisionAgent:
     """Desktop control agent that uses vision + LLM to interact with desktop."""
     
-    def __init__(self, model: str = None):
+    def __init__(self, model: str | None = None):
         cfg = get_config() or {}
         self.model = model or cfg.get('ollama', {}).get('model', 'llama2')
         self.max_steps = 10  # Prevent infinite loops
         self.step_delay = 0.5  # Delay between actions
         
-    def run_vision_task(self, task: str, max_steps: int = None) -> Dict:
+    def run_vision_task(self, task: str, max_steps: int | None = None) -> Dict:
         """Execute a task by analyzing the screen and issuing commands.
         
         Args:

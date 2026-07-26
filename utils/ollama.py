@@ -25,7 +25,7 @@ from .logger import get_logger
 logger = get_logger(__name__)
 
 
-def _get_base_url(provided_url: str = None) -> str:
+def _get_base_url(provided_url: str | None = None) -> str:
     cfg = get_config() or {}
     url = provided_url or cfg.get('ollama', {}).get('url', 'http://127.0.0.1:11434')
     return url
@@ -38,7 +38,7 @@ def _parse_host_port(url: str) -> Tuple[str, int]:
     return host, int(port)
 
 
-def is_server_up(url: str = None, timeout: float = 1.0) -> bool:
+def is_server_up(url: str | None = None, timeout: float = 1.0) -> bool:
     url = _get_base_url(url)
     host, port = _parse_host_port(url)
     try:
@@ -52,7 +52,7 @@ def which_ollama() -> str | None:
     return shutil.which('ollama')
 
 
-def start_ollama(ollama_path: str = None, wait: float = 3.0) -> Tuple[bool, str]:
+def start_ollama(ollama_path: str | None = None, wait: float = 3.0) -> Tuple[bool, str]:
     """Attempt to start the Ollama daemon using the provided binary path or
     the one found on PATH. Returns (ok, message).
     """

@@ -58,6 +58,8 @@ class PersistentMemory:
 
     def save_action(self, action: str, params: str, ok: bool, message: str) -> None:
         """Persist a single action record."""
+        if self._conn is None:
+            return
         try:
             self._conn.execute(
                 'INSERT INTO actions (action, params, ok, message, timestamp) '
@@ -74,6 +76,8 @@ class PersistentMemory:
 
     def get_recent(self, n: int = 20) -> List[Dict]:
         """Return the *n* most recent actions (newest first)."""
+        if self._conn is None:
+            return []
         try:
             cur = self._conn.execute(
                 'SELECT action, params, ok, message, timestamp '
@@ -86,6 +90,8 @@ class PersistentMemory:
 
     def get_actions_since(self, since_ts: float) -> List[Dict]:
         """Return all actions since a Unix timestamp (oldest first)."""
+        if self._conn is None:
+            return []
         try:
             cur = self._conn.execute(
                 'SELECT action, params, ok, message, timestamp '
@@ -99,6 +105,8 @@ class PersistentMemory:
 
     def get_action_count(self, action: str, since_ts: float) -> int:
         """Count occurrences of *action* since a timestamp."""
+        if self._conn is None:
+            return 0
         try:
             cur = self._conn.execute(
                 'SELECT COUNT(*) FROM actions WHERE action = ? AND timestamp >= ?',

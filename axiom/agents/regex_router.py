@@ -33,7 +33,7 @@ class RegexRouter(BaseAgent):
         (r"(?:list|ls|dir)[\s:]+(.+)", "file_agent", 1),
     ]
     
-    def __init__(self, name: str = "orchestrator", description: str = None, 
+    def __init__(self, name: str = "orchestrator", description: str | None = None, 
                  event_bus=None, tool_registry=None, agent_registry=None):
         """
         Initialize orchestrator agent.
@@ -68,9 +68,9 @@ class RegexRouter(BaseAgent):
             AgentResult with synthesized output
         """
         context = context or {}
-        steps = []
-        results = {}
-        memory_keys = []
+        steps: list[str] = []
+        results: Dict[str, Optional[AgentResult]] = {}
+        memory_keys: list[str] = []
         
         try:
             # Emit task started event
@@ -230,7 +230,7 @@ class RegexRouter(BaseAgent):
             self._add_step(steps, f"Error in {agent_name}: {str(e)}")
             return None
     
-    def _synthesize_results(self, results: Dict[str, AgentResult]) -> Dict[str, Any]:
+    def _synthesize_results(self, results: Dict[str, Optional[AgentResult]]) -> Dict[str, Any]:
         """
         Synthesize results from multiple agents.
         
@@ -240,7 +240,7 @@ class RegexRouter(BaseAgent):
         Returns:
             Synthesized output
         """
-        synthesis = {
+        synthesis: Dict[str, Any] = {
             "subtask_results": {},
             "all_successful": True,
             "total_subtasks": len(results),

@@ -418,6 +418,7 @@ class TestSemanticIndex:
         import aiosqlite
 
         idx = SemanticIndex()
+        idx._vector_store = None
 
         async def run():
             async with aiosqlite.connect(":memory:") as conn:

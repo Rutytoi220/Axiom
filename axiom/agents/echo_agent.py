@@ -19,7 +19,7 @@ class EchoAgent(SimpleBaseAgent):
         """
         self._execution_count += 1
         self._emit("agent.started", {"agent": self.name, "task": task})
-        steps = []
+        steps: list[str] = []
         self._log(f"Received task: {task}", steps)
 
         try:

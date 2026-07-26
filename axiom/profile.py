@@ -8,22 +8,16 @@ Defines the user's calibrated preferences as two orthogonal layers:
 Profiles are persisted as JSON files at ``~/.axiom/profile.json`` and loaded
 on every AXIOM startup to configure the agent's operating parameters.
 """
-
 from __future__ import annotations
-
 import json
 import logging
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
 logger = logging.getLogger(__name__)
-
-# Default profile location
-DEFAULT_PROFILE_DIR = Path.home() / ".axiom"
-DEFAULT_PROFILE_PATH = DEFAULT_PROFILE_DIR / "profile.json"
-
+DEFAULT_PROFILE_DIR = Path.home() / '.axiom'
+DEFAULT_PROFILE_PATH = DEFAULT_PROFILE_DIR / 'profile.json'
 
 @dataclass
 class PersonalityConfig:
@@ -31,18 +25,22 @@ class PersonalityConfig:
 
     All values are floats in [0.0, 1.0].
     """
-
-    vocabulary: float = 0.5     # 0 = casual,  1 = academic
-    verbosity: float = 0.5      # 0 = brief,   1 = detailed
-    formality: float = 0.5      # 0 = relaxed,  1 = professional
-    humor: float = 0.5          # 0 = dry,      1 = playful
-    empathy: float = 0.5        # 0 = direct,   1 = supportive
+    vocabulary: float = 0.5
+    verbosity: float = 0.5
+    formality: float = 0.5
+    humor: float = 0.5
+    empathy: float = 0.5
 
     def __post_init__(self) -> None:
-        for fld in ("vocabulary", "verbosity", "formality", "humor", "empathy"):
+        """Auto-generated docstring.
+
+
+Returns:
+    Return value.
+"""
+        for fld in ('vocabulary', 'verbosity', 'formality', 'humor', 'empathy'):
             val = getattr(self, fld)
             setattr(self, fld, max(0.0, min(1.0, float(val))))
-
 
 @dataclass
 class BehaviorConfig:
@@ -50,35 +48,35 @@ class BehaviorConfig:
 
     All values are floats in [0.0, 1.0].
     """
-
-    autonomy: float = 0.5       # 0 = always confirm, 1 = take initiative
-    risk_tolerance: float = 0.5  # 0 = careful,       1 = bold
-    planning: float = 0.5       # 0 = reactive,      1 = structured
-    initiative: float = 0.5     # 0 = passive,       1 = proactive
+    autonomy: float = 0.5
+    risk_tolerance: float = 0.5
+    planning: float = 0.5
+    initiative: float = 0.5
 
     def __post_init__(self) -> None:
-        for fld in ("autonomy", "risk_tolerance", "planning", "initiative"):
+        """Auto-generated docstring.
+
+
+Returns:
+    Return value.
+"""
+        for fld in ('autonomy', 'risk_tolerance', 'planning', 'initiative'):
             val = getattr(self, fld)
             setattr(self, fld, max(0.0, min(1.0, float(val))))
-
 
 @dataclass
 class GuardrailConfig:
     """Hard safety guardrails — always enforced regardless of behavior sliders."""
-
     destructive_confirmation: bool = True
     scope_enforcement: bool = True
-    confidence_threshold: float = 0.40
-
+    confidence_threshold: float = 0.4
 
 @dataclass
 class EvolutionConfig:
     """Adaptive drift tracking configuration."""
-
     enabled: bool = True
-    last_calibrated: str = ""
+    last_calibrated: str = ''
     drift_log: List[Dict[str, Any]] = field(default_factory=list)
-
 
 @dataclass
 class AxiomProfile:
@@ -86,10 +84,9 @@ class AxiomProfile:
 
     This is the single source of truth for how AXIOM communicates and acts.
     """
-
     genesis_version: int = 3
-    created: str = ""
-    theme: str = "minimal"
+    created: str = ''
+    theme: str = 'minimal'
     personality: PersonalityConfig = field(default_factory=PersonalityConfig)
     behavior: BehaviorConfig = field(default_factory=BehaviorConfig)
     guardrails: GuardrailConfig = field(default_factory=GuardrailConfig)
@@ -100,70 +97,54 @@ class AxiomProfile:
         """Serialize to a plain dictionary."""
         return asdict(self)
 
-    def to_json(self, indent: int = 2) -> str:
+    def to_json(self, indent: int=2) -> str:
         """Serialize to a JSON string."""
         return json.dumps(self.to_dict(), indent=indent)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "AxiomProfile":
+    def from_dict(cls, data: Dict[str, Any]) -> 'AxiomProfile':
         """Deserialize from a plain dictionary."""
-        personality = PersonalityConfig(**data.get("personality", {}))
-        behavior = BehaviorConfig(**data.get("behavior", {}))
-        guardrails_data = data.get("guardrails", {})
+        personality = PersonalityConfig(**data.get('personality', {}))
+        behavior = BehaviorConfig(**data.get('behavior', {}))
+        guardrails_data = data.get('guardrails', {})
         guardrails = GuardrailConfig(**guardrails_data) if guardrails_data else GuardrailConfig()
-        evolution_data = data.get("evolution", {})
+        evolution_data = data.get('evolution', {})
         evolution = EvolutionConfig(**evolution_data) if evolution_data else EvolutionConfig()
-
-        return cls(
-            genesis_version=data.get("genesis_version", 3),
-            created=data.get("created", ""),
-            theme=data.get("theme", "minimal"),
-            personality=personality,
-            behavior=behavior,
-            guardrails=guardrails,
-            evolution=evolution,
-            workspace_paths=data.get("workspace_paths", []),
-        )
+        return cls(genesis_version=data.get('genesis_version', 3), created=data.get('created', ''), theme=data.get('theme', 'minimal'), personality=personality, behavior=behavior, guardrails=guardrails, evolution=evolution, workspace_paths=data.get('workspace_paths', []))
 
     @classmethod
-    def from_json(cls, json_str: str) -> "AxiomProfile":
+    def from_json(cls, json_str: str) -> 'AxiomProfile':
         """Deserialize from a JSON string."""
         return cls.from_dict(json.loads(json_str))
 
-
-def profile_exists(path: Optional[Path] = None) -> bool:
+def profile_exists(path: Optional[Path]=None) -> bool:
     """Check whether a saved profile exists on disk."""
     p = path or DEFAULT_PROFILE_PATH
     return p.is_file()
 
-
-def load_profile(path: Optional[Path] = None) -> AxiomProfile:
+def load_profile(path: Optional[Path]=None) -> AxiomProfile:
     """Load a profile from disk, or return defaults if none exists."""
     p = path or DEFAULT_PROFILE_PATH
     if not p.is_file():
-        logger.info("No profile found at %s — returning defaults", p)
+        logger.info('No profile found at %s — returning defaults', p)
         return AxiomProfile()
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-        logger.info("Loaded profile from %s", p)
+        data = json.loads(p.read_text(encoding='utf-8'))
+        logger.info('Loaded profile from %s', p)
         return AxiomProfile.from_dict(data)
     except (json.JSONDecodeError, TypeError, KeyError) as exc:
-        logger.warning("Corrupt profile at %s (%s) — returning defaults", p, exc)
+        logger.warning('Corrupt profile at %s (%s) — returning defaults', p, exc)
         return AxiomProfile()
 
-
-def save_profile(profile: AxiomProfile, path: Optional[Path] = None) -> Path:
+def save_profile(profile: AxiomProfile, path: Optional[Path]=None) -> Path:
     """Persist a profile to disk, creating directories as needed."""
     p = path or DEFAULT_PROFILE_PATH
     p.parent.mkdir(parents=True, exist_ok=True)
-
-    # Set timestamps if not already set
     now = datetime.now(timezone.utc).isoformat()
     if not profile.created:
         profile.created = now
     if not profile.evolution.last_calibrated:
         profile.evolution.last_calibrated = now
-
-    p.write_text(profile.to_json(), encoding="utf-8")
-    logger.info("Saved profile to %s", p)
+    p.write_text(profile.to_json(), encoding='utf-8')
+    logger.info('Saved profile to %s', p)
     return p

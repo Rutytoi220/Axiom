@@ -35,7 +35,7 @@ class ActionRegistry:
         self.actions[action_name] = handler
         logger.debug(f"Registered action: {action_name}")
     
-    def execute(self, action_name: str, params: str) -> Tuple[bool, str]:
+    def execute(self, action_name: str, params: str) -> Tuple[Optional[bool], Optional[str]]:
         """Execute an action.
         
         Args:

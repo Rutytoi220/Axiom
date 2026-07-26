@@ -18,6 +18,19 @@ class Engine:
     """Main AXIOM orchestration engine."""
     
     def __init__(self, bus=None, registry=None, memory=None):
+        """Auto-generated docstring.
+
+        Args:
+            bus: Argument description.
+            registry: Argument description.
+            memory: Argument description.
+
+        Returns:
+            Return description.
+
+        Raises:
+            Exception: If something fails.
+        """
         self.event_bus = bus or EventBus()
         self.registry = registry or Registry()
         self.context: Optional[ExecutionContext] = None
