@@ -37,6 +37,10 @@ from PySide6.QtWidgets import (
 from axiom.config import get_config, AuthMode
 from axiom.gui.widgets.chat_bubble import MessageBubble, ToolPill
 from axiom.gui.widgets.swarm_pill import SwarmPill
+from axiom.gui.widgets.settings_dialog import SettingsDialog
+from axiom.gui.widgets.scheduler_dialog import SchedulerDialog
+from axiom.services.scheduler_service import BackgroundSchedulerService
+from axiom.services.sys_watchdog import SystemHealthWatchdog
 
 if TYPE_CHECKING:
     from axiom.gui.bridge import AxiomBridge
@@ -81,6 +85,10 @@ class MainWindow(QMainWindow):
         self._streaming_bubble: MessageBubble | None = None
         self._streaming_text: str = ""
         self._active_swarm_pill: SwarmPill | None = None
+        
+        # Initialize background services
+        self._scheduler_service = BackgroundSchedulerService(submit_task_callback=self._submit_task_from_service)
+        self._sys_watchdog = SystemHealthWatchdog(submit_task_callback=self._submit_task_from_service)
 
         self.setWindowTitle("AXIOM Desktop v3.0")
         self.setMinimumSize(900, 640)
@@ -97,10 +105,16 @@ class MainWindow(QMainWindow):
         # Initial Welcome Message
         self._add_bubble("assistant", "⚡ AXIOM Desktop v3.0 Online — Select a mode above or type a prompt below to begin.")
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._scheduler_service.start()
+        self._sys_watchdog.start()
+
     def closeEvent(self, event) -> None:
-        """Override window close to hide to system tray instead of exiting."""
-        event.ignore()
-        self.hide()
+        """Handle window close."""
+        self._scheduler_service.stop()
+        self._sys_watchdog.stop()
+        super().closeEvent(event)
 
     # ------------------------------------------------------------------
     # UI construction
@@ -162,6 +176,14 @@ class MainWindow(QMainWindow):
         self._expert_btn.clicked.connect(self._toggle_expert_dock)
         tb.addWidget(self._expert_btn)
 
+        tb.addSeparator()
+
+        # ---- Automation Button ----
+        self._automation_btn = QPushButton("⏱️ Automation")
+        self._automation_btn.setObjectName("automationBtn")
+        self._automation_btn.clicked.connect(self._open_scheduler_dialog)
+        tb.addWidget(self._automation_btn)
+        
         tb.addSeparator()
 
         # ---- Settings Button ----
@@ -368,6 +390,18 @@ class MainWindow(QMainWindow):
         ctx["result"]["granted"] = (msg.clickedButton() == allow_btn)
         ctx["event"].set()
 
+    def _submit_task_from_service(self, prompt: str) -> None:
+        """Called by background services to submit a task."""
+        # Must be thread-safe. QTimer.singleShot executes in the main thread.
+        QTimer.singleShot(0, lambda: self._on_submit_background_task(prompt))
+
+    def _on_submit_background_task(self, prompt: str) -> None:
+        self._add_bubble("user", f"[SYSTEM/BACKGROUND] {prompt}")
+        self._streaming_text = ""
+        self._streaming_bubble = self._add_bubble("assistant", "")
+        self._active_swarm_pill = None
+        self._bridge.submit_task(prompt)
+
     @Slot()
     def _on_send(self) -> None:
         text = self._input.toPlainText().strip()
@@ -571,3 +605,8 @@ class MainWindow(QMainWindow):
         self._model_label.setText(f"Model: {model}")
         self._status_model.setText(model)
         self._tele_model.setText(f"Model: {model}")
+
+    @Slot()
+    def _open_scheduler_dialog(self) -> None:
+        dlg = SchedulerDialog(self._scheduler_service, self)
+        dlg.exec()
