@@ -3,19 +3,21 @@ import json
 import logging
 import os
 from typing import Optional, Callable
+import time
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from axiom.gui.notifications import DesktopNotifier
+from axiom.core.events import EventBus
 
 logger = logging.getLogger(__name__)
 
 class BackgroundSchedulerService:
     """Manages recurring cron/interval workflows."""
 
-    def __init__(self, submit_task_callback: Optional[Callable[[str], None]] = None):
+    def __init__(self, event_bus: EventBus):
         self.scheduler = BackgroundScheduler()
-        self.submit_task = submit_task_callback
+        self._bus = event_bus
         self.config_file = os.path.expanduser("~/.config/axiom/scheduled_jobs.json")
         self._job_schedules = {}
         
@@ -40,8 +42,9 @@ class BackgroundSchedulerService:
             body="Task started...",
             icon="document-open-recent"
         )
-        if self.submit_task:
-            self.submit_task(prompt)
+        if self._bus:
+            now = time.time()
+            self._bus.publish_sync("scheduled.job", data={"job_id": name, "prompt": prompt, "timestamp": now})
 
     def _save_jobs(self):
         """Save jobs to JSON."""

@@ -3,6 +3,7 @@ import time
 import logging
 import threading
 import psutil
+import os
 from typing import Optional, Callable
 
 from axiom.gui.notifications import DesktopNotifier
@@ -69,19 +70,21 @@ class SystemHealthWatchdog:
 
         # Disk /
         try:
-            root_disk = psutil.disk_usage('/')
-            root_free_gb = root_disk.free / (1024**3)
-            if root_free_gb < self.disk_gb_threshold:
-                alerts.append(f"Root disk '/' has only {root_free_gb:.1f}GB free")
+            if not os.path.exists('/run/ostree-booted'):
+                root_disk = psutil.disk_usage('/')
+                root_free_gb = root_disk.free / (1024**3)
+                if root_free_gb < self.disk_gb_threshold:
+                    alerts.append(f"Root disk '/' has only {root_free_gb:.1f}GB free")
         except Exception:
             pass
             
-        # Disk /var/home (common for OSTree systems)
+        # Disk /var/home or /home
         try:
-            home_disk = psutil.disk_usage('/var/home')
+            home_path = '/var/home' if os.path.exists('/var/home') else '/home'
+            home_disk = psutil.disk_usage(home_path)
             home_free_gb = home_disk.free / (1024**3)
             if home_free_gb < self.disk_gb_threshold:
-                alerts.append(f"Home disk '/var/home' has only {home_free_gb:.1f}GB free")
+                alerts.append(f"Home disk '{home_path}' has only {home_free_gb:.1f}GB free")
         except Exception:
             pass
 

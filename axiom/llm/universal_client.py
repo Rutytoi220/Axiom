@@ -2,6 +2,8 @@ import logging
 import json
 from typing import Dict, Any, List, Optional
 import litellm
+from axiom.engine.inference_scheduler import get_scheduler
+
 logger = logging.getLogger(__name__)
 litellm.suppress_debug_info = True
 
@@ -58,15 +60,31 @@ Returns:
                     msg['content'] = new_content
                     break
 
-        try:
-            return litellm.completion(model=model, messages=messages, **kwargs)
-        except (litellm.exceptions.RateLimitError, litellm.exceptions.APIConnectionError) as e:
-            if model != self.fallback_model:
-                logger.warning(f'Provider error for {model}: {e}. Falling back to {self.fallback_model}')
-                if self.fallback_model.startswith('ollama/'):
-                    kwargs['api_base'] = 'http://localhost:11434'
-                return litellm.completion(model=self.fallback_model, messages=messages, **kwargs)
-            raise e
+        priority = kwargs.pop('priority', 0)  # Default priority is 0 (Critical/Real-time)
+        scheduler = get_scheduler()
+
+        def _do_completion():
+            try:
+                return litellm.completion(model=model, messages=messages, **kwargs)
+            except (litellm.exceptions.RateLimitError, litellm.exceptions.APIConnectionError) as e:
+                if model != self.fallback_model:
+                    logger.warning(f'Provider error for {model}: {e}. Falling back to {self.fallback_model}')
+                    if self.fallback_model.startswith('ollama/'):
+                        kwargs['api_base'] = 'http://localhost:11434'
+                    return litellm.completion(model=self.fallback_model, messages=messages, **kwargs)
+                raise e
+
+        def _streaming_generator():
+            with scheduler.priority_lock(priority):
+                response = _do_completion()
+                for chunk in response:
+                    yield chunk
+
+        if kwargs.get('stream'):
+            return _streaming_generator()
+        else:
+            with scheduler.priority_lock(priority):
+                return _do_completion()
 
     def chat(self, messages: List[Dict[str, Any]], **kwargs) -> str:
         """Execute a standard chat completion."""

@@ -17,6 +17,9 @@ class SwarmSupervisor:
     def __init__(self, llm_client=None, event_bus=None):
         self.llm = llm_client
         self.event_bus = event_bus
+        if self.event_bus:
+            self.event_bus.subscribe("scheduled.job", self._on_scheduled_job)
+            
         self.system_prompt = (
             "You are the Swarm Supervisor for AXIOM. You analyze user prompts to determine if they require "
             "multiple parallel operations, complex multi-step reasoning, or diverse tool usage. "
@@ -84,3 +87,18 @@ class SwarmSupervisor:
         except Exception as e:
             logger.error(f"Synthesis failed: {e}")
             return "\n\n".join(f"**{agent}**:\n{res}" for agent, res in results.items())
+
+    def _on_scheduled_job(self, event) -> None:
+        """Handles scheduled job events decoupled from the GUI."""
+        prompt = event.data.get("prompt")
+        if not prompt:
+            return
+            
+        logger.info(f"Supervisor intercepted scheduled job: {prompt}")
+        
+        # In a full implementation, we'd spawn agents based on `analyze_task`.
+        # Here we emit back a trigger so the agentic loop processes it, OR process it directly.
+        # Given this is a background agent swarm, emitting an orchestrator.trigger 
+        # routes it cleanly to the orchestrator just like user input!
+        if self.event_bus:
+            self.event_bus.publish_sync("orchestrator.trigger", data={"prompt": prompt, "source": "scheduler"})

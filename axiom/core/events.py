@@ -10,6 +10,7 @@ from datetime import datetime
 from fnmatch import fnmatch
 import logging
 import uuid
+import time
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -19,12 +20,14 @@ class Event:
     source: str
     timestamp: datetime = field(default_factory=datetime.now)
     event_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    correlation_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    ttl: int = 5
     data: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert event to dictionary."""
-        return {'event_type': self.event_type, 'source': self.source, 'timestamp': self.timestamp.isoformat(), 'event_id': self.event_id, 'data': self.data, 'metadata': self.metadata}
+        return {'event_type': self.event_type, 'source': self.source, 'timestamp': self.timestamp.isoformat(), 'event_id': self.event_id, 'correlation_id': self.correlation_id, 'ttl': self.ttl, 'data': self.data, 'metadata': self.metadata}
 
 class EventBus:
     """Central event pub/sub system.
@@ -47,6 +50,8 @@ Returns:
         self._max_history: int = 1000
         self._published_events: Set[str] = set()
         self._in_meta_event: bool = False
+        self._debounce_cache: Dict[str, float] = {}
+        self._debounce_ttl: float = 2.0
 
     def subscribe(self, event_type: str, handler: Callable) -> None:
         """Subscribe to an event type or pattern."""
@@ -71,6 +76,21 @@ Returns:
         ``*.error``, ``*``) are both evaluated.  A ``bus.published``
         meta-event is emitted after the primary handlers complete.
         """
+        if event.ttl <= 0:
+            logger.warning(f"[EventBus] Dropped packet {event.event_type} to prevent Event Storm loop (ttl <= 0).")
+            return
+            
+        # Debouncing
+        event_hash = f"{event.event_type}:{event.source}:{hash(str(event.data))}"
+        now = time.time()
+        last_seen = self._debounce_cache.get(event_hash, 0)
+        
+        if now - last_seen < self._debounce_ttl:
+            logger.debug(f"[EventBus] Debounced duplicate event: {event.event_type}")
+            return
+            
+        self._debounce_cache[event_hash] = now
+        
         self._event_history.append(event)
         if len(self._event_history) > self._max_history:
             self._event_history.pop(0)

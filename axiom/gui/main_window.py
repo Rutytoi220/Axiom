@@ -87,7 +87,7 @@ class MainWindow(QMainWindow):
         self._active_swarm_pill: SwarmPill | None = None
         
         # Initialize background services
-        self._scheduler_service = BackgroundSchedulerService(submit_task_callback=self._submit_task_from_service)
+        self._scheduler_service = BackgroundSchedulerService(event_bus=self._bridge._event_bus)
         self._sys_watchdog = SystemHealthWatchdog(submit_task_callback=self._submit_task_from_service)
 
         self.setWindowTitle("AXIOM Desktop v3.0")
