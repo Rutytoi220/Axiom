@@ -226,8 +226,16 @@ def run_gui() -> None:
 
     server.newConnection.connect(_on_ipc_connection)
 
+    # --- Watchdog Service ---
+    from axiom.services.watchdog_service import DirectoryWatchdog
+    watchdog = DirectoryWatchdog()
+    watchdog.start(loop)
+
     with loop:
-        loop.run_forever()
+        try:
+            loop.run_forever()
+        finally:
+            watchdog.stop()
 
 
 def main() -> None:

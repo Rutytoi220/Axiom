@@ -227,6 +227,24 @@ Returns:
             self._persist_step(session_id, 'state', {'state': state.value, 'plan': asdict(plan), 'round': rounds})
             if state == AgentState.THINK:
                 self._log(f'THINK round {rounds}: {plan.current()}', steps)
+
+                # [RAG INTERCEPT] - Inject semantic memory context on first round
+                if rounds == 1:
+                    try:
+                        from axiom.memory.vector_store import VectorMemoryEngine
+                        mem_engine = VectorMemoryEngine(llm_client=self._llm)
+                        rag_results = mem_engine.query_memory_sync(task, top_k=3)
+                        
+                        valid_chunks = [r['payload'].get('text') for r in rag_results if r['score'] > 0.75 and 'text' in r['payload']]
+                        if valid_chunks:
+                            rag_context = "[Long-Term Semantic Memory / Relevant Context]:\n" + "\n".join([f"- {c}" for c in valid_chunks])
+                            if override_prompt:
+                                override_prompt = rag_context + "\n\n" + override_prompt
+                            else:
+                                override_prompt = rag_context
+                    except Exception as e:
+                        logger.debug(f"RAG Intercept failed: {e}")
+
                 messages = self._build_messages(task, plan, observations, session_id, override_prompt, intent=intent)
                 override_prompt = None
                 time_left = max(1.0, deadline - time.time()) if deadline else 60.0

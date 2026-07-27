@@ -1,6 +1,7 @@
 """AXIOM Configuration module."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
+from pathlib import Path
 
 from enum import Enum
 
@@ -53,6 +54,8 @@ Returns:
     theme_mode: str = 'dark'  # 'system', 'dark', 'light'
     auto_ollama_start: bool = True
     model_selection_mode: str = 'auto'  # 'auto', 'manual'
+    auto_index_watchdog: bool = False
+    monitored_paths: list[str] = field(default_factory=lambda: [str(Path.home() / 'Documents')])
 
     @classmethod
     def from_dict(cls, config_dict: dict) -> 'AxiomConfig':
@@ -88,7 +91,9 @@ Returns:
             'monitor_clipboard': self.monitor_clipboard,
             'theme_mode': self.theme_mode,
             'auto_ollama_start': self.auto_ollama_start,
-            'model_selection_mode': self.model_selection_mode
+            'model_selection_mode': self.model_selection_mode,
+            'auto_index_watchdog': self.auto_index_watchdog,
+            'monitored_paths': self.monitored_paths
         }
 
     def save(self) -> None:

@@ -156,3 +156,234 @@ Returns:
         except Exception as e:
             logger.error(f'Failed to count Qdrant collection: {e}')
             return 0
+
+
+class ChromaDBStore:
+    """Local, embedded Chroma vector database store."""
+    COLLECTION_NAME = 'axiom_semantic_memory'
+
+    def __init__(self, location: Optional[str] = None):
+        try:
+            import chromadb
+            from chromadb.config import Settings
+        except ImportError:
+            raise ImportError("chromadb is not installed. Run `pip install chromadb`.")
+            
+        if location == ":memory:":
+            self.client = chromadb.Client()
+            logger.info("ChromaDBStore initialized in memory.")
+        else:
+            db_dir = Path(location) if location else Path.home() / ".local" / "share" / "axiom" / "chromadb"
+            db_dir.mkdir(parents=True, exist_ok=True)
+            self.client = chromadb.PersistentClient(path=str(db_dir))
+            logger.info(f"ChromaDBStore initialized at {db_dir}")
+            
+        self.collection = self.client.get_or_create_collection(
+            name=self.COLLECTION_NAME,
+            metadata={"hnsw:space": "cosine"}
+        )
+
+    def upsert(self, owner_id: str, owner_type: str, embedding: List[float], payload: Optional[Dict[str, Any]] = None) -> None:
+        if not embedding:
+            return
+            
+        full_payload = payload or {}
+        full_payload["owner_id"] = owner_id
+        full_payload["owner_type"] = owner_type
+        
+        # Chroma requires string values in metadata
+        for k, v in full_payload.items():
+            if not isinstance(v, (str, int, float, bool)):
+                full_payload[k] = str(v)
+                
+        # Use hashlib for deterministic ID creation to avoid duplicate insertions
+        import hashlib
+        m = hashlib.md5()
+        m.update(f"{owner_type}:{owner_id}".encode("utf-8"))
+        point_id = str(uuid.UUID(m.hexdigest()))
+
+        try:
+            self.collection.upsert(
+                ids=[point_id],
+                embeddings=[embedding],
+                metadatas=[full_payload],
+                documents=[full_payload.get("text", "")]
+            )
+        except Exception as e:
+            logger.error(f"Failed to upsert to Chroma: {e}")
+
+    def search(self, query_embedding: List[float], owner_type: Optional[str] = None, top_k: int = 5) -> List[Dict[str, Any]]:
+        if not query_embedding:
+            return []
+            
+        where = {"owner_type": owner_type} if owner_type else None
+        
+        try:
+            results = self.collection.query(
+                query_embeddings=[query_embedding],
+                n_results=top_k,
+                where=where,
+                include=["metadatas", "distances"]
+            )
+            
+            formatted_results = []
+            if results["ids"] and len(results["ids"]) > 0:
+                for idx, point_id in enumerate(results["ids"][0]):
+                    metadata = results["metadatas"][0][idx] if results["metadatas"] else {}
+                    distance = results["distances"][0][idx] if results["distances"] else 0.0
+                    
+                    # Chroma distances for cosine are (1 - cosine_similarity), so score can be transformed back or left as is
+                    score = 1.0 - distance
+                    
+                    formatted_results.append({
+                        "id": metadata.get("owner_id", point_id),
+                        "owner_id": metadata.get("owner_id", point_id),
+                        "owner_type": metadata.get("owner_type", ""),
+                        "score": score,
+                        "payload": metadata
+                    })
+            return formatted_results
+        except Exception as e:
+            logger.error(f"Failed to query Chroma: {e}")
+            return []
+
+    def delete(self, owner_id: str) -> None:
+        try:
+            self.collection.delete(where={"owner_id": owner_id})
+        except Exception as e:
+            logger.error(f"Failed to delete from Chroma: {e}")
+
+    def count(self) -> int:
+        try:
+            return self.collection.count()
+        except Exception as e:
+            logger.error(f"Failed to count Chroma collection: {e}")
+            return 0
+
+
+class VectorMemoryEngine:
+    """Async engine for indexing and querying semantic long-term memory."""
+    
+    def __init__(self, llm_client=None, store: Optional[BaseVectorStore] = None):
+        if store is None:
+            db_path = str(Path.home() / ".local" / "share" / "axiom" / "memory.db")
+            store = ChromaDBStore(location=db_path)
+            
+        self.store = store
+        self.llm = llm_client
+        if self.llm is None:
+            from axiom.llm.universal_client import UniversalLLMClient
+            from axiom.config import get_config
+            self.llm = UniversalLLMClient(get_config())
+            
+        self.embedding_model = 'ollama/nomic-embed-text'
+        self._ensure_embedding_model()
+        
+    def _ensure_embedding_model(self):
+        """Check if embedding model exists; if not, pull it via API."""
+        try:
+            models = self.llm.list_models()
+            if self.embedding_model not in models:
+                logger.warning(f"Embedding model {self.embedding_model} not found. Attempting to pull...")
+                import urllib.request
+                import json
+                req = urllib.request.Request(
+                    'http://localhost:11434/api/pull', 
+                    data=json.dumps({"name": "nomic-embed-text"}).encode('utf-8'),
+                    headers={'Content-Type': 'application/json'},
+                    method='POST'
+                )
+                urllib.request.urlopen(req, timeout=30)
+                logger.info("Successfully pulled nomic-embed-text")
+        except Exception as e:
+            logger.warning(f"Failed to verify or pull embedding model: {e}")
+
+    def _chunk_text(self, text: str, chunk_size: int = 512, overlap: int = 50) -> List[str]:
+        """Simple word-based chunker."""
+        words = text.split()
+        chunks = []
+        for i in range(0, len(words), chunk_size - overlap):
+            chunk = " ".join(words[i:i + chunk_size])
+            if chunk:
+                chunks.append(chunk)
+        return chunks
+
+    async def add_document(self, doc_id: str, text: str, metadata: dict = None) -> None:
+        """Chunk a document and add it to the vector store."""
+        import asyncio
+        metadata = metadata or {}
+        chunks = self._chunk_text(text)
+        
+        loop = asyncio.get_event_loop()
+        
+        for i, chunk in enumerate(chunks):
+            # Run embedding blocking call in executor
+            try:
+                embedding = await loop.run_in_executor(
+                    None, 
+                    self.llm.embed, 
+                    chunk, 
+                    self.embedding_model
+                )
+                if not embedding:
+                    continue
+                    
+                chunk_meta = metadata.copy()
+                chunk_meta.update({
+                    "chunk_index": i,
+                    "total_chunks": len(chunks),
+                    "text": chunk
+                })
+                
+                chunk_id = f"{doc_id}_chunk_{i}"
+                await loop.run_in_executor(
+                    None,
+                    self.store.upsert,
+                    chunk_id,
+                    "document_chunk",
+                    embedding,
+                    chunk_meta
+                )
+            except Exception as e:
+                logger.error(f"Error adding document chunk {i} of {doc_id}: {e}")
+
+    async def query_memory(self, query_text: str, top_k: int = 4) -> List[dict]:
+        """Query the vector store for semantic matches."""
+        import asyncio
+        loop = asyncio.get_event_loop()
+        
+        try:
+            embedding = await loop.run_in_executor(
+                None,
+                self.llm.embed,
+                query_text,
+                self.embedding_model
+            )
+            if not embedding:
+                return []
+                
+            results = await loop.run_in_executor(
+                None,
+                self.store.search,
+                embedding,
+                "document_chunk",
+                top_k
+            )
+            return results
+        except Exception as e:
+            logger.error(f"Error querying memory: {e}")
+            return []
+
+    def query_memory_sync(self, query_text: str, top_k: int = 4) -> List[dict]:
+        """Query the vector store synchronously."""
+        try:
+            embedding = self.llm.embed(query_text, self.embedding_model)
+            if not embedding:
+                return []
+            return self.store.search(embedding, "document_chunk", top_k)
+        except Exception as e:
+            logger.error(f"Error querying memory sync: {e}")
+            return []
+
+    def count(self) -> int:
+        return self.store.count()

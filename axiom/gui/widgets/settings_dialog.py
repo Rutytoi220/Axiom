@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
-    QComboBox, QCheckBox, QPushButton, QFormLayout, QWidget
+    QComboBox, QCheckBox, QPushButton, QFormLayout, QWidget, QLineEdit
 )
 from PySide6.QtCore import Qt, Signal
 import logging
@@ -53,6 +53,17 @@ class SettingsDialog(QDialog):
         self._model_combo.currentIndexChanged.connect(self._save_settings)
         form.addRow(QLabel("Target Model:"), self._model_combo)
         
+        # 5. Auto-Indexing Watchdog
+        self._watchdog_cb = QCheckBox("Enable Auto-Indexing Watchdog")
+        self._watchdog_cb.toggled.connect(self._save_settings)
+        form.addRow(QLabel("Storage & Memory:"), self._watchdog_cb)
+        
+        # 6. Monitored Paths
+        self._paths_input = QLineEdit()
+        self._paths_input.setPlaceholderText("~/Documents, ~/Projects")
+        self._paths_input.editingFinished.connect(self._save_settings)
+        form.addRow(QLabel("Monitored Folders:"), self._paths_input)
+        
         layout.addLayout(form)
         
         layout.addStretch()
@@ -85,6 +96,10 @@ class SettingsDialog(QDialog):
                 if idx >= 0:
                     self._model_combo.setCurrentIndex(idx)
                     
+        # Watchdog settings
+        self._watchdog_cb.setChecked(self.config.auto_index_watchdog)
+        self._paths_input.setText(", ".join(self.config.monitored_paths))
+        
         self._on_routing_changed()
 
     def _on_routing_changed(self):
@@ -98,6 +113,12 @@ class SettingsDialog(QDialog):
         
         self.config.auto_ollama_start = self._auto_start_cb.isChecked()
         self.config.model_selection_mode = self._routing_combo.currentData()
+        self.config.auto_index_watchdog = self._watchdog_cb.isChecked()
+        
+        paths_str = self._paths_input.text()
+        paths_list = [p.strip() for p in paths_str.split(",") if p.strip()]
+        if paths_list:
+            self.config.monitored_paths = paths_list
         
         if self._model_combo.isEnabled() and self._model_combo.currentText():
             self.config.ollama_model = self._model_combo.currentText()

@@ -300,9 +300,28 @@ class MainWindow(QMainWindow):
         sb = QStatusBar(self)
         self.setStatusBar(sb)
         self._status_mode = QLabel()
+        self._status_memory = QLabel("🧠 Memory: Active (0 Chunks)")
         self._status_model = QLabel()
         sb.addWidget(self._status_mode)
+        sb.addWidget(self._status_memory)
         sb.addPermanentWidget(self._status_model)
+        
+        # Memory polling timer
+        from PySide6.QtCore import QTimer
+        self._memory_timer = QTimer(self)
+        self._memory_timer.timeout.connect(self._update_memory_count)
+        self._memory_timer.start(5000)
+
+    def _update_memory_count(self) -> None:
+        try:
+            # We instantiate it or use it to just query count.
+            # Using count() is relatively cheap
+            from axiom.memory.vector_store import VectorMemoryEngine
+            engine = VectorMemoryEngine()
+            c = engine.count()
+            self._status_memory.setText(f"🧠 Memory: Active ({c} Chunks)")
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Bridge signal wiring
