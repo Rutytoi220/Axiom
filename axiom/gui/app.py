@@ -171,27 +171,9 @@ def run_gui() -> None:
     # --- AXIOM core wiring ---
     from axiom.gui.bridge import AxiomBridge
     from axiom.gui.main_window import MainWindow
-    from axiom.core.events import EventBus
     from axiom.config import get_config
 
     bridge = AxiomBridge()
-
-    # Attempt to wire up the real OrchestratorAgent if available
-    try:
-        from axiom.api.cli import CLI
-        cli_instance = CLI()
-        event_bus = cli_instance.engine.event_bus
-        orchestrator = cli_instance.orchestrator
-        bridge.set_orchestrator(orchestrator)
-        logger.info("OrchestratorAgent attached to GUI bridge.")
-    except Exception as exc:
-        import traceback
-        traceback.print_exc()
-        logger.warning("Could not initialise OrchestratorAgent: %s — running in demo mode.", exc)
-        from axiom.core.events import EventBus
-        event_bus = EventBus()
-
-    bridge.set_event_bus(event_bus)
 
     window = MainWindow(bridge=bridge)
 
@@ -226,16 +208,14 @@ def run_gui() -> None:
 
     server.newConnection.connect(_on_ipc_connection)
 
-    # --- Watchdog Service ---
-    from axiom.services.watchdog_service import DirectoryWatchdog
-    watchdog = DirectoryWatchdog()
-    watchdog.start(loop)
+    # Start IPC Client Connection
+    bridge.initialize_client()
 
     with loop:
         try:
             loop.run_forever()
-        finally:
-            watchdog.stop()
+        except KeyboardInterrupt:
+            pass
 
 
 def main() -> None:

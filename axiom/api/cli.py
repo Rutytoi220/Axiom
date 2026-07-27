@@ -628,25 +628,15 @@ Returns:
         if cmd == 'start':
             print('Starting AXIOM Daemon...')
             try:
-                from axiom.core.ipc_server import AxiomDaemon
+                from axiom.server.daemon import AxiomDaemonServer
                 import asyncio
 
                 async def run_daemon():
-                    """Auto-generated docstring.
-
-
-Returns:
-    Return value.
-"""
-                    daemon = AxiomDaemon(self)
-                    await daemon.start()
-                    print(f'Daemon running. Token: {daemon.token}')
+                    daemon = AxiomDaemonServer()
                     try:
-                        await asyncio.Event().wait()
+                        await daemon.run()
                     except asyncio.CancelledError:
                         pass
-                    finally:
-                        await daemon.stop()
                 asyncio.run(run_daemon())
             except KeyboardInterrupt:
                 print('\nDaemon stopped by user.')
@@ -708,7 +698,7 @@ Returns:
             print('Usage: service [install|start|stop|restart|status]')
             return
         cmd = args[0].lower()
-        from axiom.core.service_mgr import SystemdServiceManager
+        from axiom.server.systemd import SystemdServiceManager
         mgr = SystemdServiceManager()
         if not mgr.is_supported():
             print('Error: Systemd user services are not supported on this OS/environment.')

@@ -12,12 +12,6 @@ class SystemdServiceManager:
     SERVICE_NAME = 'axiom.service'
 
     def __init__(self):
-        """Auto-generated docstring.
-
-
-Returns:
-    Return value.
-"""
         self.config_dir = Path.home() / '.config' / 'systemd' / 'user'
         self.service_path = self.config_dir / self.SERVICE_NAME
         self.axiom_dir = Path.home() / '.axiom'
@@ -36,13 +30,27 @@ Returns:
         exe = shutil.which('axiom')
         if exe:
             return exe
-        return os.path.abspath(sys.argv[0])
+        return sys.executable
 
     def generate_service_file(self) -> str:
         """Generate the systemd unit file content."""
         exe_path = self._get_axiom_executable()
         work_dir = str(self.axiom_dir)
-        return f"""[Unit]\nDescription=AXIOM Local AI Orchestrator Daemon\nAfter=network.target\n\n[Service]\nType=simple\nExecStart={exe_path} daemon start\nWorkingDirectory={work_dir}\nRestart=on-failure\nRestartSec=5s\nEnvironment="PATH={os.environ.get('PATH', '/usr/bin')}"\n\n[Install]\nWantedBy=default.target\n"""
+        return f"""[Unit]
+Description=AXIOM Local-First AI Operating System Daemon
+After=network.target graphical-session.target
+
+[Service]
+Type=simple
+ExecStart={exe_path} -m axiom.server.daemon
+WorkingDirectory={work_dir}
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
+"""
 
     def install(self) -> bool:
         """Install and enable the systemd service."""

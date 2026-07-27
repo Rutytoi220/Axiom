@@ -1,0 +1,79 @@
+import asyncio
+import json
+import logging
+import websockets
+from typing import Callable, Optional
+
+logger = logging.getLogger(__name__)
+
+class AxiomDaemonClient:
+    def __init__(self, uri="ws://127.0.0.1:9410"):
+        self.uri = uri
+        self.ws = None
+        self.on_event: Optional[Callable[[dict], None]] = None
+        self.on_connect: Optional[Callable[[], None]] = None
+        self.on_disconnect: Optional[Callable[[], None]] = None
+        self._listen_task = None
+        self._connected = False
+
+    async def connect(self):
+        try:
+            self.ws = await websockets.connect(self.uri)
+            self._connected = True
+            logger.info(f"Connected to daemon at {self.uri}")
+            if self.on_connect:
+                self.on_connect()
+            self._listen_task = asyncio.create_task(self._listen())
+            return True
+        except Exception as e:
+            logger.error(f"Failed to connect to daemon: {e}")
+            self._connected = False
+            if self.on_disconnect:
+                self.on_disconnect()
+            return False
+
+    async def disconnect(self):
+        self._connected = False
+        if self.ws:
+            await self.ws.close()
+            self.ws = None
+        if self._listen_task:
+            self._listen_task.cancel()
+            self._listen_task = None
+        if self.on_disconnect:
+            self.on_disconnect()
+
+    @property
+    def is_connected(self):
+        return self._connected
+
+    async def _listen(self):
+        try:
+            async for message in self.ws:
+                try:
+                    data = json.loads(message)
+                    if data.get("type") == "event":
+                        if self.on_event:
+                            self.on_event(data)
+                except json.JSONDecodeError:
+                    logger.warning("Received invalid JSON from daemon")
+        except websockets.exceptions.ConnectionClosed:
+            logger.warning("Daemon connection closed")
+        finally:
+            await self.disconnect()
+
+    async def submit_task(self, prompt: str):
+        if not self.ws or not self._connected:
+            logger.error("Cannot submit task, not connected to daemon.")
+            return False
+            
+        try:
+            payload = {
+                "action": "submit_task",
+                "prompt": prompt
+            }
+            await self.ws.send(json.dumps(payload))
+            return True
+        except Exception as e:
+            logger.error(f"Failed to submit task: {e}")
+            return False

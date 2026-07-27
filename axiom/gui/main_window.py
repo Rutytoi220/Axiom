@@ -86,9 +86,7 @@ class MainWindow(QMainWindow):
         self._streaming_text: str = ""
         self._active_swarm_pill: SwarmPill | None = None
         
-        # Initialize background services
-        self._scheduler_service = BackgroundSchedulerService(event_bus=self._bridge._event_bus)
-        self._sys_watchdog = SystemHealthWatchdog(submit_task_callback=self._submit_task_from_service)
+        # Background services now run in the headless daemon
 
         self.setWindowTitle("AXIOM Desktop v3.0")
         self.setMinimumSize(900, 640)
@@ -198,6 +196,13 @@ class MainWindow(QMainWindow):
         self._model_label = QLabel("Model: —")
         self._model_label.setObjectName("modelLabel")
         tb.addWidget(self._model_label)
+        
+        tb.addSeparator()
+
+        # ---- Daemon Status Monitor ----
+        self._daemon_status_label = QLabel("🔌 Daemon: Disconnected")
+        self._daemon_status_label.setStyleSheet("font-weight: 600; font-size: 13px; color: #f87171;")
+        tb.addWidget(self._daemon_status_label)
         
         tb.addSeparator()
 
@@ -352,6 +357,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _connect_bridge(self) -> None:
+        """Connect bridge signals to UI slots."""
         self._bridge.token_received.connect(self._on_token)
         self._bridge.tool_status_changed.connect(self._on_tool_status)
         self._bridge.telemetry_updated.connect(self._on_telemetry)
@@ -359,10 +365,22 @@ class MainWindow(QMainWindow):
         self._bridge.error_occurred.connect(self._on_error)
         self._bridge.request_gui_auth.connect(self._on_request_gui_auth)
         
-        # Swarm
+        # Swarm signals
         self._bridge.swarm_agent_started.connect(self._on_swarm_started)
         self._bridge.swarm_agent_token.connect(self._on_swarm_token)
         self._bridge.swarm_agent_completed.connect(self._on_swarm_completed)
+
+        # Daemon Connection
+        self._bridge.connection_status_changed.connect(self._on_daemon_connection_changed)
+
+    @Slot(bool)
+    def _on_daemon_connection_changed(self, connected: bool) -> None:
+        if connected:
+            self._daemon_status_label.setText("⚡ Daemon: Connected")
+            self._daemon_status_label.setStyleSheet("font-weight: 600; font-size: 13px; color: #10b981;")
+        else:
+            self._daemon_status_label.setText("🔌 Daemon: Disconnected")
+            self._daemon_status_label.setStyleSheet("font-weight: 600; font-size: 13px; color: #f87171;")
 
     # ------------------------------------------------------------------
     # Qt Slots
