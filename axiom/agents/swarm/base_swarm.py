@@ -37,8 +37,20 @@ Returns:
         self.consensus = ConsensusEngine(event_bus) if event_bus else None
         self.blackboard = blackboard
         self.session_id = session_id or 'default_session'
+        self.system_prompt = ""
+        self._memory = []
         if self.event_bus:
             self.event_bus.subscribe(self.topic, self._handle_task_event)
+
+    def _emit_telemetry(self, event_type: str, payload: Dict[str, Any]) -> None:
+        """Helper to emit standard swarm telemetry."""
+        if self.event_bus:
+            full_payload = {'agent_name': self.name, 'session_id': self.session_id}
+            full_payload.update(payload)
+            self.event_bus.publish(event_type, full_payload)
+
+    def set_system_prompt(self, prompt: str) -> None:
+        self.system_prompt = prompt
 
     def _write_to_blackboard(self, key: str, value: Any) -> None:
         """Write an intermediate artifact to the Blackboard scratchpad.
@@ -107,5 +119,64 @@ Returns:
             return error
 
     async def run(self, task: str, context: Optional[Dict[str, Any]]=None) -> AgentResult:
-        """Default run implementation to be overridden by subclasses."""
-        return AgentResult(success=True, output=f'Executed task: {task}')
+        """Run the sub-agent loop."""
+        self._emit_telemetry('swarm.agent.started', {'assigned_task': task})
+        try:
+            # Prepare context
+            messages = []
+            if self.system_prompt:
+                messages.append({'role': 'system', 'content': self.system_prompt})
+            if context:
+                messages.append({'role': 'system', 'content': f"[Shared Context]: {context}"})
+            messages.append({'role': 'user', 'content': task})
+            
+            # Simple run loop for subagents
+            from axiom.engine.tool_pruner import ToolPruner
+            all_schemas = [tool.schema for tool in self.tool_registry.list_tools().values()] if self.tool_registry else []
+            
+            response = await self._call_llm_async(messages, all_schemas)
+            self._emit_telemetry('swarm.agent.completed', {'result_summary': response})
+            return AgentResult(success=True, output=response)
+        except Exception as e:
+            logger.error(f"[{self.name}] Error running task: {e}")
+            self._emit_telemetry('swarm.agent.completed', {'result_summary': f"Error: {e}"})
+            return AgentResult(success=False, error=str(e))
+            
+    async def _call_llm_async(self, messages: list, tool_schemas: list) -> str:
+        """Execute a simple LLM call that simulates streaming tokens via telemetry."""
+        # Note: Since the real self.llm_client.generate is likely sync, we wrap or mock it
+        import asyncio
+        loop = asyncio.get_event_loop()
+        try:
+            # We will use the universal LLM client
+            def do_generate():
+                return self.llm_client.generate(messages, tools=tool_schemas)
+            
+            response_msg = await loop.run_in_executor(None, do_generate)
+            content = response_msg.get('content', '')
+            
+            # Emit fake token stream for UI flair since real streaming might not be enabled
+            if content:
+                words = content.split(" ")
+                for i in range(0, len(words), 3):
+                    chunk = " ".join(words[i:i+3]) + " "
+                    self._emit_telemetry('swarm.agent.token', {'chunk': chunk})
+                    await asyncio.sleep(0.01)
+                    
+            # Handle tool calls if any
+            tool_calls = response_msg.get('tool_calls', [])
+            if tool_calls:
+                for tc in tool_calls:
+                    name = tc['function']['name']
+                    args = tc['function']['arguments']
+                    self._emit_telemetry('swarm.agent.token', {'chunk': f"\n[Executing {name}...]\n"})
+                    res = await self._execute_tool_safely(name, args)
+                    messages.append(response_msg)
+                    messages.append({'role': 'tool', 'name': name, 'content': str(res)})
+                
+                # Recurse
+                return await self._call_llm_async(messages, tool_schemas)
+
+            return content
+        except Exception as e:
+            return f"Agent Error: {e}"

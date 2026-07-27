@@ -1,7 +1,7 @@
 """CoderAgent for the Swarm. Specialized in file editing and syntax."""
 import logging
 from typing import Any, Dict, Optional
-from axiom.agents.swarm.base_subagent import BaseSubagent
+from axiom.agents.swarm.base_swarm import BaseSubagent
 from axiom.agents.base import AgentResult
 logger = logging.getLogger(__name__)
 

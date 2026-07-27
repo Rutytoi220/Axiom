@@ -44,6 +44,11 @@ class AxiomBridge(QObject):
     response_finished: Signal = Signal(str)
     error_occurred: Signal = Signal(str)
     request_gui_auth: Signal = Signal(str, str, dict)
+    
+    # Swarm Signals
+    swarm_agent_started: Signal = Signal(str, str)
+    swarm_agent_token: Signal = Signal(str, str)
+    swarm_agent_completed: Signal = Signal(str, str)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -131,6 +136,17 @@ class AxiomBridge(QObject):
         self._event_bus.subscribe("tool.*", self._on_tool_event)
         self._event_bus.subscribe("telemetry.*", self._on_telemetry_event)
         self._event_bus.subscribe("orchestrator.*", self._on_orchestrator_event)
+        self._event_bus.subscribe("swarm.*", self._on_swarm_event)
+
+    def _on_swarm_event(self, event: Any) -> None:
+        """Relay swarm telemetry to the Qt thread."""
+        agent = event.data.get("agent_name", "Unknown")
+        if event.event_type == "swarm.agent.started":
+            self.swarm_agent_started.emit(agent, str(event.data.get("assigned_task")))
+        elif event.event_type == "swarm.agent.token":
+            self.swarm_agent_token.emit(agent, str(event.data.get("chunk")))
+        elif event.event_type == "swarm.agent.completed":
+            self.swarm_agent_completed.emit(agent, str(event.data.get("result_summary")))
 
     def _on_llm_token(self, event: Any) -> None:
         """Relay LLM streaming tokens to the Qt thread."""

@@ -205,6 +205,52 @@ Returns:
         override_prompt = None
         force_text_response = False
         txn = WorkspaceTransactionManager(bus=self._bus if hasattr(self, '_bus') else getattr(self, 'bus', None), verbose=True)
+        
+        # --- SWARM SUPERVISOR INTERCEPT ---
+        try:
+            from axiom.agents.swarm.supervisor import SwarmSupervisor
+            from axiom.agents.swarm.dispatcher import SwarmDispatcher
+            
+            supervisor = SwarmSupervisor(llm_client=self._llm, event_bus=getattr(self, '_bus', None) or getattr(self, 'bus', None))
+            swarm_tasks = supervisor.analyze_task(task)
+            
+            if swarm_tasks:
+                self._log(f"[SwarmSupervisor] Delegating {len(swarm_tasks)} tasks to sub-agents...", steps)
+                
+                dispatcher = SwarmDispatcher(
+                    event_bus=getattr(self, '_bus', None) or getattr(self, 'bus', None),
+                    tool_registry=self.registry,
+                    llm_client=self._llm,
+                    session_id=session_id
+                )
+                
+                import asyncio
+                # Run the dispatcher in the current loop, or a new loop if none exists
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    
+                if loop.is_running():
+                    import concurrent.futures
+                    # A bit risky blocking an event loop, but we do what we must
+                    future = asyncio.run_coroutine_threadsafe(dispatcher.dispatch(swarm_tasks), loop)
+                    swarm_results = future.result()
+                else:
+                    swarm_results = loop.run_until_complete(dispatcher.dispatch(swarm_tasks))
+                
+                final_response = supervisor.synthesize_results(task, swarm_results)
+                
+                self._persist_step(session_id, 'assistant', {'response': final_response})
+                self._emit('orchestrator.task.completed', {'task': task, 'success': True, 'rounds': 1, 'session_id': session_id})
+                return AgentResult(True, output={'response': final_response, 'tool_results': [], 'rounds': 1, 'session_id': session_id, 'plan': asdict(plan)}, steps_taken=steps)
+                
+        except Exception as e:
+            logger.error(f"Swarm intercept failed: {e}")
+            self._log(f"[SwarmSupervisor] Fallback to single-agent due to error: {e}", steps)
+        # --- END SWARM SUPERVISOR ---
+        
         txn.begin()
         self._persist_step(session_id, 'user', {'task': task})
         self._log(f'Session {session_id}: starting state machine', steps)

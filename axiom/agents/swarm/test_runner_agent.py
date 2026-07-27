@@ -1,7 +1,7 @@
 """TestRunnerAgent for the Swarm. Specialized in test execution and voting."""
 import logging
 from typing import Any, Dict, Optional
-from axiom.agents.swarm.base_subagent import BaseSubagent
+from axiom.agents.swarm.base_swarm import BaseSubagent
 from axiom.agents.base import AgentResult
 from axiom.core.events import Event
 logger = logging.getLogger(__name__)

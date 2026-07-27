@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 
 from axiom.config import get_config, AuthMode
 from axiom.gui.widgets.chat_bubble import MessageBubble, ToolPill
+from axiom.gui.widgets.swarm_pill import SwarmPill
 
 if TYPE_CHECKING:
     from axiom.gui.bridge import AxiomBridge
@@ -79,6 +80,7 @@ class MainWindow(QMainWindow):
         self._bridge = bridge
         self._streaming_bubble: MessageBubble | None = None
         self._streaming_text: str = ""
+        self._active_swarm_pill: SwarmPill | None = None
 
         self.setWindowTitle("AXIOM Desktop v3.0")
         self.setMinimumSize(900, 640)
@@ -334,6 +336,11 @@ class MainWindow(QMainWindow):
         self._bridge.response_finished.connect(self._on_response_finished)
         self._bridge.error_occurred.connect(self._on_error)
         self._bridge.request_gui_auth.connect(self._on_request_gui_auth)
+        
+        # Swarm
+        self._bridge.swarm_agent_started.connect(self._on_swarm_started)
+        self._bridge.swarm_agent_token.connect(self._on_swarm_token)
+        self._bridge.swarm_agent_completed.connect(self._on_swarm_completed)
 
     # ------------------------------------------------------------------
     # Qt Slots
@@ -371,6 +378,7 @@ class MainWindow(QMainWindow):
         # Start a new streaming assistant bubble
         self._streaming_text = ""
         self._streaming_bubble = self._add_bubble("assistant", "")
+        self._active_swarm_pill = None
         self._bridge.submit_task(text)
 
     @Slot(str)
@@ -387,6 +395,26 @@ class MainWindow(QMainWindow):
         if self._dock.isVisible():
             self._expert_log.append(f"[TOOL] {tool_id}: {status}")
         self._scroll_to_bottom()
+
+    @Slot(str, str)
+    def _on_swarm_started(self, agent_name: str, task: str) -> None:
+        if not self._active_swarm_pill:
+            self._active_swarm_pill = SwarmPill()
+            self._chat_layout.insertWidget(self._chat_layout.count() - 1, self._active_swarm_pill)
+        self._active_swarm_pill.add_agent_task(agent_name, task)
+        self._scroll_to_bottom()
+        
+    @Slot(str, str)
+    def _on_swarm_token(self, agent_name: str, chunk: str) -> None:
+        if self._active_swarm_pill:
+            self._active_swarm_pill.update_agent_status(agent_name, chunk)
+            self._scroll_to_bottom()
+            
+    @Slot(str, str)
+    def _on_swarm_completed(self, agent_name: str, result: str) -> None:
+        if self._active_swarm_pill:
+            self._active_swarm_pill.complete_agent(agent_name, result)
+            self._scroll_to_bottom()
 
     @Slot(dict)
     def _on_telemetry(self, data: dict) -> None:
