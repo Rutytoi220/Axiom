@@ -21,29 +21,9 @@ class ToolPruner:
 
     @staticmethod
     def prune_schemas(user_prompt: str, raw_schemas: List[Dict[str, Any]], intent: str) -> List[Dict[str, Any]]:
-        """Filters schemas based on the intent and semantic clustering of the user prompt."""
+        """Filters schemas based on the intent."""
         if intent == "chat":
             return []
-
-        prompt_lower = user_prompt.lower()
-        active_tools = set()
-        matched_cluster = False
-
-        for cluster, config in ToolPruner.CLUSTER_MAPPINGS.items():
-            pattern = re.compile(r'\b(' + '|'.join(config["keywords"]) + r')\b')
-            if pattern.search(prompt_lower):
-                matched_cluster = True
-                active_tools.update(config["tools"])
-
-        if not matched_cluster:
-            # Fallback: if no specific cluster matches, we return all schemas to be safe.
-            return raw_schemas
-
-        # Prune the raw schemas to only include those in the active_tools set
-        pruned_schemas = [schema for schema in raw_schemas if schema.get("name") in active_tools]
-        
-        # If pruning somehow removed everything but we had a non-chat intent, fallback to raw_schemas
-        if not pruned_schemas:
-            return raw_schemas
-
-        return pruned_schemas
+            
+        # Return all schemas directly, shifting full reasoning burden to the LLM
+        return raw_schemas

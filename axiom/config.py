@@ -48,6 +48,11 @@ Returns:
     event_history_limit: int = 1000
     sandbox_mode: bool = True
     allow_system_tools: bool = True
+    
+    # UI / GUI Settings
+    theme_mode: str = 'dark'  # 'system', 'dark', 'light'
+    auto_ollama_start: bool = True
+    model_selection_mode: str = 'auto'  # 'auto', 'manual'
 
     @classmethod
     def from_dict(cls, config_dict: dict) -> 'AxiomConfig':
@@ -62,8 +67,61 @@ Returns:
 
     def to_dict(self) -> dict:
         """Convert config to dictionary."""
-        return {'auth_mode': self.auth_mode.value, 'debug': self.debug, 'log_level': self.log_level, 'proactive_kernel': self.proactive_kernel, 'ollama_base_url': self.ollama_base_url, 'ollama_model': self.ollama_model, 'embedding_model': self.embedding_model, 'ollama_temperature': self.ollama_temperature, 'db_path': self.db_path, 'max_history': self.max_history, 'max_agents': self.max_agents, 'max_tools': self.max_tools, 'event_history_limit': self.event_history_limit, 'sandbox_mode': self.sandbox_mode, 'allow_system_tools': self.allow_system_tools, 'allow_cloud_fallback': self.allow_cloud_fallback, 'monitor_window_focus': self.monitor_window_focus, 'monitor_clipboard': self.monitor_clipboard}
-_config = AxiomConfig()
+        return {
+            'auth_mode': self.auth_mode.value, 
+            'debug': self.debug, 
+            'log_level': self.log_level, 
+            'proactive_kernel': self.proactive_kernel, 
+            'ollama_base_url': self.ollama_base_url, 
+            'ollama_model': self.ollama_model, 
+            'embedding_model': self.embedding_model, 
+            'ollama_temperature': self.ollama_temperature, 
+            'db_path': self.db_path, 
+            'max_history': self.max_history, 
+            'max_agents': self.max_agents, 
+            'max_tools': self.max_tools, 
+            'event_history_limit': self.event_history_limit, 
+            'sandbox_mode': self.sandbox_mode, 
+            'allow_system_tools': self.allow_system_tools, 
+            'allow_cloud_fallback': self.allow_cloud_fallback, 
+            'monitor_window_focus': self.monitor_window_focus, 
+            'monitor_clipboard': self.monitor_clipboard,
+            'theme_mode': self.theme_mode,
+            'auto_ollama_start': self.auto_ollama_start,
+            'model_selection_mode': self.model_selection_mode
+        }
+
+    def save(self) -> None:
+        """Save configuration to ~/.config/axiom/settings.json."""
+        import json
+        from pathlib import Path
+        config_dir = Path.home() / ".config" / "axiom"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        config_path = config_dir / "settings.json"
+        
+        try:
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(self.to_dict(), f, indent=4)
+        except Exception as e:
+            print(f"Failed to save AXIOM config: {e}")
+
+    @classmethod
+    def load(cls) -> 'AxiomConfig':
+        """Load configuration from ~/.config/axiom/settings.json."""
+        import json
+        from pathlib import Path
+        config_path = Path.home() / ".config" / "axiom" / "settings.json"
+        
+        if config_path.exists():
+            try:
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    return cls.from_dict(data)
+            except Exception as e:
+                print(f"Failed to load AXIOM config: {e}")
+        return cls()
+
+_config = AxiomConfig.load()
 
 def get_config() -> AxiomConfig:
     """Get global AXIOM configuration."""

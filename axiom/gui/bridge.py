@@ -43,6 +43,7 @@ class AxiomBridge(QObject):
     telemetry_updated: Signal = Signal(dict)
     response_finished: Signal = Signal(str)
     error_occurred: Signal = Signal(str)
+    request_gui_auth: Signal = Signal(str, str, dict)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -67,6 +68,15 @@ class AxiomBridge(QObject):
     def set_orchestrator(self, orchestrator: Any) -> None:
         """Register the OrchestratorAgent for async task dispatch."""
         self._orchestrator = orchestrator
+
+    def refresh_models(self) -> None:
+        """Trigger a background refresh of the available models."""
+        if self._orchestrator and hasattr(self._orchestrator, "_llm"):
+            llm = self._orchestrator._llm
+            if hasattr(llm, "refresh_models"):
+                # Spawn non-blocking background thread to refresh cache
+                import threading
+                threading.Thread(target=llm.refresh_models, daemon=True).start()
 
     def submit_task(self, user_input: str) -> None:
         """Schedule an orchestrator run on the async event loop.
@@ -130,7 +140,7 @@ class AxiomBridge(QObject):
 
     def _on_tool_event(self, event: Any) -> None:
         """Relay tool start/finish events."""
-        tool_id = event.data.get("tool_id", "unknown_tool")
+        tool_id = event.data.get("tool_name", event.data.get("tool_id", "unknown_tool"))
         status = event.data.get("status", event.event_type)
         message = event.data.get("message", "")
         self.tool_status_changed.emit(tool_id, f"{status}: {message}")

@@ -90,7 +90,19 @@ Returns:
 
     def get_tool(self, tool_id: str) -> Optional[BaseTool]:
         """Return the tool registered under ``tool_id``, or ``None``."""
-        return self._core_registry.get_tool(tool_id)
+        tool = self._core_registry.get_tool(tool_id)
+        if tool is None:
+            aliases = {
+                "safe_file_search": "file_search",
+                "file_opener": "file_read",
+                "read_file": "file_read",
+                "write_file": "file_write",
+                "shell_command": "shell",
+                "run_command": "shell",
+            }
+            if tool_id in aliases:
+                tool = self._core_registry.get_tool(aliases[tool_id])
+        return tool
 
     def list_tools(self) -> Dict[str, BaseTool]:
         """Return a shallow copy of all registered tools keyed by ``tool_id``."""
@@ -125,18 +137,49 @@ Returns:
             schemas.append({'type': 'function', 'function': {'name': tool_id, 'description': tool.description or tool_id, 'parameters': tool.schema or {'type': 'object', 'properties': {}}}})
         return schemas
 
-    def execute(self, tool_id: str, **arguments: Any) -> ToolResult:  # type: ignore[override]
-        """Execute a registered tool safely, regardless of its calling convention.
+    def _pre_validate_path(self, tool_id: str, arguments: Dict[str, Any]) -> Optional[ToolResult]:
+        """Intercept slang or hallucinatory file paths before execution."""
+        from axiom.tools import ToolResult
+        import os
+        
+        path_arg = None
+        if 'file_path' in arguments:
+            path_arg = arguments['file_path']
+        elif 'path' in arguments:
+            path_arg = arguments['path']
+        elif 'params' in arguments and isinstance(arguments['params'], dict):
+            path_arg = arguments['params'].get('file_path') or arguments['params'].get('path')
+            
+        if path_arg and isinstance(path_arg, str) and tool_id in ('file_opener', 'file_read', 'read_file'):
+            try:
+                from axiom.tools import resolve_safe_path
+                from pathlib import Path
+                
+                # Basic slang/placeholder trap and file existence check using smart resolver
+                resolved_p = resolve_safe_path(path_arg, Path.cwd())
+                if not resolved_p.exists():
+                    import json
+                    error_payload = {
+                        "status": "FATAL_ERROR",
+                        "error_type": "PRE_EXECUTION_GUARD",
+                        "message": f"[System Guard]: Execution blocked. The path '{path_arg}' (resolved to '{resolved_p}') DOES NOT EXIST.",
+                        "action_required": "Run 'file_search' or 'ls' first to get valid absolute paths. Stop guessing filenames."
+                    }
+                    return ToolResult(success=False, error=json.dumps(error_payload))
+            except Exception:
+                pass
+        return None
 
-        Delegates to :meth:`BaseTool.__call__`, which adapts to both the
-        dict-parameter async tool family and the legacy synchronous
-        keyword-argument family, and bridges async ``execute`` implementations
-        onto a synchronous call. Errors raised by the tool are captured and
-        returned as a failed :class:`ToolResult` rather than propagating.
-        """
+    def execute(self, tool_id: str, **arguments: Any) -> ToolResult:  # type: ignore[override]
+        """Execute a registered tool safely, regardless of its calling convention."""
         tool = self.get_tool(tool_id)
         if tool is None:
             return ToolResult(success=False, error=f'Tool not found: {tool_id}')
+        
+        val_error = self._pre_validate_path(tool.tool_id, arguments)
+        if val_error:
+            return val_error
+            
         try:
             return tool(**arguments)
         except Exception as exc:
@@ -154,6 +197,11 @@ Returns:
         tool = self.get_tool(tool_id)
         if tool is None:
             return ToolResult(success=False, error=f'Tool not found: {tool_id}')
+            
+        val_error = self._pre_validate_path(tool.tool_id, arguments)
+        if val_error:
+            return val_error
+            
         try:
             sig = inspect.signature(tool.execute)
             params_list = list(sig.parameters.values())

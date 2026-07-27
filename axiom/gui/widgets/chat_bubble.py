@@ -22,36 +22,33 @@ class ToolPill(QFrame):
     def __init__(self, tool_id: str, status: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("toolPill")
-        self.setStyleSheet(
-            "QFrame#toolPill { background:#1e1e22; border:1px solid #2e2e36; "
-            "border-radius:6px; padding:2px 8px; }"
-        )
         self._expanded = False
         self._detail_text = status
 
-        layout = QHBoxLayout(self)
+        layout = QHBoxLayout()
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(6)
 
-        self._icon = QLabel("⚙️")
+        if tool_id == "screen_capture":
+            self._icon = QLabel("📸")
+            self.setStyleSheet("QFrame#toolPill { background: #2b1f3c; border-radius: 6px; }")
+        else:
+            self._icon = QLabel("⚙️")
+            
         layout.addWidget(self._icon)
 
         self._summary = QLabel(f"<b>{html.escape(tool_id)}</b>")
-        self._summary.setStyleSheet("color: #a0a0b0; font-size: 11px;")
+        self._summary.setObjectName("toolPillSummary")
         layout.addWidget(self._summary, 1)
 
         self._toggle = QToolButton()
+        self._toggle.setObjectName("toolPillToggle")
         self._toggle.setText("▶")
-        self._toggle.setStyleSheet(
-            "QToolButton { color:#a0a0b0; border:none; font-size:10px; }"
-        )
         self._toggle.clicked.connect(self._toggle_detail)
         layout.addWidget(self._toggle)
 
         self._detail_label = QLabel(html.escape(status))
-        self._detail_label.setStyleSheet(
-            "color:#8888aa; font-size:11px; font-family:monospace;"
-        )
+        self._detail_label.setObjectName("toolPillDetail")
         self._detail_label.setWordWrap(True)
         self._detail_label.setVisible(False)
 
@@ -94,12 +91,7 @@ class MessageBubble(QFrame):
         self.setObjectName("msgBubble")
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
 
-        if role == "user":
-            self.setStyleSheet(self._USER_STYLE)
-        elif role == "tool":
-            self.setStyleSheet(self._ERR_STYLE)
-        else:
-            self.setStyleSheet(self._ASST_STYLE)
+        self.setProperty("bubbleRole", role)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -108,12 +100,9 @@ class MessageBubble(QFrame):
         # Role badge + timestamp
         header = QHBoxLayout()
         role_label = QLabel({"user": "You", "assistant": "AXIOM", "tool": "Tool"}.get(role, role))
-        role_label.setStyleSheet(
-            f"font-weight:600; font-size:12px; color:"
-            f"{'#10b981' if role == 'assistant' else '#f59e0b' if role == 'user' else '#ef4444'};"
-        )
+        role_label.setObjectName(f"roleLabel_{role}")
         ts = QLabel(time.strftime("%H:%M"))
-        ts.setStyleSheet("font-size:10px; color:#4a4a5a;")
+        ts.setObjectName("msgTimestamp")
         header.addWidget(role_label)
         header.addStretch()
         header.addWidget(ts)
@@ -121,10 +110,10 @@ class MessageBubble(QFrame):
 
         # Main text
         self._body = QLabel()
+        self._body.setObjectName("msgBody")
         self._body.setWordWrap(True)
         self._body.setTextFormat(Qt.TextFormat.RichText)
         self._body.setOpenExternalLinks(True)
-        self._body.setStyleSheet("color:#f0f0f5; font-size:13px; line-height:1.5;")
         self._body.setText(text)
         layout.addWidget(self._body)
 

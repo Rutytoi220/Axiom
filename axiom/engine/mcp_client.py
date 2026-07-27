@@ -9,8 +9,8 @@ from typing import Dict, Any, Optional
 from axiom.tools.mcp_sse_client import MCPSSEClient
 logger = logging.getLogger(__name__)
 
-class MCPHub:
-    """Dynamic Model Context Protocol (MCP) Client Hub."""
+class MCPClientManager:
+    """Dynamic Model Context Protocol (MCP) Client Manager."""
 
     def __init__(self, registry):
         """Auto-generated docstring.
@@ -22,7 +22,9 @@ Returns:
     Return value.
 """
         self.registry = registry
-        self.config_path = Path.home() / '.axiom' / 'mcp_services.json'
+        config_dir = Path.home() / '.config' / 'axiom'
+        config_dir.mkdir(parents=True, exist_ok=True)
+        self.config_path = config_dir / 'mcp_servers.json'
         self.servers = {}
         self.active_tools = []
         self._sse_clients = {}
@@ -56,13 +58,8 @@ Returns:
         self._loop.call_soon_threadsafe(self._loop.stop)
 
     def _ensure_config(self):
-        """Auto-generated docstring.
-
-
-Returns:
-    Return value.
-"""
-        if not self.config_path.exists():
+        """Auto-generated docstring."""
+        if not self.config_path.exists() or self.config_path.stat().st_size == 0:
             self.config_path.write_text(json.dumps({'mcpServers': {}}, indent=2))
 
     def load_servers(self):

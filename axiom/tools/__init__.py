@@ -370,11 +370,7 @@ Returns:
             console.print(Panel(warning_msg, title="[bold yellow]Shell Action Required[/bold yellow]", border_style="red"))
             
             try:
-                confirmed = await asyncio.to_thread(
-                    Confirm.ask,
-                    "[bold white]Allow execution?[/bold white]",
-                    default=False
-                )
+                confirmed = await _request_gui_authorization(self.tool_id, command)
                 if not confirmed:
                     return ToolResult(success=False, error='Command execution aborted by user')
             except (EOFError, KeyboardInterrupt):
@@ -488,13 +484,8 @@ Returns:
 
     @property
     def description(self) -> str:
-        """Auto-generated docstring.
-
-
-Returns:
-    Return value.
-"""
-        return 'Reads plain text files ONLY (e.g., .txt, .py, .md, .sh, .json). DO NOT use this tool for PDFs (.pdf), Word documents (.docx), or spreadsheets—it will fail. Use `read_document_content` for those formats.'
+        """Auto-generated docstring."""
+        return 'Reads files and extracts text. Supports plain text (.txt, .py, .json, .md) and document extraction (.pdf).'
 
     @property
     def schema(self) -> Dict[str, Any]:
@@ -519,7 +510,7 @@ Returns:
         if not op or not path:
             return ToolResult(success=False, error='Missing operation or path')
         try:
-            full_path = (self._base_dir / path).resolve()
+            full_path = resolve_safe_path(path, self._base_dir)
             full_path.relative_to(self._base_dir)
         except ValueError:
             return ToolResult(success=False, error='Path resolves outside sandbox')
@@ -533,12 +524,43 @@ Returns:
                 items = [{'name': p.name, 'is_dir': p.is_dir()} for p in full_path.iterdir()]
                 return ToolResult(success=True, output={'items': items})
             elif op == 'read':
-                if full_path.suffix.lower() in ('.pdf', '.docx', '.doc', '.xls', '.xlsx'):
-                    return ToolResult(success=False, error='[!] Error: Cannot read binary/rich documents with file_read. You MUST use the read_document_content tool instead.')
                 if not full_path.is_file():
-                    return ToolResult(success=False, error='Not a file')
+                    import json
+                    error_payload = {
+                        "status": "FATAL_ERROR",
+                        "error_type": "FILE_NOT_FOUND",
+                        "message": f"The file '{full_path}' DOES NOT EXIST on this filesystem.",
+                        "action_required": "You MUST run 'file_search' or 'ls' on the parent directory to find the real filename before trying again."
+                    }
+                    return ToolResult(success=False, error=json.dumps(error_payload))
+                
+                # Check for PDF
+                if full_path.suffix.lower() == '.pdf':
+                    try:
+                        from pypdf import PdfReader
+                        reader = PdfReader(str(full_path))
+                        text_pages = []
+                        for i, page in enumerate(reader.pages):
+                            page_text = page.extract_text()
+                            if page_text:
+                                text_pages.append(f"--- Page {i+1} ---\n{page_text}")
+                        content = "\n".join(text_pages)
+                        max_chars = params.get('max_chars', 15000)
+                        if len(content) > max_chars:
+                            content = content[:max_chars] + f"\n... [Truncated at {max_chars} chars]"
+                        formatted_content = f"[PDF Content - {len(reader.pages)} Pages Read]:\n\n{content}"
+                        return ToolResult(success=True, output={'content': formatted_content, 'size': len(content), 'binary': False})
+                    except Exception as e:
+                        return ToolResult(success=False, error=f'Failed to extract PDF text: {e}')
+                        
+                elif full_path.suffix.lower() in ('.docx', '.doc', '.xls', '.xlsx'):
+                    return ToolResult(success=False, error='[!] Error: Cannot read .docx/.xls with pure text reader yet. Use external tools or add a docx library.')
+                    
                 try:
                     content = full_path.read_text(encoding=params.get('encoding', 'utf-8'))
+                    max_chars = params.get('max_chars', 15000)
+                    if len(content) > max_chars:
+                        content = content[:max_chars] + f"\n... [Truncated at {max_chars} chars]"
                     return ToolResult(success=True, output={'content': content, 'size': len(content), 'binary': False})
                 except UnicodeDecodeError:
                     size = full_path.stat().st_size
@@ -965,12 +987,7 @@ Returns:
             console.print(Panel(warning_msg, title="[bold yellow]Shell Action Required[/bold yellow]", border_style="red"))
             
             try:
-                # We can't easily await inside sync method without event loop handling, 
-                # wait! Is execute() in ShellCommandTool async? No, it's defined as `def execute` but `ShellTool.execute` is `async def execute`! 
-                # Let's check if ShellCommandTool's execute is async. It is `def execute(self...` 
-                # Actually wait, `ShellTool` has `async def execute`. `ShellCommandTool` has `def execute`. 
-                # Let me just check if we can prompt synchronously.
-                confirmed = Confirm.ask("[bold white]Allow execution?[/bold white]", default=False)
+                confirmed = _request_gui_authorization_sync(self.tool_id, command)
                 if not confirmed:
                     return ToolResult(success=False, error='Command execution aborted by user')
             except (EOFError, KeyboardInterrupt):

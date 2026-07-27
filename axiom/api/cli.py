@@ -10,7 +10,7 @@ from axiom.memory import SyncMemoryStore
 from axiom.llm.universal_client import UniversalLLMClient
 from axiom.agents.orchestrator_agent import OrchestratorAgent
 from axiom.tool_registry import ToolRegistry
-from axiom.tools.mcp_hub import MCPHub
+from axiom.engine.mcp_client import MCPClientManager
 from axiom.tools import EchoTool, ShellTool, FileReadTool, FileWriteTool, SystemInfoTool
 from axiom.legacy_wrapper import create_legacy_tools
 from axiom.plugins import NXBTPlugin, AutomationPlugin
@@ -68,7 +68,7 @@ Returns:
         self.memory_store = self.memory
         self.engine = Engine(memory=self.memory)
         self.tool_registry = ToolRegistry(self.engine.registry)
-        self.mcp_hub = MCPHub(self.engine.registry)
+        self.mcp_hub = MCPClientManager(self.engine.registry)
         self.orchestrator = OrchestratorAgent(self.tool_registry, self.engine.event_bus, self.memory_store, llm=self.ollama)
         self._event_log = []
         self._closed = False
@@ -150,9 +150,10 @@ Returns:
 
     def _register_tools(self) -> None:
         """Register system tools."""
-        from axiom.tools.os_assist import SafeFileSearchTool, FileOpenerTool, AppLauncherTool, CaptureScreenContextTool
+        from axiom.tools.os_assist import SafeFileSearchTool, FileOpenerTool, AppLauncherTool
+        from axiom.tools.vision_tools import ScreenCaptureTool
         from axiom.tools.document_reader import ReadDocumentContentTool
-        tools = [EchoTool(), ShellTool(), FileReadTool('.'), FileWriteTool('.'), SystemInfoTool(), SafeFileSearchTool(), FileOpenerTool(), AppLauncherTool(), CaptureScreenContextTool(), ReadDocumentContentTool()]
+        tools = [EchoTool(), ShellTool(), FileReadTool('.'), FileWriteTool('.'), SystemInfoTool(), SafeFileSearchTool(), FileOpenerTool(), AppLauncherTool(), ScreenCaptureTool(), ReadDocumentContentTool()]
         tools.extend(create_legacy_tools())
         for tool in tools:
             self.engine.registry.register_tool(tool.tool_id, tool)

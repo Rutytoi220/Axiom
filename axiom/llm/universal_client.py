@@ -39,15 +39,25 @@ Returns:
         self.config = DummyConfig(default_model)
 
     def _execute_completion(self, model: str, messages: List[Dict[str, Any]], **kwargs) -> Any:
-        """Auto-generated docstring.
+        """Auto-generated docstring."""
+        images = kwargs.pop('images', None)
+        if images:
+            for msg in reversed(messages):
+                if msg.get('role') == 'user':
+                    orig_content = msg.get('content', '')
+                    new_content = []
+                    if isinstance(orig_content, str):
+                        new_content.append({'type': 'text', 'text': orig_content})
+                    elif isinstance(orig_content, list):
+                        new_content.extend(orig_content)
+                        
+                    for img in images:
+                        b64_str = img if img.startswith('data:') else f"data:image/png;base64,{img}"
+                        new_content.append({'type': 'image_url', 'image_url': {'url': b64_str}})
+                        
+                    msg['content'] = new_content
+                    break
 
-Args:
-    model: Argument.
-    messages: Argument.
-
-Returns:
-    Return value.
-"""
         try:
             return litellm.completion(model=model, messages=messages, **kwargs)
         except (litellm.exceptions.RateLimitError, litellm.exceptions.APIConnectionError) as e:
@@ -66,8 +76,22 @@ Returns:
         model = kwargs.pop('model', self.config.model)
         if model.startswith('ollama/'):
             kwargs['api_base'] = 'http://localhost:11434'
+            
+        stream_callback = kwargs.pop('stream_callback', None)
+        if stream_callback:
+            kwargs['stream'] = True
+
         try:
             response = self._execute_completion(model, messages, **kwargs)
+            if stream_callback:
+                full_text = []
+                for chunk in response:
+                    delta = chunk.choices[0].delta
+                    content = getattr(delta, "content", "") or ""
+                    if content:
+                        full_text.append(content)
+                        stream_callback(content)
+                return "".join(full_text)
             return response.choices[0].message.content or ''
         except Exception as e:
             logger.error(f'UniversalLLMClient chat error: {e}')
@@ -87,10 +111,48 @@ Returns:
                 litellm_tools.append(schema)
             else:
                 litellm_tools.append({'type': 'function', 'function': schema})
+        stream_callback = kwargs.pop('stream_callback', None)
+        if stream_callback:
+            kwargs['stream'] = True
+            
         if litellm_tools:
             kwargs['tools'] = litellm_tools
         try:
             response = self._execute_completion(model, messages, **kwargs)
+            
+            if stream_callback:
+                full_text = []
+                tool_calls_dict = {}
+                for chunk in response:
+                    delta = chunk.choices[0].delta
+                    content = getattr(delta, "content", "") or ""
+                    if content:
+                        full_text.append(content)
+                        stream_callback(content)
+                    
+                    if hasattr(delta, 'tool_calls') and delta.tool_calls:
+                        for tc in delta.tool_calls:
+                            idx = getattr(tc, 'index', 0)
+                            if idx not in tool_calls_dict:
+                                tool_calls_dict[idx] = {'name': '', 'arguments': ''}
+                            
+                            if hasattr(tc, 'function'):
+                                if getattr(tc.function, 'name', None):
+                                    tool_calls_dict[idx]['name'] += tc.function.name
+                                if getattr(tc.function, 'arguments', None):
+                                    tool_calls_dict[idx]['arguments'] += tc.function.arguments
+
+                parsed_tool_calls = []
+                for idx in sorted(tool_calls_dict.keys()):
+                    t = tool_calls_dict[idx]
+                    try:
+                        args = json.loads(t['arguments']) if t['arguments'] else {}
+                    except Exception:
+                        args = t['arguments']
+                    parsed_tool_calls.append({'name': t['name'], 'arguments': args})
+                
+                return {'content': "".join(full_text), 'tool_calls': parsed_tool_calls}
+
             msg = response.choices[0].message
             parsed_tool_calls = []
             if hasattr(msg, 'tool_calls') and msg.tool_calls:

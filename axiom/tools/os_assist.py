@@ -151,9 +151,18 @@ Returns:
         file_path = params.get('file_path')
         if not file_path:
             return ToolResult(success=False, error='Missing file_path')
-        path = Path(file_path).resolve()
+            
+        from axiom.tools import resolve_safe_path
+        path = resolve_safe_path(file_path, Path.cwd())
         if not path.exists() or not path.is_file():
-            return ToolResult(success=False, error=f'File not found: {file_path}')
+            import json
+            error_payload = {
+                "status": "FATAL_ERROR",
+                "error_type": "FILE_NOT_FOUND",
+                "message": f"The file '{path}' DOES NOT EXIST on this filesystem.",
+                "action_required": "You MUST run 'file_search' or 'ls' on the parent directory to find the real filename before trying again."
+            }
+            return ToolResult(success=False, error=json.dumps(error_payload))
         try:
             if platform.system() == 'Windows':
                 startfile = getattr(os, 'startfile')

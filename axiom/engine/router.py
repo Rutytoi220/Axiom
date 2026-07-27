@@ -77,12 +77,7 @@ Returns:
         if not user_text:
             return IntentCategory.SYSTEM
             
-        explicit_vision = any(phrase in user_text.lower() for phrase in [
-            'look at my screen', 'read the text in this image', 'analyze this screenshot',
-            'what is in this image', 'describe this image'
-        ])
-        
-        if self._has_image(messages) or explicit_vision:
+        if self._has_image(messages):
             return IntentCategory.VISION
             
         system_prompt = "You are a semantic intent router. Classify the user's request into one of the following categories:\nCODE: For programming, refactoring, debugging, or execution.\nCHAT: For general conversation, greetings, or short chat.\nSYSTEM: For orchestrating tools, reading files, or complex multi-step OS tasks.\nREASONING: For deep logical puzzles, math, or complex analysis requiring advanced chain-of-thought.\nOutput strictly valid JSON conforming to the requested schema."
@@ -100,6 +95,19 @@ Returns:
 
     def _route_request(self, messages: List[Dict[str, Any]], tool_schemas: Optional[List[Dict[str, Any]]]=None) -> str:
         """Determine which model to use."""
+        config = get_config()
+        if getattr(config, 'model_selection_mode', 'auto') == 'manual':
+            selected_model = getattr(config, 'ollama_model', 'ollama/qwen3:8b')
+            if self._current_active_model and self._current_active_model != selected_model:
+                logger.info(f'SmartRouter (Manual Override) Swapping Model: {self._current_active_model} -> {selected_model}')
+            elif not self._current_active_model:
+                logger.info(f'SmartRouter (Manual Override) initializing with Model: {selected_model}')
+            self._current_active_model = selected_model
+            if self.event_bus:
+                from axiom.core.events import Event
+                self.event_bus.publish(Event('model.routed', 'SmartRouter', data={'target': selected_model, 'intent': 'MANUAL'}))
+            return selected_model
+
         target_intent = self._classify_task(messages, tool_schemas)
         if target_intent == IntentCategory.CODE:
             if self.telemetry and self.telemetry.latest_state.get('warning'):

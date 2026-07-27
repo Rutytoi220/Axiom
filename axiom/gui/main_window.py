@@ -95,6 +95,11 @@ class MainWindow(QMainWindow):
         # Initial Welcome Message
         self._add_bubble("assistant", "⚡ AXIOM Desktop v3.0 Online — Select a mode above or type a prompt below to begin.")
 
+    def closeEvent(self, event) -> None:
+        """Override window close to hide to system tray instead of exiting."""
+        event.ignore()
+        self.hide()
+
     # ------------------------------------------------------------------
     # UI construction
     # ------------------------------------------------------------------
@@ -157,12 +162,39 @@ class MainWindow(QMainWindow):
 
         tb.addSeparator()
 
+        # ---- Settings Button ----
+        self._settings_btn = QPushButton("⚙️ Settings")
+        self._settings_btn.setObjectName("settingsBtn")
+        self._settings_btn.clicked.connect(self._open_settings_dialog)
+        tb.addWidget(self._settings_btn)
+
+        tb.addSeparator()
+
         # ---- Model badge ----
         self._model_label = QLabel("Model: —")
         self._model_label.setObjectName("modelLabel")
         tb.addWidget(self._model_label)
+        
+        tb.addSeparator()
+
+        # ---- Ollama Health Monitor ----
+        self._ollama_status_label = QLabel("🟡 Ollama: Checking...")
+        self._ollama_status_label.setStyleSheet("font-weight: 600; font-size: 13px; color: #fbbf24;")
+        tb.addWidget(self._ollama_status_label)
+        
+        self._ollama_start_btn = QPushButton("🚀 Start Ollama")
+        self._ollama_start_btn.setStyleSheet("background-color: #f59e0b; color: white; font-weight: bold; border: none; padding: 4px 10px; border-radius: 4px; margin-left: 5px;")
+        self._ollama_start_btn.clicked.connect(self._on_ollama_start_clicked)
+        self._ollama_start_action = tb.addWidget(self._ollama_start_btn)
+        self._ollama_start_action.setVisible(False)
 
         tb.addWidget(QWidget())  # right padding
+        
+        # Initialize the health monitor
+        from axiom.services.ollama_monitor import OllamaHealthMonitor
+        self._ollama_monitor = OllamaHealthMonitor(self)
+        self._ollama_monitor.status_changed.connect(self._on_ollama_status_changed)
+        QTimer.singleShot(0, self._ollama_monitor.start)
 
     def _build_central_widget(self) -> None:
         """Scrollable chat viewport with message bubbles."""
@@ -237,7 +269,7 @@ class MainWindow(QMainWindow):
     def _build_bottom_bar(self) -> None:
         """Bottom control bar: multiline input + send button."""
         bar = QWidget()
-        bar.setStyleSheet("background:#1a1a1f; border-top:1px solid #2e2e36;")
+        bar.setObjectName("bottomBar")
         bar_layout = QHBoxLayout(bar)
         bar_layout.setContentsMargins(16, 10, 16, 10)
         bar_layout.setSpacing(10)
@@ -282,10 +314,33 @@ class MainWindow(QMainWindow):
         self._bridge.telemetry_updated.connect(self._on_telemetry)
         self._bridge.response_finished.connect(self._on_response_finished)
         self._bridge.error_occurred.connect(self._on_error)
+        self._bridge.request_gui_auth.connect(self._on_request_gui_auth)
 
     # ------------------------------------------------------------------
     # Qt Slots
     # ------------------------------------------------------------------
+
+    @Slot(str, str, dict)
+    def _on_request_gui_auth(self, tool_name: str, arguments: str, ctx: dict) -> None:
+        from PySide6.QtWidgets import QMessageBox
+        
+        msg = QMessageBox(self)
+        msg.setWindowTitle("[SECURITY APPROVAL REQUIRED]")
+        msg.setText(f"AXIOM requests permission to execute an external action:\n\nTool: {tool_name}\nCommand / Args: {arguments}")
+        msg.setIcon(QMessageBox.Icon.Warning)
+        
+        allow_btn = msg.addButton("Allow Execution", QMessageBox.ButtonRole.AcceptRole)
+        allow_btn.setStyleSheet("background-color: #10b981; color: white; font-weight: bold; border: none; padding: 6px 12px; border-radius: 4px;")
+        
+        deny_btn = msg.addButton("Deny Action", QMessageBox.ButtonRole.RejectRole)
+        deny_btn.setStyleSheet("background-color: #ef4444; color: white; font-weight: bold; border: none; padding: 6px 12px; border-radius: 4px;")
+        
+        msg.setStyleSheet("QMessageBox { background-color: #1a1a1f; color: #d4d4d8; } QLabel { color: #d4d4d8; font-family: monospace; }")
+        
+        msg.exec()
+        
+        ctx["result"]["granted"] = (msg.clickedButton() == allow_btn)
+        ctx["event"].set()
 
     @Slot()
     def _on_send(self) -> None:
@@ -372,6 +427,70 @@ class MainWindow(QMainWindow):
         self._status_mode.setStyleSheet(f"color:{color}; font-weight:600;")
         self._tele_mode.setText(f"Mode: {mode.name}")
         self._tele_mode.setStyleSheet(f"color:{color}; font-size:11px; font-weight:600;")
+
+    @Slot(bool, float)
+    def _on_ollama_status_changed(self, is_online: bool, latency: float) -> None:
+        if is_online:
+            self._ollama_status_label.setText(f"🟢 Ollama: Online ({latency:.0f}ms)")
+            self._ollama_status_label.setStyleSheet("font-weight: 600; font-size: 13px; color: #10b981;")
+            self._ollama_start_btn.setVisible(False)
+            self._ollama_start_action.setVisible(False)
+            
+            # Auto-Reconnect Signal: trigger a quick background model registry refresh
+            self._bridge.refresh_models()
+        else:
+            self._ollama_status_label.setText("🔴 Ollama: Offline")
+            self._ollama_status_label.setStyleSheet("font-weight: 600; font-size: 13px; color: #ef4444;")
+            self._ollama_start_btn.setVisible(True)
+            self._ollama_start_action.setVisible(True)
+            
+            # Auto-start on boot if configured
+            if getattr(self, "_first_ollama_ping", True):
+                from axiom.config import get_config
+                if get_config().auto_ollama_start:
+                    self._on_ollama_start_clicked()
+                    
+        self._first_ollama_ping = False
+
+    @Slot()
+    def _open_settings_dialog(self):
+        from axiom.gui.widgets.settings_dialog import SettingsDialog
+        dlg = SettingsDialog(self._bridge, self)
+        dlg.settings_updated.connect(self._on_settings_updated)
+        dlg.exec()
+
+    @Slot()
+    def _on_settings_updated(self):
+        import axiom.gui.app as gui_app
+        from PySide6.QtWidgets import QApplication
+        from axiom.config import get_config
+        
+        # Reload stylesheet
+        gui_app._load_stylesheet(QApplication.instance())
+        
+        # Check model selection mode
+        config = get_config()
+        if config.model_selection_mode == "manual":
+            self.update_model_label(f"{config.ollama_model} (Manual)")
+        else:
+            self.update_model_label(config.ollama_model)
+
+    @Slot()
+    def _on_ollama_start_clicked(self) -> None:
+        self._ollama_status_label.setText("🟡 Starting Daemon...")
+        self._ollama_status_label.setStyleSheet("font-weight: 600; font-size: 13px; color: #fbbf24;")
+        self._ollama_start_btn.setEnabled(False)
+        self._ollama_monitor.trigger_rapid_polling()
+        
+        # Spawn daemon in background thread to avoid blocking UI
+        import threading
+        def _spawn():
+            success = self._ollama_monitor.spawn_ollama_service()
+            if not success:
+                # Re-enable if failed
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(0, lambda: self._ollama_start_btn.setEnabled(True))
+        threading.Thread(target=_spawn, daemon=True).start()
 
     # ------------------------------------------------------------------
     # Expert dock

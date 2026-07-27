@@ -18,7 +18,21 @@ logger = logging.getLogger(__name__)
 
 
 def _load_stylesheet(app: "QApplication") -> None:  # type: ignore[name-defined]
-    qss_path = Path(__file__).parent / "styles" / "themes.qss"
+    from axiom.config import get_config
+    from PySide6.QtCore import Qt
+    config = get_config()
+    theme_mode = config.theme_mode.lower()
+    
+    is_dark = True
+    if theme_mode == "light":
+        is_dark = False
+    elif theme_mode == "system":
+        if hasattr(app.styleHints(), 'colorScheme'):
+            is_dark = app.styleHints().colorScheme() == Qt.ColorScheme.Dark
+
+    theme_file = "themes.qss" if is_dark else "light_theme.qss"
+    qss_path = Path(__file__).parent / "styles" / theme_file
+    
     if qss_path.exists():
         app.setStyleSheet(qss_path.read_text(encoding="utf-8"))
         logger.debug("Loaded QSS theme from %s", qss_path)
@@ -32,16 +46,25 @@ def _build_tray(app: "QApplication", window: "MainWindow") -> "QSystemTrayIcon":
     from axiom.config import get_config, AuthMode
 
     tray = QSystemTrayIcon(app)
-    # Use a simple text-based fallback icon (Unicode circle in a pixmap)
-    from PySide6.QtGui import QPixmap, QColor, QPainter
-    pix = QPixmap(32, 32)
-    pix.fill(QColor(0, 0, 0, 0))
-    painter = QPainter(pix)
-    painter.setPen(QColor("#10b981"))
-    painter.setFont(app.font())
-    painter.drawText(pix.rect(), 0x84, "A")  # Qt.AlignCenter
-    painter.end()
-    tray.setIcon(QIcon(pix))
+    
+    # Use real icon if exists
+    assets_dir = Path(__file__).parent / "assets"
+    if (assets_dir / "logo.svg").exists():
+        tray.setIcon(QIcon(str(assets_dir / "logo.svg")))
+    elif (assets_dir / "logo.png").exists():
+        tray.setIcon(QIcon(str(assets_dir / "logo.png")))
+    else:
+        # Use a simple text-based fallback icon (Unicode circle in a pixmap)
+        from PySide6.QtGui import QPixmap, QColor, QPainter
+        pix = QPixmap(32, 32)
+        pix.fill(QColor(0, 0, 0, 0))
+        painter = QPainter(pix)
+        painter.setPen(QColor("#10b981"))
+        painter.setFont(app.font())
+        painter.drawText(pix.rect(), 0x84, "A")  # Qt.AlignCenter
+        painter.end()
+        tray.setIcon(QIcon(pix))
+        
     tray.setToolTip("AXIOM Desktop v3.0")
 
     menu = QMenu()
@@ -113,7 +136,36 @@ def run_gui() -> None:
     app.setApplicationName("AXIOM Desktop")
     app.setApplicationVersion("3.0")
     app.setOrganizationName("AXIOM")
-    app.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
+    
+    # --- Single Instance IPC ---
+    from PySide6.QtNetwork import QLocalSocket, QLocalServer
+    socket = QLocalSocket()
+    socket.connectToServer("axiom_desktop_v3")
+    if socket.waitForConnected(500):
+        socket.write(b"WAKEUP")
+        socket.waitForBytesWritten(1000)
+        socket.disconnectFromServer()
+        sys.exit(0)
+
+    server = QLocalServer()
+    server.removeServer("axiom_desktop_v3")
+    server.listen("axiom_desktop_v3")
+    app._ipc_server = server  # Prevent GC
+
+    # Wayland/Desktop grouping (Qt 6.5+ automatically appends .desktop)
+    app.setDesktopFileName("axiom")
+    
+    # Don't quit when closing the main window (keep tray running)
+    app.setQuitOnLastWindowClosed(False)
+    
+    # Global App Icon
+    from PySide6.QtGui import QIcon
+    assets_dir = Path(__file__).parent / "assets"
+    if (assets_dir / "logo.svg").exists():
+        app.setWindowIcon(QIcon(str(assets_dir / "logo.svg")))
+    elif (assets_dir / "logo.png").exists():
+        app.setWindowIcon(QIcon(str(assets_dir / "logo.png")))
+        
     _load_stylesheet(app)
 
     # --- AXIOM core wiring ---
@@ -157,6 +209,22 @@ def run_gui() -> None:
     bridge.set_event_loop(loop)
 
     window.show()
+
+    def _on_ipc_connection() -> None:
+        sock = server.nextPendingConnection()
+        def on_ready_read():
+            data = sock.readAll().data()
+            if b"WAKEUP" in data:
+                window.show()
+                window.raise_()
+                window.activateWindow()
+            sock.disconnectFromServer()
+        sock.readyRead.connect(on_ready_read)
+        # Handle case where data is already available
+        if sock.bytesAvailable():
+            on_ready_read()
+
+    server.newConnection.connect(_on_ipc_connection)
 
     with loop:
         loop.run_forever()

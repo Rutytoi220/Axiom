@@ -150,7 +150,7 @@ Returns:
             self._emit('orchestrator.task.received', {'task': task, 'session_id': session_id})
             steps: List[str] = []
             if self._llm is None:
-                return self._prefix_route(task, steps)
+                return AgentResult(False, error='No LLM attached to OrchestratorAgent', steps_taken=steps)
             return self._agentic_loop(task, steps, use_tools=use_tools, session_id=session_id, timeout=timeout)
         finally:
             self._state = 'idle'
@@ -232,12 +232,38 @@ Returns:
                 time_left = max(1.0, deadline - time.time()) if deadline else 60.0
                 temp_override = 0.1 if intent in ('orchestration', 'code') else None
                 current_schemas = [] if force_text_response else tool_schemas
-                response_msg = self._call_llm(messages, current_schemas, timeout=time_left, temperature=temp_override)
+                
+                vision_images = []
+                for obs in observations:
+                    if obs.get('tool') == 'screen_capture' and obs.get('success'):
+                        res_out = obs.get('result', {}).get('output', {})
+                        if isinstance(res_out, dict) and 'image_b64' in res_out:
+                            b64 = res_out['image_b64']
+                            if b64 != '[IMAGE_PAYLOAD_MOVED_TO_VISION_CONTEXT]':
+                                vision_images.append(b64)
+                                res_out['image_b64'] = '[IMAGE_PAYLOAD_MOVED_TO_VISION_CONTEXT]'
+
+                response_msg = self._call_llm(messages, current_schemas, timeout=time_left, temperature=temp_override, images=vision_images)
                 force_text_response = False
                 tool_calls = response_msg.get('tool_calls') or []
                 content = response_msg.get('content')
                 logger.debug("RAW CONTENT: %r TOOL_CALLS: %s", content, tool_calls)
                 import re, json
+
+                # [ANTI-LAZINESS AUTONOMOUS OVERRIDE]
+                if not tool_calls and content and use_tools:
+                    from axiom.config import get_config, AuthMode
+                    config = get_config()
+                    if config.auth_mode == AuthMode.AUTOPILOT:
+                        # Check if the LLM outputted markdown shell or tool names but didn't invoke them
+                        lazy_pattern = r'```(?:bash|sh|shell)'
+                        if re.search(lazy_pattern, content.lower()) or "tool_call" in content.lower():
+                            logger.info("[Anti-Laziness] Intercepted tutorial-style response in Autopilot Mode. Forcing retry.")
+                            observations.append({
+                                'error': '[System Warning]: Do not output raw markdown instructions. You are in Autopilot Mode—invoke the tool call schema directly to execute this action.'
+                            })
+                            continue
+
                 if not tool_calls and content and use_tools:
                     pattern_python = '(\\w+)\\s*\\(["\\\']?(.*?)["\\\']?\\)'
                     pattern_md = '\\*\\*?(\\w+)\\*\\*?.*?```(?:json|text)?\\s*([^\\n`]+)\\s*```'
@@ -433,7 +459,25 @@ Returns:
             elif state == AgentState.OBSERVE:
                 self._log('OBSERVE: incorporated latest tool results', steps)
                 self._persist_step(session_id, 'observation', {'observations': observations[-3:]})
-                state = AgentState.REFLECT
+                
+                # [ANTI-LAZINESS AUTONOMOUS OVERRIDE] 
+                # Prevent model from prematurely exiting or giving a generic "I read the file" confirmation.
+                is_large_doc = False
+                if observations:
+                    last_obs = observations[-1]
+                    if isinstance(last_obs, dict) and last_obs.get('success'):
+                        output = last_obs.get('output', {})
+                        if isinstance(output, dict):
+                            content = str(output.get('content', ''))
+                            if "[PDF Content" in content or len(content) > 1500:
+                                is_large_doc = True
+                                
+                if is_large_doc:
+                    override_prompt = "[System Directive]: Document content successfully extracted above. Now fulfill the user's original request by synthesizing, summarizing, or analyzing this text in clear natural language."
+                    state = AgentState.THINK
+                    self._log('OBSERVE: Large document detected. Bypassing REFLECT to force synthesis.', steps)
+                else:
+                    state = AgentState.REFLECT
             elif state == AgentState.REFLECT:
                 reflection = self._reflect(task, plan, observations, final_response)
                 self._persist_step(session_id, 'reflection', reflection)
@@ -504,12 +548,28 @@ Returns:
                 tools_loaded = bool(self.registry.list_tools())
             except Exception:
                 logger.debug('Unable to determine whether action tools are loaded.', exc_info=True)
-        system_persona = "You are AXIOM, a local-first AI Operating System and developer assistant for Linux. You have access to native tools for file management, terminal execution, system monitoring, vision analysis, and sandboxed code execution. When asked about your capabilities, summarize your active tools and OS integration rather than speaking as a generic text assistant."
+        system_persona = (
+            "You are AXIOM, a local-first AI Operating System and developer assistant for Linux. "
+            "You have access to native tools for file management, terminal execution, system monitoring, vision analysis, and sandboxed code execution. "
+            "When asked about your capabilities, summarize your active tools and OS integration rather than speaking as a generic text assistant.\n\n"
+            "You are operating on a modern Linux system (such as Bazzite, Silverblue, or Debian). "
+            "Be aware that `/home/<user>` and `/var/home/<user>` are identical, valid symlinked directories on immutable/atomic Linux distributions. "
+            "NEVER argue with the user about valid file paths or claim `/var/home` is incorrect.\n\n"
+            "RULE OF FILE OPERATIONS: NEVER invoke `file_opener`, `file_read`, or shell execution on a guessed, incomplete, or unverified filename.\n"
+            "If the user asks to open 'the pdf in Downloads' without providing an exact, case-sensitive filename, YOU MUST FIRST execute `file_search` or `shell(ls ~/Downloads/*.pdf)` to list available files.\n"
+            "Ignore conversational slang, intensifiers, and adjectives (e.g., 'flippin', 'freaking', 'stupid', 'damn') when parsing filenames."
+        )
 
         if intent == 'chat':
             base_prompt = system_persona + ' Be concise, helpful, and conversational. Do not list your tools unless explicitly asked.'
         else:
-            base_prompt = (DIRECT_ACTION_MODE_GUARD + '\n\n' if tools_loaded else '') + system_persona + "\n1. Your sole purpose is to execute requested tasks using the provided tools.\n2. NEVER output your internal reasoning, thought process, or status logs in the Final Answer.\n3. If a tool call is required, invoke it natively and silently. DO NOT output raw JSON blocks in your text response.\n4. If no tool is required, provide ONLY the direct response to the user.\n5. If you must plan, keep it in an internal-only scratchpad (if implemented), but do not send it to the user interface.\n6. You MUST invoke tools using the native structured tool-call API whenever possible. If outputting text tool calls, strictly use registered tool names.\n7. CRITICAL RULE: You are strictly FORBIDDEN from claiming to have performed an action (opening a file, reading a document, executing a script) unless you have actually emitted a tool call and received the verified [System Observation]. DO NOT roleplay, simulate, or hallucinate tool execution in conversational prose. If a tool is not available, state explicitly that you cannot perform the action.\n8. CRITICAL Temporal Rule: You must respond ONLY to the user's latest (most recent) message at the very bottom of the prompt. Use older conversation history solely for context and reference. NEVER ignore the latest prompt to answer old, ignored, or previously addressed questions from earlier turns.\nCONSTRAINTS:\n- NO verbose planning logs.\n- STRIKE the 'Final Answer:' header from your output; just provide the content.\n9. [MULTIMODAL PERCEPTION] If the user refers to 'this window', 'my screen', 'look at this', or asks to diagnose a visual issue, you MUST use the 'capture_screen_context' tool."
+            base_prompt = (DIRECT_ACTION_MODE_GUARD + '\n\n' if tools_loaded else '') + system_persona + "\n1. Your sole purpose is to execute requested tasks using the provided tools.\n2. NEVER output your internal reasoning, thought process, or status logs in the Final Answer.\n3. If a tool call is required, invoke it natively and silently. DO NOT output raw JSON blocks in your text response.\n4. If no tool is required, provide ONLY the direct response to the user.\n5. If you must plan, keep it in an internal-only scratchpad (if implemented), but do not send it to the user interface.\n6. You MUST invoke tools using the native structured tool-call API whenever possible. If outputting text tool calls, strictly use registered tool names.\n7. CRITICAL RULE: You are strictly FORBIDDEN from claiming to have performed an action (opening a file, reading a document, executing a script) unless you have actually emitted a tool call and received the verified [System Observation]. DO NOT roleplay, simulate, or hallucinate tool execution in conversational prose. If a tool is not available, state explicitly that you cannot perform the action.\n8. CRITICAL Temporal Rule: You must respond ONLY to the user's latest (most recent) message at the very bottom of the prompt. Use older conversation history solely for context and reference. NEVER ignore the latest prompt to answer old, ignored, or previously addressed questions from earlier turns.\nCONSTRAINTS:\n- NO verbose planning logs.\n- STRIKE the 'Final Answer:' header from your output; just provide the content.\n9. [MULTIMODAL PERCEPTION] If the user refers to 'this window', 'my screen', 'look at this', or asks to diagnose a visual issue, you MUST use the 'screen_capture' tool."
+            base_prompt += (
+                "\n\nCRITICAL OPERATIONAL RULE: You are an autonomous AI Operating System, NOT a conversational chatbot or a tutorial assistant. "
+                "When a task requires finding a file, executing a script, checking system status, or modifying code, YOU MUST EXECUTE THE TOOL CALLS DIRECTLY via the JSON tool schema.\n"
+                "NEVER print markdown shell blocks (e.g., ```bash ... ```) telling the user to run commands manually.\n"
+                "NEVER explain how to use AXIOM's tools. If the user tells you to do something, execute the tool immediately without conversational filler."
+            )
         try:
             from axiom.perception.watcher import ActiveWindowContext
             active_win = ActiveWindowContext.get_active_window_title()
@@ -555,32 +615,35 @@ Returns:
                 messages = self._context_manager.build_context_window(system_messages=system_messages, chat_history=self._chat_history, current_task=task, retrieved_memories=memories, observations=observations)
         return messages
 
-    def _call_llm(self, messages: List[Dict[str, Any]], tool_schemas: List[Dict[str, Any]], timeout: Optional[float]=None, temperature: Optional[float]=None) -> Dict[str, Any]:
-        """Auto-generated docstring.
-
-Args:
-    messages: Argument.
-    tool_schemas: Argument.
-    timeout: Argument.
-    temperature: Argument.
-
-Returns:
-    Return value.
-"""
+    def _call_llm(self, messages: List[Dict[str, Any]], tool_schemas: List[Dict[str, Any]], timeout: Optional[float]=None, temperature: Optional[float]=None, images: Optional[List[str]]=None) -> Dict[str, Any]:
+        """Auto-generated docstring."""
         last_exc = None
         for attempt in range(LLM_RETRIES):
             try:
-                if tool_schemas and hasattr(self._llm, 'chat_with_tools'):
-                    kwargs = {'timeout': timeout} if timeout else {}
+                # Add stream callback if EventBus is available
+                bus = getattr(self, 'bus', getattr(self, '_bus', None))
+                if bus:
+                    from axiom.core.events import Event
+                    kwargs_inject = {'timeout': timeout} if timeout else {}
                     if temperature is not None:
-                        kwargs['temperature'] = temperature
-                    msg = self._llm.chat_with_tools(messages, tool_schemas, **kwargs)
+                        kwargs_inject['temperature'] = temperature
+                    if images:
+                        kwargs_inject['images'] = images
+                    kwargs_inject['stream_callback'] = lambda token: bus.publish(
+                        Event('llm.token', 'orchestrator', data={'token': token})
+                    )
+                else:
+                    kwargs_inject = {'timeout': timeout} if timeout else {}
+                    if temperature is not None:
+                        kwargs_inject['temperature'] = temperature
+                    if images:
+                        kwargs_inject['images'] = images
+
+                if tool_schemas and hasattr(self._llm, 'chat_with_tools'):
+                    msg = self._llm.chat_with_tools(messages, tool_schemas, **kwargs_inject)
                     response = msg if isinstance(msg, dict) else {'role': 'assistant', 'content': str(msg)}
                 else:
-                    kwargs = {'timeout': timeout} if timeout else {}
-                    if temperature is not None:
-                        kwargs['temperature'] = temperature
-                    content = self._llm.chat(messages, **kwargs)
+                    content = self._llm.chat(messages, **kwargs_inject)
                     response = {'role': 'assistant', 'content': content or ''}
                 
                 content_str = response.get('content', '')
@@ -720,6 +783,21 @@ Returns:
                 return "I don't have permission to access that file or folder. You might need to change its permissions."
             return err_str
         try:
+            # Emit UI Stream Integration
+            if tool_name in ('file_read', 'read_file'):
+                path_arg = arguments.get('path', arguments.get('file_path', ''))
+                self._emit('tool.started', {
+                    'tool_name': tool_name,
+                    'status': '📖 Reading Document',
+                    'message': f"{path_arg}..."
+                })
+            else:
+                self._emit('tool.started', {
+                    'tool_name': tool_name,
+                    'status': 'Executing',
+                    'message': f"{tool_name}..."
+                })
+                
             if self.registry and hasattr(self.registry, 'execute'):
                 tool_result = self.registry.execute(tool_name, **arguments)
                 raw_error = getattr(tool_result, 'error', None)
@@ -1008,22 +1086,4 @@ Returns:
                 return None
         return None
 
-    def _prefix_route(self, task: str, steps: List[str]) -> AgentResult:
-        """Auto-generated docstring.
 
-Args:
-    task: Argument.
-    steps: Argument.
-
-Returns:
-    Return value.
-"""
-        prefix, subtask = task.split(':', 1) if ':' in task else (None, task)
-        prefix = prefix.strip() if prefix else None
-        subtask = subtask.strip()
-        agent = self._agents.get('echo_agent') if prefix == 'echo' else None
-        if agent is not None:
-            self._log(f'Routing to agent: {agent.name}', steps)
-            result = agent.run(subtask)
-            return AgentResult(getattr(result, 'success', True), output=getattr(result, 'output', None), error=getattr(result, 'error', None), steps_taken=steps + getattr(result, 'steps_taken', []))
-        return AgentResult(False, error=f'No agent matched for: {task}', steps_taken=steps)
