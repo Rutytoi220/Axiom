@@ -51,13 +51,36 @@ class ToolPill(QFrame):
         self._detail_label.setObjectName("toolPillDetail")
         self._detail_label.setWordWrap(True)
         self._detail_label.setVisible(False)
+        
+        self._consensus_badge = QLabel()
+        self._consensus_badge.setObjectName("consensusBadge")
+        self._consensus_badge.setStyleSheet("background: #312e81; color: #a5b4fc; border-radius: 4px; padding: 2px 6px; font-weight: bold; font-size: 11px;")
+        self._consensus_badge.setVisible(False)
 
         outer = QVBoxLayout()
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(2)
         outer.addLayout(layout)
+        outer.addWidget(self._consensus_badge)
         outer.addWidget(self._detail_label)
         self.setLayout(outer)
+
+    def update_status(self, status: str) -> None:
+        self._detail_text = status
+        self._detail_label.setText(html.escape(status))
+        
+        # Check for Swarm Consensus triggers
+        if "[🔄 Swarm Consensus" in status:
+            self._consensus_badge.setText("🧪 Swarm Consensus: Testing generated code...")
+            self._consensus_badge.setVisible(True)
+        elif "Swarm Consensus: Verification PASSED" in status:
+            self._consensus_badge.setText("🧪 Swarm Consensus: Iterations Passed (Verified by TestAgent)")
+            self._consensus_badge.setStyleSheet("background: #064e3b; color: #6ee7b7; border-radius: 4px; padding: 2px 6px; font-weight: bold; font-size: 11px;")
+            self._consensus_badge.setVisible(True)
+        elif "Swarm Consensus: Max retries exhausted" in status or "Verification FAILED" in status:
+            self._consensus_badge.setText("🧪 Swarm Consensus: Verification Failed (Exhausted)")
+            self._consensus_badge.setStyleSheet("background: #7f1d1d; color: #fca5a5; border-radius: 4px; padding: 2px 6px; font-weight: bold; font-size: 11px;")
+            self._consensus_badge.setVisible(True)
 
     def _toggle_detail(self) -> None:
         self._expanded = not self._expanded

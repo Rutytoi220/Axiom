@@ -1094,6 +1094,7 @@ def run_cli() -> None:
     finally:
         cli.close()
 if __name__ == '__main__':
+    import sys
     import logging.config
     from pathlib import Path
     log_path = Path.home() / '.axiom' / 'daemon.log'
@@ -1104,5 +1105,20 @@ if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1].lower() == 'hud':
         from axiom.gui.hud import run_hud
         run_hud()
+    elif len(sys.argv) > 1 and sys.argv[1].lower() == 'pipe':
+        prompt = sys.argv[2] if len(sys.argv) > 2 else ""
+        if not sys.stdin.isatty():
+            stdin_content = sys.stdin.read().strip()
+            if stdin_content:
+                prompt = f"[Piped Terminal Input]:\n{stdin_content}\n\n[Task]: {prompt}"
+        
+        if not prompt:
+            print("Error: No prompt or piped input provided.")
+            sys.exit(1)
+            
+        import asyncio
+        from axiom.client.ipc_client import AxiomDaemonClient
+        client = AxiomDaemonClient()
+        asyncio.run(client.submit_task_and_stream(prompt))
     else:
         run_cli()

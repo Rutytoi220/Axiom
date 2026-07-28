@@ -3,6 +3,7 @@ import json
 import logging
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
+from axiom.engine.consensus import SwarmConsensusEngine
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,8 @@ class SwarmSupervisor:
     def __init__(self, llm_client=None, event_bus=None):
         self.llm = llm_client
         self.event_bus = event_bus
+        self.consensus_engine = SwarmConsensusEngine(event_bus)
+        
         if self.event_bus:
             self.event_bus.subscribe("scheduled.job", self._on_scheduled_job)
             
@@ -82,8 +85,22 @@ class SwarmSupervisor:
         ]
         
         try:
+            # Generate the initial synthesis
             response = self.llm.generate(messages)
-            return response.get("content", "")
+            content = response.get("content", "")
+            
+            # Use consensus engine to verify if there's code
+            if "```python" in content:
+                class DummyCoder:
+                    def chat(self, msgs, **kwargs):
+                        # The consensus engine passes messages, we just want it to generate using self.llm
+                        return self.llm.generate(msgs).get("content", "")
+                
+                # Re-bind for consensus loop
+                dummy = DummyCoder()
+                content = self.consensus_engine.run_verification_loop(dummy, f"User's original request: {user_prompt}\n\n{context}\n\nPlease verify and ensure the code is correct.")
+                
+            return content
         except Exception as e:
             logger.error(f"Synthesis failed: {e}")
             return "\n\n".join(f"**{agent}**:\n{res}" for agent, res in results.items())

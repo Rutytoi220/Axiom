@@ -77,3 +77,40 @@ class AxiomDaemonClient:
         except Exception as e:
             logger.error(f"Failed to submit task: {e}")
             return False
+
+    async def submit_task_and_stream(self, prompt: str):
+        """Submit task and stream response to stdout, blocking until complete."""
+        import sys
+        if not await self.connect():
+            return False
+
+        loop_complete = asyncio.Event()
+
+        def handle_event(data):
+            if data.get("type") == "event":
+                event_type = data.get("event", {}).get("type")
+                if event_type == "telemetry.token":
+                    token = data.get("event", {}).get("data", {}).get("token", "")
+                    sys.stdout.write(token)
+                    sys.stdout.flush()
+                elif event_type == "telemetry.update":
+                    msg = data.get("event", {}).get("data", {}).get("message", "")
+                    sys.stdout.write(f"\n{msg}\n")
+                    sys.stdout.flush()
+                elif event_type == "orchestrator.completed":
+                    sys.stdout.write("\n")
+                    sys.stdout.flush()
+                    loop_complete.set()
+                elif event_type == "orchestrator.error":
+                    sys.stdout.write(f"\nError: {data.get('event', {}).get('data', {}).get('error', '')}\n")
+                    sys.stdout.flush()
+                    loop_complete.set()
+
+        self.on_event = handle_event
+        
+        success = await self.submit_task(prompt)
+        if success:
+            await loop_complete.wait()
+            
+        await self.disconnect()
+        return success
