@@ -6,10 +6,10 @@ import os
 import shlex
 import platform
 import shutil
+__all__ = ['ToolResult', 'ToolParameter', 'BaseTool', 'EchoTool', 'ShellTool', 'FileReadTool', 'FileWriteTool', 'SystemInfoTool', 'FileTool', 'SafeFileSearchTool', 'FileOpenerTool', 'AppLauncherTool', 'ClipboardReadTool', 'ClipboardWriteTool']
 from abc import ABC
 from typing import Any, Dict, List, Optional
 from pathlib import Path
-__all__ = ['ToolResult', 'ToolParameter', 'BaseTool', 'EchoTool', 'ShellTool', 'FileReadTool', 'FileWriteTool', 'SystemInfoTool', 'FileTool', 'SafeFileSearchTool', 'FileOpenerTool', 'AppLauncherTool']
 logger = logging.getLogger(__name__)
 
 class ToolResult:
@@ -375,6 +375,16 @@ Returns:
                     return ToolResult(success=False, error='Command execution aborted by user')
             except (EOFError, KeyboardInterrupt):
                 return ToolResult(success=False, error='Command execution aborted by user')
+                
+        # Security Sandbox Evaluation
+        from axiom.engine.security import SecuritySandbox
+        sandbox = SecuritySandbox()
+        # For simplicity, agent_name is hardcoded since BaseTool doesn't track it, 
+        # or we could try to extract from orchestrator state, but we'll use "Agent" for now
+        is_allowed, reason = sandbox.evaluate_command("Agent", self.tool_id, params)
+        if not is_allowed:
+            return ToolResult(success=False, error=reason)
+            
         if self._is_blocked(command):
             return ToolResult(success=False, error='Command blocked by shell safety policy')
         try:
@@ -644,6 +654,14 @@ Returns:
             full_path.relative_to(self._base_dir)
         except ValueError:
             return ToolResult(success=False, error='Path resolves outside sandbox')
+            
+        # Security Sandbox Evaluation
+        from axiom.engine.security import SecuritySandbox
+        sandbox = SecuritySandbox()
+        is_allowed, reason = sandbox.evaluate_command("Agent", self.tool_id, params)
+        if not is_allowed:
+            return ToolResult(success=False, error=reason)
+            
         enc = params.get('encoding', 'utf-8')
         try:
             if op == 'write':

@@ -184,6 +184,14 @@ class MainWindow(QMainWindow):
         
         tb.addSeparator()
 
+        # ---- Security Audit Button ----
+        self._audit_btn = QPushButton("🛡️ Security Log")
+        self._audit_btn.setObjectName("auditBtn")
+        self._audit_btn.clicked.connect(self._open_audit_dialog)
+        tb.addWidget(self._audit_btn)
+        
+        tb.addSeparator()
+
         # ---- Settings Button ----
         self._settings_btn = QPushButton("⚙️ Settings")
         self._settings_btn.setObjectName("settingsBtn")
@@ -552,11 +560,16 @@ class MainWindow(QMainWindow):
         self._first_ollama_ping = False
 
     @Slot()
-    def _open_settings_dialog(self):
+    def _open_settings_dialog(self) -> None:
         from axiom.gui.widgets.settings_dialog import SettingsDialog
         dlg = SettingsDialog(self._bridge, self)
         dlg.settings_updated.connect(self._on_settings_updated)
         dlg.exec()
+
+    def _open_audit_dialog(self) -> None:
+        from axiom.gui.widgets.audit_dialog import AuditDialog
+        dialog = AuditDialog(self)
+        dialog.exec()
 
     @Slot()
     def _on_settings_updated(self):

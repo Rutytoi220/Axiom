@@ -153,7 +153,8 @@ Returns:
         from axiom.tools.os_assist import SafeFileSearchTool, FileOpenerTool, AppLauncherTool
         from axiom.tools.vision_tools import ScreenCaptureTool
         from axiom.tools.document_reader import ReadDocumentContentTool
-        tools = [EchoTool(), ShellTool(), FileReadTool('.'), FileWriteTool('.'), SystemInfoTool(), SafeFileSearchTool(), FileOpenerTool(), AppLauncherTool(), ScreenCaptureTool(), ReadDocumentContentTool()]
+        from axiom.tools.clipboard_tools import ClipboardReadTool, ClipboardWriteTool
+        tools = [EchoTool(), ShellTool(), FileReadTool('.'), FileWriteTool('.'), SystemInfoTool(), SafeFileSearchTool(), FileOpenerTool(), AppLauncherTool(), ScreenCaptureTool(), ReadDocumentContentTool(), ClipboardReadTool(), ClipboardWriteTool()]
         tools.extend(create_legacy_tools())
         for tool in tools:
             self.engine.registry.register_tool(tool.tool_id, tool)
@@ -1099,4 +1100,9 @@ if __name__ == '__main__':
     log_path.parent.mkdir(parents=True, exist_ok=True)
     logging_config = {'version': 1, 'disable_existing_loggers': False, 'formatters': {'standard': {'format': '%(asctime)s [%(levelname)s] %(name)s: %(message)s'}}, 'handlers': {'file': {'level': 'DEBUG', 'class': 'logging.FileHandler', 'filename': str(log_path), 'formatter': 'standard'}, 'console': {'level': 'WARNING', 'class': 'logging.StreamHandler', 'formatter': 'standard'}}, 'root': {'handlers': ['file', 'console'], 'level': 'DEBUG'}}
     logging.config.dictConfig(logging_config)
-    run_cli()
+
+    if len(sys.argv) > 1 and sys.argv[1].lower() == 'hud':
+        from axiom.gui.hud import run_hud
+        run_hud()
+    else:
+        run_cli()
