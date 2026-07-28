@@ -1,7 +1,10 @@
 import logging
 import asyncio
+import re
+import uuid
 from typing import Dict, Any, List, Optional
 from axiom.memory.vector_store import VectorMemoryEngine
+from axiom.engine.graph_memory import GraphMemoryEngine
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +17,7 @@ class TransactionalMemoryManager:
         else:
             self.engine = memory_engine
             
+        self.graph = GraphMemoryEngine()
         self._staged_documents: List[Dict[str, Any]] = []
         self._in_transaction = False
         
@@ -47,6 +51,7 @@ class TransactionalMemoryManager:
             # We process all chunks and if any fail (exception raised), we catch it
             for doc in self._staged_documents:
                 await self.engine.add_document(doc["doc_id"], doc["text"], doc["metadata"])
+                self._extract_and_inject_graph(doc["text"])
                 
             self._in_transaction = False
             self._staged_documents.clear()
@@ -69,4 +74,32 @@ class TransactionalMemoryManager:
         self._in_transaction = False
         self._staged_documents.clear()
         logger.warning("Memory Transaction ROLLBACK complete. Uncommitted vectors discarded.")
+
+    def _extract_and_inject_graph(self, text: str):
+        """Tier 1 basic regex extraction for GraphRAG."""
+        # Simple extraction for demo: look for "service" failing and dependencies
+        # Example pattern: "nginx.service failed due to port 80 conflict"
+        
+        service_match = re.search(r'([\w-]+\.service)', text)
+        if service_match:
+            service_name = service_match.group(1)
+            service_id = f"ent_{uuid.uuid4().hex[:8]}"
+            self.graph.add_entity(service_id, service_name, "Service", {"extracted_from": "text"})
+            
+            # Check for port dependency
+            port_match = re.search(r'port (\d+)', text)
+            if port_match:
+                port_num = port_match.group(1)
+                port_name = f"Port {port_num}"
+                port_id = f"ent_{uuid.uuid4().hex[:8]}"
+                self.graph.add_entity(port_id, port_name, "Port", {"number": port_num})
+                self.graph.add_relationship(service_id, port_id, "DEPENDS_ON", 1.0)
+                
+            # Check for generic dependencies like "network.target"
+            target_match = re.search(r'([\w-]+\.target)', text)
+            if target_match:
+                target_name = target_match.group(1)
+                target_id = f"ent_{uuid.uuid4().hex[:8]}"
+                self.graph.add_entity(target_id, target_name, "Target", {})
+                self.graph.add_relationship(service_id, target_id, "DEPENDS_ON", 1.0)
 

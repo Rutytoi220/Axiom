@@ -17,6 +17,8 @@ class SecuritySandbox:
         r'/etc/',
         r'wget\s+',
         r'curl\s+',
+        r'ssh\s+',
+        r'scp\s+'
     ]
 
     _instance = None
@@ -37,7 +39,10 @@ class SecuritySandbox:
         if not command and tool_name in ('file_write', 'file_opener'):
             command = arguments.get('path', '')
             
-        is_high_risk = False
+        if tool_name == 'ssh_teleport':
+            is_high_risk = True
+        else:
+            is_high_risk = False
         
         # Check patterns
         for pattern in self._compiled_patterns:

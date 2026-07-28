@@ -112,13 +112,17 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        self._scheduler_service.start()
-        self._sys_watchdog.start()
+        if hasattr(self, '_scheduler_service'):
+            self._scheduler_service.start()
+        if hasattr(self, '_sys_watchdog'):
+            self._sys_watchdog.start()
 
     def closeEvent(self, event) -> None:
         """Handle window close."""
-        self._scheduler_service.stop()
-        self._sys_watchdog.stop()
+        if hasattr(self, '_scheduler_service'):
+            self._scheduler_service.stop()
+        if hasattr(self, '_sys_watchdog'):
+            self._sys_watchdog.stop()
         super().closeEvent(event)
 
     # ------------------------------------------------------------------
@@ -213,6 +217,22 @@ class MainWindow(QMainWindow):
         self._health_btn.setStyleSheet("color: #f38ba8;")
         self._health_btn.clicked.connect(self._open_health_radar)
         tb.addWidget(self._health_btn)
+
+        tb.addSeparator()
+        
+        # ---- Knowledge Graph Button ----
+        self._graph_btn = QPushButton("🕸️ Knowledge Graph")
+        self._graph_btn.setObjectName("graphBtn")
+        self._graph_btn.setStyleSheet("color: #cba6f7;")
+        self._graph_btn.clicked.connect(self._open_graph_dialog)
+        tb.addWidget(self._graph_btn)
+        
+        # ---- Recall Timeline Button ----
+        self._recall_btn = QPushButton("⏱️ Recall Timeline")
+        self._recall_btn.setObjectName("recallBtn")
+        self._recall_btn.setStyleSheet("color: #89b4fa;")
+        self._recall_btn.clicked.connect(self._open_recall_dialog)
+        tb.addWidget(self._recall_btn)
 
         tb.addSeparator()
 
@@ -616,6 +636,16 @@ class MainWindow(QMainWindow):
         dlg = HealthRadarDialog(self)
         dlg.exec()
 
+    def _open_graph_dialog(self) -> None:
+        from axiom.gui.widgets.graph_dialog import GraphDialog
+        dlg = GraphDialog(self)
+        dlg.exec()
+        
+    def _open_recall_dialog(self) -> None:
+        from axiom.gui.widgets.recall_dialog import RecallDialog
+        dlg = RecallDialog(self)
+        dlg.exec()
+
     @Slot()
     def _open_budget_dialog(self) -> None:
         from axiom.gui.widgets.budget_dialog import BudgetDialog
@@ -710,5 +740,9 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def _open_scheduler_dialog(self) -> None:
+        if not hasattr(self, '_scheduler_service'):
+            from axiom.services.scheduler_service import BackgroundSchedulerService
+            from axiom.core.events import EventBus
+            self._scheduler_service = BackgroundSchedulerService(event_bus=EventBus())
         dlg = SchedulerDialog(self._scheduler_service, self)
         dlg.exec()
