@@ -203,6 +203,14 @@ class MainWindow(QMainWindow):
 
         tb.addSeparator()
 
+        # ---- KVM Sandbox Button ----
+        self._kvm_btn = QPushButton("🖥️ KVM Sandboxes")
+        self._kvm_btn.setObjectName("kvmBtn")
+        self._kvm_btn.clicked.connect(self._open_vm_dialog)
+        tb.addWidget(self._kvm_btn)
+
+        tb.addSeparator()
+
         # ---- Automation Button ----
         self._automation_btn = QPushButton("⏱️ Automation")
         self._automation_btn.setObjectName("automationBtn")
@@ -422,11 +430,18 @@ class MainWindow(QMainWindow):
 
         self._thermal_label = QLabel("🌡️ Thermal: Normal (64°C)")
         self._thermal_label.setStyleSheet("color: #a6e3a1; font-weight: bold;")
+        
+        self.voice_btn = QPushButton("🔊 Voice: Active")
+        self.voice_btn.setCheckable(True)
+        self.voice_btn.setChecked(True)
+        self.voice_btn.setStyleSheet("border: none; color: #89b4fa; font-weight: bold;")
+        self.voice_btn.clicked.connect(self._toggle_voice)
 
         sb.addWidget(self._status_mode)
         sb.addWidget(self._status_memory)
         sb.addWidget(self.governor_btn)
         sb.addWidget(self._thermal_label)
+        sb.addWidget(self.voice_btn)
         sb.addPermanentWidget(self._status_model)
         
         # Memory polling timer
@@ -698,6 +713,21 @@ class MainWindow(QMainWindow):
         from axiom.gui.widgets.fs_dialog import AxiomFSDialog
         dlg = AxiomFSDialog(self)
         dlg.exec()
+        
+    def _open_vm_dialog(self) -> None:
+        from axiom.gui.widgets.vm_dialog import VMManagerDialog
+        dlg = VMManagerDialog(self)
+        dlg.exec()
+        
+    def _toggle_voice(self, checked: bool) -> None:
+        if checked:
+            self.voice_btn.setText("🔊 Voice: Active")
+            self.voice_btn.setStyleSheet("border: none; color: #89b4fa; font-weight: bold;")
+        else:
+            self.voice_btn.setText("🔇 Voice: Muted")
+            self.voice_btn.setStyleSheet("border: none; color: #6c7086; font-weight: bold;")
+        # Send toggle to voice daemon via IPC or local instance
+        pass
 
     @Slot()
     def _open_budget_dialog(self) -> None:

@@ -5,6 +5,7 @@ import os
 from typing import Dict, Any, Tuple
 from axiom.engine.audit_ledger import AuditLedger
 from axiom.engine.container_sandbox import ContainerSandboxManager
+from axiom.engine.vm_orchestrator import MicroVMManager
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ class SecuritySandbox:
             from axiom.engine.snapshot_engine import SnapshotManager
             cls._instance.snapshot_mgr = SnapshotManager()
             cls._instance.container_mgr = ContainerSandboxManager()
+            cls._instance.vm_mgr = MicroVMManager()
         return cls._instance
 
     def evaluate_command(self, agent_name: str, tool_name: str, arguments: Dict[str, Any]) -> Tuple[bool, str]:
@@ -56,11 +58,23 @@ class SecuritySandbox:
         risk_level = "HIGH" if is_high_risk else "LOW"
         
         if is_high_risk:
-            # Block and emit notification
-            status = "BLOCKED"
-            self._emit_dbus_notification(agent_name, command)
+            # Elevate to KVM Micro-VM mode
+            status = "KVM_ELEVATED"
+            logger.warning(f"Security Sandbox: High Risk Command detected. Elevating to KVM Micro-VM: {command}")
+            vm_id = self.vm_mgr.create_disposable_vm()
+            
+            # Execute in VM and destroy
+            try:
+                output = self.vm_mgr.exec_in_vm(vm_id, command)
+            finally:
+                self.vm_mgr.destroy_vm(vm_id)
+                
             self.ledger.log_execution(agent_name, tool_name, arguments, risk_level, status)
-            return False, f"Command blocked by Security Sandbox (High Risk): {command}"
+            
+            if tool_name in ('shell_command', 'run_command', 'shell'):
+                arguments['command'] = f"echo 'KVM Execution Intercepted: {output}'"
+                
+            return True, f"Command executed safely in KVM Micro-VM: {command}"
             
         # Allowed
         status = "ALLOWED"
