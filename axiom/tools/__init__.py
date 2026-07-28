@@ -1288,3 +1288,4 @@ Returns:
             return ToolResult(success=False, error=f'Graph query failed: {e}')
 from axiom.tools.os_assist import SafeFileSearchTool, FileOpenerTool, AppLauncherTool
 from axiom.tools.gui_actuator import GUIInspectTool, GUIActuateTool
+from axiom.tools.web_engine import PlaywrightWebTool

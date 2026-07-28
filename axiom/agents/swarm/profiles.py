@@ -51,3 +51,4 @@ class VisionAgent(BaseSubagent):
         self.set_system_prompt(
             "You are VisionAgent. You use screen capture and visual analysis to answer questions about the current screen state."
         )
+from axiom.engine.cyber_auditor import SecurityAuditorAgent

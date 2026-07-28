@@ -234,6 +234,13 @@ class MainWindow(QMainWindow):
         self._recall_btn.clicked.connect(self._open_recall_dialog)
         tb.addWidget(self._recall_btn)
 
+        # ---- Cyber Audit Button ----
+        self._audit_btn = QPushButton("🛡️ Cyber Audit")
+        self._audit_btn.setObjectName("auditBtn")
+        self._audit_btn.setStyleSheet("color: #fab387;")
+        self._audit_btn.clicked.connect(self._open_security_dialog)
+        tb.addWidget(self._audit_btn)
+
         tb.addSeparator()
 
         # ---- Skill Library Button ----
@@ -644,6 +651,11 @@ class MainWindow(QMainWindow):
     def _open_recall_dialog(self) -> None:
         from axiom.gui.widgets.recall_dialog import RecallDialog
         dlg = RecallDialog(self)
+        dlg.exec()
+        
+    def _open_security_dialog(self) -> None:
+        from axiom.gui.widgets.security_dialog import SecurityDashboardDialog
+        dlg = SecurityDashboardDialog(self)
         dlg.exec()
 
     @Slot()

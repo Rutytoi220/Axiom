@@ -90,6 +90,23 @@ class HUDWindow(QWidget):
         """)
         self.dictate_btn.clicked.connect(self._on_dictate_toggle)
         header_layout.addWidget(self.dictate_btn)
+
+        self.crop_btn = QPushButton("✂️ Crop Vision")
+        self.crop_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #313244;
+                color: #cdd6f4;
+                border: none;
+                border-radius: 6px;
+                padding: 5px 10px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #45475a;
+            }
+        """)
+        self.crop_btn.clicked.connect(self._on_crop_vision)
+        header_layout.addWidget(self.crop_btn)
         
         self.paste_btn = QPushButton("📋 Paste Context")
         self.paste_btn.setStyleSheet("""
@@ -232,6 +249,19 @@ class HUDWindow(QWidget):
             self.output_area.verticalScrollBar().setValue(self.output_area.verticalScrollBar().maximum())
         elif event_type == "orchestrator.finished":
             self.status_icon.setText("✅")
+
+    def _on_crop_vision(self):
+        """Open the fullscreen transparent overlay to draw a crop region."""
+        from axiom.gui.overlay_hud import CropOverlayWindow
+        self._overlay = CropOverlayWindow()
+        self._overlay.crop_selected.connect(self._handle_crop)
+        self._overlay.show()
+        
+    def _handle_crop(self, x: int, y: int, w: int, h: int):
+        """Send the cropped region coordinates to VisionAgent for analysis."""
+        self.input_field.setText(f"/vision --crop {x},{y},{w},{h} What is in this region?")
+        self.input_field.setFocus()
+        self.show()
 
 def run_hud():
     app = QApplication.instance() or QApplication(sys.argv)
