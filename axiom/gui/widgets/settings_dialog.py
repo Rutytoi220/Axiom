@@ -95,6 +95,24 @@ class SettingsDialog(QDialog):
         fed_layout.addStretch()
         self.tabs.addTab(fed_tab, "🌐 Cloud Federation & Budget")
         
+        # --- Cron Swarms & Voice Tab ---
+        cron_tab = QWidget()
+        cron_layout = QVBoxLayout(cron_tab)
+        cron_form = QFormLayout()
+        cron_form.setSpacing(12)
+        
+        self._whisper_model = QComboBox()
+        self._whisper_model.addItems(["tiny.en", "base.en", "small.en"])
+        self._whisper_model.currentIndexChanged.connect(self._save_settings)
+        cron_form.addRow("Whisper Dictation Model:", self._whisper_model)
+        
+        self._cron_jobs_label = QLabel("Active Cron Jobs:\n(See ~/.config/axiom/cron.json)")
+        cron_form.addRow("Background Swarms:", self._cron_jobs_label)
+        
+        cron_layout.addLayout(cron_form)
+        cron_layout.addStretch()
+        self.tabs.addTab(cron_tab, "⏱️ Cron Swarms & Voice")
+        
         layout.addWidget(self.tabs)
 
     def _load_current_settings(self):
@@ -131,6 +149,11 @@ class SettingsDialog(QDialog):
             logger.warning(f"Could not load keys: {e}")
             
         self._daily_token_limit.setValue(getattr(self.config, 'daily_cloud_token_limit', 50000))
+        
+        whisper_model = getattr(self.config, 'whisper_model', 'tiny.en')
+        idx = self._whisper_model.findText(whisper_model)
+        if idx >= 0:
+            self._whisper_model.setCurrentIndex(idx)
 
     def _on_routing_changed(self):
         mode = self._routing_combo.currentData()
@@ -153,6 +176,7 @@ class SettingsDialog(QDialog):
             self.config.ollama_model = self._model_combo.currentText()
             
         setattr(self.config, 'daily_cloud_token_limit', self._daily_token_limit.value())
+        setattr(self.config, 'whisper_model', self._whisper_model.currentText())
         self.config.save()
         
         # Save federation keys

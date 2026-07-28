@@ -18,7 +18,7 @@ class BackgroundSchedulerService:
     def __init__(self, event_bus: EventBus):
         self.scheduler = BackgroundScheduler()
         self._bus = event_bus
-        self.config_file = os.path.expanduser("~/.config/axiom/scheduled_jobs.json")
+        self.config_file = os.path.expanduser("~/.config/axiom/cron.json")
         self._job_schedules = {}
         
     def start(self):
@@ -42,9 +42,17 @@ class BackgroundSchedulerService:
             body="Task started...",
             icon="document-open-recent"
         )
-        if self._bus:
-            now = time.time()
-            self._bus.publish_sync("scheduled.job", data={"job_id": name, "prompt": prompt, "timestamp": now})
+        
+        # Fire off the Cron Swarm Engine asynchronously
+        from axiom.services.cron_swarm import CronSwarmEngine
+        import asyncio
+        engine = CronSwarmEngine(self._bus)
+        
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.create_task(engine.execute_job(name, prompt))
+        else:
+            asyncio.run(engine.execute_job(name, prompt))
 
     def _save_jobs(self):
         """Save jobs to JSON."""
@@ -81,16 +89,21 @@ class BackgroundSchedulerService:
             with open(self.config_file, 'r') as f:
                 jobs_data = json.load(f)
                 
-            for j in jobs_data:
+            jobs_list = jobs_data.get("jobs", [])
+            for j in jobs_list:
+                # Handle old schema or new schema
+                trigger_type = j.get("trigger_type", "cron")
+                schedule = j.get("cron", j.get("schedule", "0 8 * * *"))
+                
                 self.add_job(
                     name=j["name"],
                     prompt=j["prompt"],
-                    trigger_type=j["trigger_type"],
-                    schedule=j["schedule"],
+                    trigger_type=trigger_type,
+                    schedule=schedule,
                     save=False
                 )
                 if j.get("paused"):
-                    self.pause_job(j["id"])
+                    self.pause_job(j.get("id", j["name"]))
                     
         except Exception as e:
             logger.error(f"Failed to load scheduled jobs: {e}")

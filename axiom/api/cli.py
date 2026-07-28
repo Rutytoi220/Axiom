@@ -1120,5 +1120,8 @@ if __name__ == '__main__':
         from axiom.client.ipc_client import AxiomDaemonClient
         client = AxiomDaemonClient()
         asyncio.run(client.submit_task_and_stream(prompt))
+    elif len(sys.argv) > 1 and sys.argv[1].lower() == 'mcp-server':
+        from axiom.server.mcp_server import run_mcp_server
+        run_mcp_server()
     else:
         run_cli()

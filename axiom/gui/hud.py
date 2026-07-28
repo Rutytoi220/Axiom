@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
     QLineEdit, QPushButton, QTextEdit, QLabel
 )
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, Slot, QMetaObject, Q_ARG, Qt as QtCoreQt
 from PySide6.QtGui import QIcon, QFont, QColor
 
 from axiom.client.ipc_client import AxiomDaemonClient
@@ -26,6 +26,8 @@ class HUDWindow(QWidget):
         self._init_ui()
         self._client = AxiomDaemonClient()
         self._client.on_event = self._on_daemon_event
+        self._voice_engine = None
+        self._is_recording = False
         
         # Center on screen
         screen = QApplication.primaryScreen().geometry()
@@ -71,6 +73,23 @@ class HUDWindow(QWidget):
         """)
         self.input_field.returnPressed.connect(self._on_submit)
         header_layout.addWidget(self.input_field)
+        
+        self.dictate_btn = QPushButton("🎙️ Dictate")
+        self.dictate_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #313244;
+                color: #cdd6f4;
+                border: none;
+                border-radius: 6px;
+                padding: 5px 10px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #45475a;
+            }
+        """)
+        self.dictate_btn.clicked.connect(self._on_dictate_toggle)
+        header_layout.addWidget(self.dictate_btn)
         
         self.paste_btn = QPushButton("📋 Paste Context")
         self.paste_btn.setStyleSheet("""
@@ -133,6 +152,56 @@ class HUDWindow(QWidget):
             current = self.input_field.text()
             self.input_field.setText(f"[System Clipboard Context]:\n{text}\n\n[User Request]: {current}")
             self.input_field.setFocus()
+
+    def _on_dictate_toggle(self):
+        if not self._voice_engine:
+            from axiom.tools.voice_engine import VoiceDictationEngine
+            self._voice_engine = VoiceDictationEngine()
+            
+        if not self._is_recording:
+            self._is_recording = True
+            self.dictate_btn.setText("🔴 Recording...")
+            self.dictate_btn.setStyleSheet("QPushButton { background-color: #f38ba8; color: #11111b; border-radius: 6px; padding: 5px 10px; font-weight: bold; }")
+            self._voice_engine.start_recording()
+        else:
+            self._is_recording = False
+            self.dictate_btn.setText("⏳ Processing...")
+            self.dictate_btn.setStyleSheet("QPushButton { background-color: #f9e2af; color: #11111b; border-radius: 6px; padding: 5px 10px; font-weight: bold; }")
+            
+            # Process in background
+            def process():
+                text = self._voice_engine.stop_recording_and_transcribe()
+                # Run back in main thread
+                QMetaObject.invokeMethod(
+                    self, 
+                    "_on_dictate_finished", 
+                    QtCoreQt.QueuedConnection, 
+                    Q_ARG(str, text)
+                )
+                
+            import threading
+            threading.Thread(target=process, daemon=True).start()
+
+    @Slot(str)
+    def _on_dictate_finished(self, text: str):
+        self.dictate_btn.setText("🎙️ Dictate")
+        self.dictate_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #313244;
+                color: #cdd6f4;
+                border: none;
+                border-radius: 6px;
+                padding: 5px 10px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #45475a;
+            }
+        """)
+        if text:
+            current = self.input_field.text()
+            self.input_field.setText(f"{current} {text}".strip())
+        self.input_field.setFocus()
 
     def _on_submit(self):
         prompt = self.input_field.text().strip()
