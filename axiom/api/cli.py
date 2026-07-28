@@ -920,6 +920,23 @@ Returns:
                 os.environ['AXIOM_AUTOPILOT'] = '1'
                 print('[✓] Autopilot ENABLED. Security warnings will be bypassed.')
 
+    def do_package(self, arg: str) -> None:
+        """Build & package AXIOM. Usage: package --target [freeze|deb|rpm|appimage|exe|dmg|all]"""
+        parts = arg.strip().split()
+        if not parts or parts[0] != '--target' or len(parts) < 2:
+            print('Usage: package --target [freeze|deb|rpm|appimage|exe|dmg|all]')
+            return
+        target = parts[1]
+        print(f'\n[📦] Starting AXIOM Package Engine → target={target}')
+        try:
+            from axiom.build.package_engine import PackageEngine
+            engine = PackageEngine()
+            engine.run(target)
+            print(f'[✓] Package pipeline complete for target: {target}')
+        except Exception as e:
+            print(f'[✗] Package pipeline failed: {e}')
+            logger.exception('Package pipeline error')
+
     def do_replay(self, arg: str) -> None:
         """Alias for trace --last"""
         self.do_trace('--last')

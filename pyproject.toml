@@ -67,6 +67,9 @@ gui = [
     "PySide6>=6.5.0",
     "qasync>=0.27.0",
 ]
+build = [
+    "pyinstaller>=6.0.0",
+]
 
 [project.scripts]
 axiom = "axiom.api.cli:main"
