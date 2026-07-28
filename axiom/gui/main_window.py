@@ -192,6 +192,14 @@ class MainWindow(QMainWindow):
         self._sandbox_btn.setObjectName("sandboxBtn")
         self._sandbox_btn.clicked.connect(self._open_sandbox_dialog)
         tb.addWidget(self._sandbox_btn)
+        
+        tb.addSeparator()
+        
+        # ---- AxiomFS Explorer Button ----
+        self._fs_btn = QPushButton("📁 AxiomFS")
+        self._fs_btn.setObjectName("fsBtn")
+        self._fs_btn.clicked.connect(self._open_fs_dialog)
+        tb.addWidget(self._fs_btn)
 
         tb.addSeparator()
 
@@ -411,10 +419,14 @@ class MainWindow(QMainWindow):
         self.governor_btn = QPushButton("⚡ Governor: Active (60 FPS)")
         self.governor_btn.setStyleSheet("border: none; color: #f9e2af; font-weight: bold;")
         self.governor_btn.clicked.connect(self._open_governor_dialog)
-        
+
+        self._thermal_label = QLabel("🌡️ Thermal: Normal (64°C)")
+        self._thermal_label.setStyleSheet("color: #a6e3a1; font-weight: bold;")
+
         sb.addWidget(self._status_mode)
         sb.addWidget(self._status_memory)
         sb.addWidget(self.governor_btn)
+        sb.addWidget(self._thermal_label)
         sb.addPermanentWidget(self._status_model)
         
         # Memory polling timer
@@ -680,6 +692,11 @@ class MainWindow(QMainWindow):
     def _open_sandbox_dialog(self) -> None:
         from axiom.gui.widgets.sandbox_dialog import SandboxManagerDialog
         dlg = SandboxManagerDialog(self)
+        dlg.exec()
+        
+    def _open_fs_dialog(self) -> None:
+        from axiom.gui.widgets.fs_dialog import AxiomFSDialog
+        dlg = AxiomFSDialog(self)
         dlg.exec()
 
     @Slot()

@@ -6,7 +6,7 @@ import os
 import shlex
 import platform
 import shutil
-__all__ = ['ToolResult', 'ToolParameter', 'BaseTool', 'EchoTool', 'ShellTool', 'FileReadTool', 'FileWriteTool', 'SystemInfoTool', 'FileTool', 'SafeFileSearchTool', 'FileOpenerTool', 'AppLauncherTool', 'ClipboardReadTool', 'ClipboardWriteTool', 'GUIInspectTool', 'GUIActuateTool', 'PlaywrightWebTool', 'WorkspaceOrchestrateTool']
+__all__ = ['ToolResult', 'ToolParameter', 'BaseTool', 'EchoTool', 'ShellTool', 'FileReadTool', 'FileWriteTool', 'SystemInfoTool', 'FileTool', 'SafeFileSearchTool', 'FileOpenerTool', 'AppLauncherTool', 'ClipboardReadTool', 'ClipboardWriteTool', 'GUIInspectTool', 'GUIActuateTool', 'PlaywrightWebTool', 'WorkspaceOrchestrateTool', 'LiveVisionStreamTool']
 from abc import ABC
 from typing import Any, Dict, List, Optional
 from pathlib import Path
@@ -1292,3 +1292,4 @@ from axiom.tools.web_engine import PlaywrightWebTool
 
 from axiom.tools.workspace_manager import WorkspaceOrchestrateTool
 from axiom.tools.web_engine import PlaywrightWebTool
+from axiom.tools.live_vision import LiveVisionStreamTool
