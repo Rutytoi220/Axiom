@@ -1,8 +1,10 @@
 import re
 import subprocess
 import logging
+import os
 from typing import Dict, Any, Tuple
 from axiom.engine.audit_ledger import AuditLedger
+from axiom.engine.container_sandbox import ContainerSandboxManager
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,7 @@ class SecuritySandbox:
             
             from axiom.engine.snapshot_engine import SnapshotManager
             cls._instance.snapshot_mgr = SnapshotManager()
+            cls._instance.container_mgr = ContainerSandboxManager()
         return cls._instance
 
     def evaluate_command(self, agent_name: str, tool_name: str, arguments: Dict[str, Any]) -> Tuple[bool, str]:
@@ -65,6 +68,12 @@ class SecuritySandbox:
         # If it's a modifying command but allowed (e.g. strict mode approved), create a snapshot
         if tool_name in ('shell_command', 'run_command', 'shell', 'file_write'):
             self.snapshot_mgr.create_checkpoint(f"Pre-execution of {tool_name} by {agent_name}")
+            
+            if tool_name in ('shell_command', 'run_command', 'shell'):
+                # Dynamically inject the sandbox wrapper into the command string
+                # We overwrite the arguments dict which will be returned to the executor
+                workspace_dir = os.getcwd()
+                arguments['command'] = self.container_mgr.wrap_command(command, workspace_dir)
             
         self.ledger.log_execution(agent_name, tool_name, arguments, risk_level, status)
         return True, "Command allowed"

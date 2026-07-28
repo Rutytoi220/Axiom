@@ -5,6 +5,7 @@ import uuid
 from typing import Dict, Any, List, Optional
 from axiom.memory.vector_store import VectorMemoryEngine
 from axiom.engine.graph_memory import GraphMemoryEngine
+from axiom.engine.sharded_rag import ShardedRAGManager
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,7 @@ class TransactionalMemoryManager:
             self.engine = memory_engine
             
         self.graph = GraphMemoryEngine()
+        self.sharded_rag = ShardedRAGManager()
         self._staged_documents: List[Dict[str, Any]] = []
         self._in_transaction = False
         
@@ -48,8 +50,12 @@ class TransactionalMemoryManager:
         logger.info(f"Memory Transaction COMMIT: Indexing {len(self._staged_documents)} documents...")
         
         try:
-            # We process all chunks and if any fail (exception raised), we catch it
+            # Distribute embeddings to sharded network first
+            await self.sharded_rag.distribute_embeddings(self._staged_documents)
+            
+            # We process all chunks locally as well for the local replica
             for doc in self._staged_documents:
+                # Add to local engine
                 await self.engine.add_document(doc["doc_id"], doc["text"], doc["metadata"])
                 self._extract_and_inject_graph(doc["text"])
                 
@@ -74,6 +80,25 @@ class TransactionalMemoryManager:
         self._in_transaction = False
         self._staged_documents.clear()
         logger.warning("Memory Transaction ROLLBACK complete. Uncommitted vectors discarded.")
+
+    async def query_axiom_memory(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+        """Queries the vector index. Uses Sharded RAG if available."""
+        # Query remote shards
+        sharded_results = await self.sharded_rag.query_shards(query, top_k)
+        
+        # Query local engine
+        local_results = []
+        try:
+            # We mock the local results format for now based on what VectorMemoryEngine might return
+            local_results = await self.engine.search(query, top_k)
+        except Exception:
+            pass
+            
+        # Merge results, prioritizing score (simplified merge)
+        merged = sharded_results + local_results
+        # Ensure we have scores
+        merged.sort(key=lambda x: x.get("score", 0), reverse=True)
+        return merged[:top_k]
 
     def _extract_and_inject_graph(self, text: str):
         """Tier 1 basic regex extraction for GraphRAG."""

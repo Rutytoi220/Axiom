@@ -184,6 +184,14 @@ class MainWindow(QMainWindow):
         self._expert_btn.setCheckable(True)
         self._expert_btn.clicked.connect(self._toggle_expert_dock)
         tb.addWidget(self._expert_btn)
+        
+        tb.addSeparator()
+        
+        # ---- Sandbox Mode Toggle ----
+        self._sandbox_btn = QPushButton("📦 Sandbox Mode: Strict (bwrap)")
+        self._sandbox_btn.setObjectName("sandboxBtn")
+        self._sandbox_btn.clicked.connect(self._open_sandbox_dialog)
+        tb.addWidget(self._sandbox_btn)
 
         tb.addSeparator()
 
@@ -667,6 +675,11 @@ class MainWindow(QMainWindow):
     def _open_governor_dialog(self) -> None:
         from axiom.gui.widgets.governor_dialog import GovernorDialog
         dlg = GovernorDialog(self)
+        dlg.exec()
+        
+    def _open_sandbox_dialog(self) -> None:
+        from axiom.gui.widgets.sandbox_dialog import SandboxManagerDialog
+        dlg = SandboxManagerDialog(self)
         dlg.exec()
 
     @Slot()
