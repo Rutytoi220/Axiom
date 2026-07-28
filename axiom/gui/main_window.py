@@ -102,6 +102,13 @@ class MainWindow(QMainWindow):
         
         # Initial Welcome Message
         self._add_bubble("assistant", "⚡ AXIOM Desktop v3.0 Online — Select a mode above or type a prompt below to begin.")
+        
+        # Budget Updater
+        self._budget_timer = QTimer(self)
+        self._budget_timer.timeout.connect(self._update_budget_meter)
+        self._budget_timer.start(10000) # Every 10s
+        # Defer the first update slightly to avoid import loops if any
+        QTimer.singleShot(100, self._update_budget_meter)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -211,6 +218,15 @@ class MainWindow(QMainWindow):
         self._daemon_status_label = QLabel("🔌 Daemon: Disconnected")
         self._daemon_status_label.setStyleSheet("font-weight: 600; font-size: 13px; color: #f87171;")
         tb.addWidget(self._daemon_status_label)
+        
+        tb.addSeparator()
+
+        # ---- Live Budget Meter ----
+        self._budget_btn = QPushButton("☁️ Claude: Budget")
+        self._budget_btn.setObjectName("budgetBtn")
+        self._budget_btn.setStyleSheet("font-weight: bold; border: none; padding: 2px 8px; border-radius: 4px; background: transparent; color: #cdd6f4;")
+        self._budget_btn.clicked.connect(self._open_budget_dialog)
+        tb.addWidget(self._budget_btn)
         
         tb.addSeparator()
 
@@ -570,6 +586,32 @@ class MainWindow(QMainWindow):
         from axiom.gui.widgets.audit_dialog import AuditDialog
         dialog = AuditDialog(self)
         dialog.exec()
+
+    @Slot()
+    def _open_budget_dialog(self) -> None:
+        from axiom.gui.widgets.budget_dialog import BudgetDialog
+        dialog = BudgetDialog(self)
+        dialog.exec()
+        self._update_budget_meter()
+
+    @Slot()
+    def _update_budget_meter(self):
+        try:
+            from axiom.engine.budget_mgr import TokenBudgetManager
+            mgr = TokenBudgetManager()
+            _, _, percent = mgr.can_afford_cloud_call(0)
+            
+            if percent >= 90:
+                self._budget_btn.setText("🔴 Claude: Capped (Local Only)")
+                self._budget_btn.setStyleSheet("font-weight: bold; border: none; padding: 2px 8px; border-radius: 4px; background: transparent; color: #f38ba8;")
+            elif percent >= 75:
+                self._budget_btn.setText(f"🟡 Claude: {100 - int(percent)}% Budget")
+                self._budget_btn.setStyleSheet("font-weight: bold; border: none; padding: 2px 8px; border-radius: 4px; background: transparent; color: #f9e2af;")
+            else:
+                self._budget_btn.setText(f"☁️ Claude: {100 - int(percent)}% Budget")
+                self._budget_btn.setStyleSheet("font-weight: bold; border: none; padding: 2px 8px; border-radius: 4px; background: transparent; color: #a6e3a1;")
+        except Exception as e:
+            pass
 
     @Slot()
     def _on_settings_updated(self):

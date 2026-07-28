@@ -3,6 +3,7 @@ import json
 from typing import Dict, Any, List, Optional
 import litellm
 from axiom.engine.inference_scheduler import get_scheduler
+from axiom.llm.federation_client import HybridFederationClient
 
 logger = logging.getLogger(__name__)
 litellm.suppress_debug_info = True
@@ -39,6 +40,7 @@ Returns:
 """
                 self.model = model
         self.config = DummyConfig(default_model)
+        self.federation = HybridFederationClient()
 
     def _execute_completion(self, model: str, messages: List[Dict[str, Any]], **kwargs) -> Any:
         """Auto-generated docstring."""
@@ -92,6 +94,16 @@ Returns:
         if timeout:
             kwargs['timeout'] = timeout
         model = kwargs.pop('model', self.config.model)
+        
+        if model.startswith('claude-3-5') or model == 'cloud':
+            if self.federation.is_configured:
+                # We have to run it via the async wrapper
+                import asyncio
+                return asyncio.run(self.federation.chat_async(messages, **kwargs))
+            else:
+                logger.warning("Cloud model requested but federation is not configured. Falling back to local.")
+                model = self.fallback_model
+                
         if model.startswith('ollama/'):
             kwargs['api_base'] = 'http://localhost:11434'
             

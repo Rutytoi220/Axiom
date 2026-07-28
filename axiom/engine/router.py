@@ -109,6 +109,34 @@ Returns:
             return selected_model
 
         target_intent = self._classify_task(messages, tool_schemas)
+        
+        # Check for explicitly requested cloud tier
+        is_cloud_requested = False
+        if messages:
+            last_user_msg = next((m for m in reversed(messages) if m.get('role') == 'user'), None)
+            if last_user_msg:
+                content = last_user_msg.get('content', '')
+                if isinstance(content, str) and (content.strip().startswith('/claude') or content.strip().startswith('/cloud')):
+                    is_cloud_requested = True
+                    
+        if is_cloud_requested:
+            from axiom.engine.budget_mgr import TokenBudgetManager
+            budget_mgr = TokenBudgetManager()
+            can_afford, reason, _ = budget_mgr.can_afford_cloud_call(4000)
+            if can_afford:
+                selected_model = 'claude-3-5-sonnet-latest'
+                self._current_active_model = selected_model
+                if self.event_bus:
+                    from axiom.core.events import Event
+                    self.event_bus.publish(Event('model.routed', 'SmartRouter', data={'target': selected_model, 'intent': 'CLOUD'}))
+                return selected_model
+            else:
+                logger.warning(reason)
+                if self.event_bus:
+                    from axiom.core.events import Event
+                    self.event_bus.publish(Event('telemetry.warning', 'SmartRouter', data={'message': reason}))
+                # Fallback to normal routing
+                pass
         if target_intent == IntentCategory.CODE:
             if self.telemetry and self.telemetry.latest_state.get('warning'):
                 ram_avail = self.telemetry.latest_state.get('ram_available_percent', 0)
