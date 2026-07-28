@@ -4,6 +4,7 @@ import logging
 import socket
 from websockets.server import serve
 from axiom.core.events import EventBus
+from axiom.server.pq_mesh import PQEncryptionLayer, get_mesh_auth_token
 
 logger = logging.getLogger(__name__)
 
@@ -43,30 +44,69 @@ class MeshNodeServer:
         self.clients.add(websocket)
         logger.info(f"MeshNode: Client connected from {websocket.remote_address}")
         
+        # Security Handshake
+        pq = PQEncryptionLayer()
+        psk = get_mesh_auth_token()
+        
         try:
-            # Send initial registration/profile
-            profile = self._get_hardware_profile()
+            # 1. Receive Auth & Client Public Key
+            init_msg = await asyncio.wait_for(websocket.recv(), timeout=5.0)
+            init_data = json.loads(init_msg)
+            
+            if init_data.get("auth_token") != psk:
+                logger.warning(f"MeshNode: Rejecting unauthenticated client {websocket.remote_address}")
+                await websocket.close(1008, "Invalid auth token")
+                return
+                
+            client_pub_bytes = bytes.fromhex(init_data["public_key"])
+            pq.derive_shared_key(client_pub_bytes)
+            
+            # 2. Send Server Public Key
             await websocket.send(json.dumps({
-                "type": "registration",
-                "payload": profile
+                "type": "handshake_ack",
+                "public_key": pq.get_public_bytes().hex()
             }))
             
+            # Connection Secured
+            logger.info(f"MeshNode: Connection secured with {websocket.remote_address}")
+            
+            # Send initial registration/profile (Encrypted)
+            profile = self._get_hardware_profile()
+            encrypted_profile = pq.encrypt(json.dumps({
+                "type": "registration",
+                "payload": profile
+            }).encode('utf-8'))
+            await websocket.send(encrypted_profile.hex())
+            
             async for message in websocket:
-                data = json.loads(message)
+                try:
+                    decrypted = pq.decrypt(bytes.fromhex(message))
+                    data = json.loads(decrypted.decode('utf-8'))
+                except Exception as e:
+                    logger.error(f"MeshNode: Decryption failed - {e}")
+                    continue
+                    
                 if data.get("type") == "task_dispatch":
                     task_id = data.get("task_id")
                     prompt = data.get("prompt")
                     logger.info(f"MeshNode: Received task {task_id}: {prompt}")
                     
                     # Execute task asynchronously
-                    asyncio.create_task(self._process_task(websocket, task_id, prompt))
+                    asyncio.create_task(self._process_task(websocket, pq, task_id, prompt))
+                elif data.get("type") == "clipboard_sync":
+                    content = data.get("content")
+                    if self.event_bus:
+                        self.event_bus.publish_sync("mesh.clipboard.received", {"content": content})
+                        self.event_bus.publish_sync("telemetry.update", {"message": f"[📋 Mesh Clipboard] Received snippet from Node: {data.get('hostname', 'Unknown')}"})
+        except asyncio.TimeoutError:
+            logger.warning("MeshNode: Handshake timeout")
         except Exception as e:
             logger.error(f"MeshNode error: {e}")
         finally:
             self.clients.remove(websocket)
             logger.info(f"MeshNode: Client disconnected {websocket.remote_address}")
             
-    async def _process_task(self, websocket, task_id: str, prompt: str):
+    async def _process_task(self, websocket, pq, task_id: str, prompt: str):
         """Simulates processing a heavy background workload."""
         logger.info(f"MeshNode: Processing task {task_id}...")
         
@@ -78,11 +118,12 @@ class MeshNodeServer:
         
         # Send result back
         try:
-            await websocket.send(json.dumps({
+            payload = json.dumps({
                 "type": "task_result",
                 "task_id": task_id,
                 "result": result
-            }))
+            }).encode('utf-8')
+            await websocket.send(pq.encrypt(payload).hex())
             
             if self.event_bus:
                 self.event_bus.publish_sync("telemetry.update", data={"message": f"[🕸️ Mesh Result Delivered: {task_id}]"})

@@ -124,6 +124,28 @@ class HUDWindow(QWidget):
         """)
         self.paste_btn.clicked.connect(self._on_paste_context)
         header_layout.addWidget(self.paste_btn)
+
+        self.mesh_sync_btn = QPushButton("📋 Mesh Sync")
+        self.mesh_sync_btn.setCheckable(True)
+        self.mesh_sync_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #313244;
+                color: #cdd6f4;
+                border: none;
+                border-radius: 6px;
+                padding: 5px 10px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #45475a;
+            }
+            QPushButton:checked {
+                background-color: #a6e3a1;
+                color: #11111b;
+            }
+        """)
+        self.mesh_sync_btn.clicked.connect(self._on_mesh_sync_toggle)
+        header_layout.addWidget(self.mesh_sync_btn)
         
         container_layout.addLayout(header_layout)
         
@@ -262,6 +284,15 @@ class HUDWindow(QWidget):
         self.input_field.setText(f"/vision --crop {x},{y},{w},{h} What is in this region?")
         self.input_field.setFocus()
         self.show()
+
+    def _on_mesh_sync_toggle(self, checked: bool):
+        # Notify the P2P clipboard service
+        # In a real integration, the HUD would pass this down via EventBus
+        self._client.send_message({
+            "type": "event",
+            "topic": "gui.clipboard.sync_toggled",
+            "data": {"state": checked}
+        })
 
 def run_hud():
     app = QApplication.instance() or QApplication(sys.argv)

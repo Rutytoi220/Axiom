@@ -3,6 +3,7 @@ import json
 import logging
 import websockets
 from typing import Optional, Dict
+from axiom.server.pq_mesh import PQEncryptionLayer, get_mesh_auth_token
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +20,31 @@ class MeshClient:
             self.websocket = await websockets.connect(self.uri)
             logger.info(f"Connected to MeshNode at {self.uri}")
             
-            # Wait for registration profile
-            msg = await asyncio.wait_for(self.websocket.recv(), timeout=5.0)
-            data = json.loads(msg)
+            # Security Handshake
+            self.pq = PQEncryptionLayer()
+            psk = get_mesh_auth_token()
+            
+            # 1. Send Auth & Public Key
+            await self.websocket.send(json.dumps({
+                "auth_token": psk,
+                "public_key": self.pq.get_public_bytes().hex()
+            }))
+            
+            # 2. Receive Server Public Key
+            ack_msg = await asyncio.wait_for(self.websocket.recv(), timeout=5.0)
+            ack_data = json.loads(ack_msg)
+            if ack_data.get("type") != "handshake_ack":
+                logger.error("MeshClient: Handshake failed.")
+                return False
+                
+            server_pub = bytes.fromhex(ack_data["public_key"])
+            self.pq.derive_shared_key(server_pub)
+            
+            # Wait for encrypted registration profile
+            msg_hex = await asyncio.wait_for(self.websocket.recv(), timeout=5.0)
+            msg_decrypted = self.pq.decrypt(bytes.fromhex(msg_hex))
+            data = json.loads(msg_decrypted.decode('utf-8'))
+            
             if data.get("type") == "registration":
                 self.node_profile = data.get("payload")
                 logger.info(f"Registered MeshNode: {self.node_profile.get('hostname')}")
@@ -35,16 +58,19 @@ class MeshClient:
             return None
             
         try:
-            await self.websocket.send(json.dumps({
+            payload = json.dumps({
                 "type": "task_dispatch",
                 "task_id": task_id,
                 "prompt": prompt
-            }))
+            }).encode('utf-8')
+            
+            await self.websocket.send(self.pq.encrypt(payload).hex())
             
             # Wait for result
             while True:
-                msg = await self.websocket.recv()
-                data = json.loads(msg)
+                msg_hex = await self.websocket.recv()
+                msg_decrypted = self.pq.decrypt(bytes.fromhex(msg_hex))
+                data = json.loads(msg_decrypted.decode('utf-8'))
                 if data.get("type") == "task_result" and data.get("task_id") == task_id:
                     return data.get("result")
                     

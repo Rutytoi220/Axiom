@@ -399,8 +399,14 @@ class MainWindow(QMainWindow):
         self._status_mode = QLabel()
         self._status_memory = QLabel("🧠 Memory: Active (0 Chunks)")
         self._status_model = QLabel()
+        
+        self.governor_btn = QPushButton("⚡ Governor: Active (60 FPS)")
+        self.governor_btn.setStyleSheet("border: none; color: #f9e2af; font-weight: bold;")
+        self.governor_btn.clicked.connect(self._open_governor_dialog)
+        
         sb.addWidget(self._status_mode)
         sb.addWidget(self._status_memory)
+        sb.addWidget(self.governor_btn)
         sb.addPermanentWidget(self._status_model)
         
         # Memory polling timer
@@ -656,6 +662,11 @@ class MainWindow(QMainWindow):
     def _open_security_dialog(self) -> None:
         from axiom.gui.widgets.security_dialog import SecurityDashboardDialog
         dlg = SecurityDashboardDialog(self)
+        dlg.exec()
+        
+    def _open_governor_dialog(self) -> None:
+        from axiom.gui.widgets.governor_dialog import GovernorDialog
+        dlg = GovernorDialog(self)
         dlg.exec()
 
     @Slot()
