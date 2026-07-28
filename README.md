@@ -1,67 +1,75 @@
-# AXIOM
-
-[![CI/CD Pipeline](https://github.com/rutytoi/axiom/actions/workflows/release.yml/badge.svg)](https://github.com/rutytoi/axiom/actions/workflows/release.yml)
-[![Python Version](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/release/python-3120/)
-
-AXIOM is a local-first AI execution system for coordinating tools, agents, memory, and desktop automation without requiring a cloud control plane.
-
-## Core capabilities
-
 <div align="center">
-  <!-- TODO: Record an animated GIF of AXIOM executing a multi-step local tool sequence and save it as assets/demo.gif -->
-  <img src="assets/demo.gif" alt="AXIOM Terminal Output Demo" width="800">
-  <p><em>AXIOM v1.0 executing a local tool sequence</em></p>
+  <img src="axiom/gui/assets/logo.png" alt="AXIOM Logo" width="200">
+  <h1>AXIOM v5.3.0</h1>
+  <p><strong>Sovereign, Self-Patching, Multimodal Linux AI Operating System Layer</strong></p>
+
+  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+  [![Platform: Linux/Wayland](https://img.shields.io/badge/Platform-Linux%2FWayland-blue.svg)](#)
+  [![Python: 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+  [![Build Status](https://github.com/rutytoi/axiom/actions/workflows/release.yml/badge.svg)](https://github.com/rutytoi/axiom/actions/workflows/release.yml)
+  [![Release](https://img.shields.io/badge/Release-v5.3.0-green.svg)](#)
 </div>
 
-- Event-driven execution and component registries
-- Local Ollama integration
-- Persistent local memory
-- Sandboxed file and shell tooling
-- Deterministic execution plans with dependency tracking and confirmation gates
+---
 
-## Quick Start
+## 🧠 What is AXIOM?
 
-### Installation
+AXIOM is not just another LLM wrapper. It is a **Sovereign AI Operating System Layer** designed to bridge the gap between local LLMs and deep system integration. Evolving from a simple AI client into a self-evolving kernel, AXIOM provides a secure, private, and multimodal environment for autonomous agents to interact with your Linux desktop, hardware, and local network.
 
-Clone the repository and install the package:
+By prioritizing **local-first privacy** and **hybrid federation**, AXIOM allows you to leverage the power of massive cloud models (Anthropic Claude, GPT-4) only when necessary, while keeping the majority of reasoning and data processing on your own silicon via **Ollama**.
 
+---
+
+## 🚀 Key Features Matrix
+
+| Feature | Description | Implementation |
+| :--- | :--- | :--- |
+| 🧠 **Sovereign Kernel** | Master daemon architecture with live code evolution and self-patching. | `axiom.kernel` |
+| 🛡️ **Total Isolation** | Rootless `bwrap` containers & disposable QEMU/KVM micro-VMs for tool execution. | `axiom.security` |
+| 📁 **AxiomFS** | Semantic FUSE filesystem. Browse GraphRAG memory as dynamic Linux directories. | `axiom.fs` |
+| 🎙️ **Jarvis HUD** | Floating Wayland overlay with GPU-accelerated Whisper STT and Piper TTS. | `axiom.gui` |
+| 🌐 **P2P Mesh** | Zero-config LAN task offloading and 4-tier LLM routing with budget guards. | `axiom.swarm` |
+| 🔌 **IDE Federation** | Native Model Context Protocol (MCP) Server for Cursor, VS Code, and Neovim. | `axiom.server` |
+| 🔄 **OTA Updates** | Cryptographic SHA256 release verification with atomic systemd hot-reloading. | `axiom.security` |
+
+---
+
+## 🛠️ Quick Installation
+
+### 🐧 Linux (Recommended)
+
+**Immutable Linux (Bazzite / Fedora Atomic):**
 ```bash
-git clone https://github.com/rutytoi/axiom.git
-cd axiom
-pip install -e .
+rpm-ostree install axiom.rpm
 ```
 
-Note: You must have [Ollama](https://ollama.com/) installed and running locally.
-
-### Usage
-
-Start the interactive AXIOM terminal:
-
+**Debian / Ubuntu:**
 ```bash
-axiom
+sudo dpkg -i axiom.deb
 ```
 
-You can now chat with the orchestrator, ask for system `status`, view registered `tools`, or type `help` for more commands.
-
-For a full guide on using tools, agents, and Python integration, see [QUICKSTART.md](QUICKSTART.md).
-
-## Extending AXIOM
-
-AXIOM is designed to be easily extensible. You can build your own agents and tools to customize the orchestration layer.
-Check out the starter scripts in the `examples/` directory:
-- [examples/example_custom_agent.py](examples/example_custom_agent.py) - How to build and register custom agents
-- [examples/example_custom_tool.py](examples/example_custom_tool.py) - How to build custom tools
-
-## Development
-
-Run the tests with:
-
+**Universal AppImage:**
 ```bash
-python -m pytest tests/
+chmod +x AXIOM.AppImage && ./AXIOM.AppImage
 ```
 
-Build a distribution with:
+### 🪟 Windows
+Download the `AXIOM_v5.3.0_Setup.exe` from the [Releases](https://github.com/rutytoi/axiom/releases) page and follow the wizard.
 
-```bash
-python -m pip wheel --no-deps --no-build-isolation .
-```
+### 🍎 macOS
+Download `AXIOM.dmg`, drag to Applications, and allow permissions for Terminal/Accessibility in System Settings.
+
+---
+
+## 📖 Documentation Index
+
+- [**Architecture Deep-Dive**](ARCHITECTURE.md): Technical mapping of the AXIOM Kernel and Swarm consensus.
+- [**Contributing Guide**](CONTRIBUTING.md): Setup your dev environment and join the evolution.
+- [**Quickstart Guide**](QUICKSTART.md): Get up and running in 5 minutes.
+- [**SDK Guide**](SDK_GUIDE.md): Build your own agents and tools on the AXIOM core.
+
+---
+
+## ⚖️ License
+
+AXIOM is released under the **MIT License**. See [LICENSE](LICENSE) for details.

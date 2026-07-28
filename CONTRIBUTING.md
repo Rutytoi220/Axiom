@@ -1,35 +1,74 @@
 # Contributing to AXIOM
 
-First off, thank you for considering contributing to AXIOM! 
+Welcome! We are thrilled that you want to help evolve AXIOM into the most powerful sovereign AI operating system layer.
 
-## Setting up your Development Environment
+## 🛠️ Setting up your Development Environment
 
-1. Fork the repository and clone your fork.
-2. Ensure you have Python 3.12+ installed.
-3. Install the dependencies and development tools:
+1. **Clone the Repo**:
    ```bash
+   git clone https://github.com/rutytoi/axiom.git
+   ```
+2. **Environment Setup**:
+   AXIOM requires Python 3.11+. We recommend using a virtual environment.
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
    pip install -e ".[dev]"
    ```
-4. Run the test suite to ensure everything is working:
-   ```bash
-   pytest tests/
-   ```
+3. **Core Dependencies**:
+   - **Ollama**: Ensure Ollama is running locally (`ollama serve`).
+   - **Bubblewrap**: Required for standard sandboxing (`sudo apt install bubblewrap`).
+   - **QEMU**: Required for VM isolation (`sudo apt install qemu-kvm`).
+   - **FUSE**: Required for AxiomFS (`sudo apt install fuse3`).
 
-## Development Workflow
+---
 
-- **Branch Naming:** Use descriptive branch names (e.g., `feature/add-docker-plugin`, `bugfix/sqlite-timeout`).
-- **Code Style:** We use `black` for formatting and `flake8` for linting. Please ensure your code passes both before submitting a PR.
-- **Testing:** All new features or bug fixes must include corresponding tests in the `tests/` directory. We aim for high coverage.
+## 🧪 Testing & Verification
 
-## Submitting a Pull Request
+We maintain a rigorous regression suite. Never submit a PR without passing all tests.
 
-1. Push your changes to your fork.
-2. Open a Pull Request against the `main` branch.
-3. Clearly describe the problem you are solving and how your changes address it.
-4. Ensure all CI checks pass.
+- **Unit Tests**:
+  ```bash
+  pytest tests/
+  ```
+- **Coverage**:
+  ```bash
+  pytest --cov=axiom tests/
+  ```
+- **Type Checking**:
+  ```bash
+  mypy axiom/
+  ```
 
-## Architecture
+---
 
-Before making major changes, please read the `ARCHITECTURE.md` file in the root directory to understand the event bus, memory system, and tool registry patterns.
+## 📦 Packaging & Distribution
 
-Thank you for helping make AXIOM better!
+Before a release, we use the automated package builder to generate artifacts for all platforms:
+
+```bash
+python3 -m axiom.api.cli package --target all
+```
+
+This generates `.rpm`, `.deb`, `.AppImage`, and Windows `.exe` installers in the `dist/` directory.
+
+---
+
+## 🤝 Pull Request Guidelines
+
+1. **Branching**: Create a feature branch from `main` (e.g., `feat/axiom-fs-encryption`).
+2. **Atomic Commits**: Keep your commits focused and descriptive.
+3. **Documentation**: If you add a new subsystem or tool, you **must** update `ARCHITECTURE.md` and provide a docstring in the code.
+4. **Verification**: Link your PR to a relevant issue and include the `pytest` output in your PR description.
+
+---
+
+## 🛡️ Security First
+
+If you discover a security vulnerability (especially in the sandbox or kernel execution layer), please **do not** open a public issue. Email the core maintainers directly at `security@axiom-ai.io`.
+
+---
+
+## ⚖️ Code of Conduct
+
+Be respectful, be technical, and keep AXIOM sovereign. We follow the standard Contributor Covenant.

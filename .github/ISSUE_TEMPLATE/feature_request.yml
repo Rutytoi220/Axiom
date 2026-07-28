@@ -1,5 +1,5 @@
 name: Feature Request
-description: Suggest an idea for AXIOM
+description: Suggest a new capability for AXIOM v5.3.0+
 title: "[FEATURE] "
 labels: ["enhancement"]
 body:
@@ -7,6 +7,19 @@ body:
     attributes:
       value: |
         Thanks for taking the time to suggest a feature!
+  - type: dropdown
+    id: category
+    attributes:
+      label: Feature Category
+      options:
+        - Kernel Evolution
+        - New Agent Skill
+        - Security / Sandbox
+        - UI / UX Enhancement
+        - P2P / Swarm Optimization
+        - Hardware Integration
+    validations:
+      required: true
   - type: textarea
     id: description
     attributes:
@@ -22,7 +35,7 @@ body:
     validations:
       required: true
   - type: textarea
-    id: alternatives
+    id: implementation_ideas
     attributes:
-      label: Alternatives Considered
-      description: A clear and concise description of any alternative solutions or features you've considered.
+      label: Implementation Ideas
+      description: Any thoughts on how to build this within the current v5.3.0 architecture?
