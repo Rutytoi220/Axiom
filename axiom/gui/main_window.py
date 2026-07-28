@@ -185,32 +185,21 @@ class MainWindow(QMainWindow):
         self._expert_btn.clicked.connect(self._toggle_expert_dock)
         tb.addWidget(self._expert_btn)
         
+        # ---- Master Kernel Supervisor Toggle ----
+        self._kernel_btn = QPushButton("🧠 AXIOM Kernel v5.0")
+        self._kernel_btn.setObjectName("kernelBtn")
+        self._kernel_btn.setStyleSheet("""
+            background-color: #89b4fa;
+            color: #11111b;
+            font-weight: bold;
+            border-radius: 4px;
+            padding: 5px 15px;
+        """)
+        self._kernel_btn.clicked.connect(self._open_kernel_dialog)
+        tb.addWidget(self._kernel_btn)
+
         tb.addSeparator()
         
-        # ---- Sandbox Mode Toggle ----
-        self._sandbox_btn = QPushButton("📦 Sandbox Mode: Strict (bwrap)")
-        self._sandbox_btn.setObjectName("sandboxBtn")
-        self._sandbox_btn.clicked.connect(self._open_sandbox_dialog)
-        tb.addWidget(self._sandbox_btn)
-        
-        tb.addSeparator()
-        
-        # ---- AxiomFS Explorer Button ----
-        self._fs_btn = QPushButton("📁 AxiomFS")
-        self._fs_btn.setObjectName("fsBtn")
-        self._fs_btn.clicked.connect(self._open_fs_dialog)
-        tb.addWidget(self._fs_btn)
-
-        tb.addSeparator()
-
-        # ---- KVM Sandbox Button ----
-        self._kvm_btn = QPushButton("🖥️ KVM Sandboxes")
-        self._kvm_btn.setObjectName("kvmBtn")
-        self._kvm_btn.clicked.connect(self._open_vm_dialog)
-        tb.addWidget(self._kvm_btn)
-
-        tb.addSeparator()
-
         # ---- Automation Button ----
         self._automation_btn = QPushButton("⏱️ Automation")
         self._automation_btn.setObjectName("automationBtn")
@@ -702,6 +691,11 @@ class MainWindow(QMainWindow):
     def _open_governor_dialog(self) -> None:
         from axiom.gui.widgets.governor_dialog import GovernorDialog
         dlg = GovernorDialog(self)
+        dlg.exec()
+        
+    def _open_kernel_dialog(self) -> None:
+        from axiom.gui.widgets.kernel_dialog import KernelControlCenterDialog
+        dlg = KernelControlCenterDialog(self)
         dlg.exec()
         
     def _open_sandbox_dialog(self) -> None:
