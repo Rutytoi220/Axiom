@@ -207,6 +207,14 @@ class MainWindow(QMainWindow):
 
         tb.addSeparator()
 
+        # ---- Skill Library Button ----
+        self._skill_btn = QPushButton("🧩 Skill Library")
+        self._skill_btn.setObjectName("skillBtn")
+        self._skill_btn.clicked.connect(self._open_skill_dialog)
+        tb.addWidget(self._skill_btn)
+
+        tb.addSeparator()
+
         # ---- Model badge ----
         self._model_label = QLabel("Model: —")
         self._model_label.setObjectName("modelLabel")
@@ -586,6 +594,12 @@ class MainWindow(QMainWindow):
         from axiom.gui.widgets.audit_dialog import AuditDialog
         dialog = AuditDialog(self)
         dialog.exec()
+
+    def _open_skill_dialog(self) -> None:
+        """Open the Skill Library dialog."""
+        from axiom.gui.widgets.skill_dialog import SkillManagerDialog
+        dlg = SkillManagerDialog(self)
+        dlg.exec()
 
     @Slot()
     def _open_budget_dialog(self) -> None:

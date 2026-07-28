@@ -6,7 +6,7 @@ import os
 import shlex
 import platform
 import shutil
-__all__ = ['ToolResult', 'ToolParameter', 'BaseTool', 'EchoTool', 'ShellTool', 'FileReadTool', 'FileWriteTool', 'SystemInfoTool', 'FileTool', 'SafeFileSearchTool', 'FileOpenerTool', 'AppLauncherTool', 'ClipboardReadTool', 'ClipboardWriteTool']
+__all__ = ['ToolResult', 'ToolParameter', 'BaseTool', 'EchoTool', 'ShellTool', 'FileReadTool', 'FileWriteTool', 'SystemInfoTool', 'FileTool', 'SafeFileSearchTool', 'FileOpenerTool', 'AppLauncherTool', 'ClipboardReadTool', 'ClipboardWriteTool', 'GUIInspectTool', 'GUIActuateTool']
 from abc import ABC
 from typing import Any, Dict, List, Optional
 from pathlib import Path
@@ -1287,3 +1287,4 @@ Returns:
         except Exception as e:
             return ToolResult(success=False, error=f'Graph query failed: {e}')
 from axiom.tools.os_assist import SafeFileSearchTool, FileOpenerTool, AppLauncherTool
+from axiom.tools.gui_actuator import GUIInspectTool, GUIActuateTool

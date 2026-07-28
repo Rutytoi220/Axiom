@@ -113,6 +113,34 @@ class SettingsDialog(QDialog):
         cron_layout.addStretch()
         self.tabs.addTab(cron_tab, "⏱️ Cron Swarms & Voice")
         
+        # --- LAN Mesh Tab ---
+        mesh_tab = QWidget()
+        mesh_layout = QVBoxLayout(mesh_tab)
+        
+        mesh_info_label = QLabel("Connected LAN Mesh Peer Nodes:")
+        mesh_info_label.setStyleSheet("font-weight: bold;")
+        mesh_layout.addWidget(mesh_info_label)
+        
+        from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView
+        self.mesh_table = QTableWidget(0, 4)
+        self.mesh_table.setHorizontalHeaderLabels(["Hostname", "Role", "Hardware", "Status"])
+        self.mesh_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.mesh_table.setStyleSheet("background-color: #1e1e2e; color: #cdd6f4;")
+        
+        # Add a dummy local node for illustration
+        self.mesh_table.insertRow(0)
+        self.mesh_table.setItem(0, 0, QTableWidgetItem("localhost"))
+        self.mesh_table.setItem(0, 1, QTableWidgetItem("Orchestrator"))
+        self.mesh_table.setItem(0, 2, QTableWidgetItem("Local GPU"))
+        self.mesh_table.setItem(0, 3, QTableWidgetItem("Active"))
+        
+        mesh_layout.addWidget(self.mesh_table)
+        
+        mesh_refresh_btn = QPushButton("🔄 Scan Network (Port 9412)")
+        mesh_layout.addWidget(mesh_refresh_btn)
+        
+        self.tabs.addTab(mesh_tab, "🕸️ LAN Mesh")
+        
         layout.addWidget(self.tabs)
 
     def _load_current_settings(self):
