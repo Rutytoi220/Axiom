@@ -206,6 +206,15 @@ class MainWindow(QMainWindow):
         tb.addWidget(self._settings_btn)
 
         tb.addSeparator()
+        
+        # ---- System Health Button ----
+        self._health_btn = QPushButton("❤️ System Health")
+        self._health_btn.setObjectName("healthBtn")
+        self._health_btn.setStyleSheet("color: #f38ba8;")
+        self._health_btn.clicked.connect(self._open_health_radar)
+        tb.addWidget(self._health_btn)
+
+        tb.addSeparator()
 
         # ---- Skill Library Button ----
         self._skill_btn = QPushButton("🧩 Skill Library")
@@ -599,6 +608,12 @@ class MainWindow(QMainWindow):
         """Open the Skill Library dialog."""
         from axiom.gui.widgets.skill_dialog import SkillManagerDialog
         dlg = SkillManagerDialog(self)
+        dlg.exec()
+
+    def _open_health_radar(self) -> None:
+        """Open the System Health Radar dialog."""
+        from axiom.gui.widgets.health_radar import HealthRadarDialog
+        dlg = HealthRadarDialog(self)
         dlg.exec()
 
     @Slot()

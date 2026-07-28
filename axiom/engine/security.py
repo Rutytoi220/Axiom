@@ -26,6 +26,9 @@ class SecuritySandbox:
             cls._instance = super(SecuritySandbox, cls).__new__(cls)
             cls._instance.ledger = AuditLedger()
             cls._instance._compiled_patterns = [re.compile(p) for p in cls.HIGH_RISK_PATTERNS]
+            
+            from axiom.engine.snapshot_engine import SnapshotManager
+            cls._instance.snapshot_mgr = SnapshotManager()
         return cls._instance
 
     def evaluate_command(self, agent_name: str, tool_name: str, arguments: Dict[str, Any]) -> Tuple[bool, str]:
@@ -53,6 +56,11 @@ class SecuritySandbox:
             
         # Allowed
         status = "ALLOWED"
+        
+        # If it's a modifying command but allowed (e.g. strict mode approved), create a snapshot
+        if tool_name in ('shell_command', 'run_command', 'shell', 'file_write'):
+            self.snapshot_mgr.create_checkpoint(f"Pre-execution of {tool_name} by {agent_name}")
+            
         self.ledger.log_execution(agent_name, tool_name, arguments, risk_level, status)
         return True, "Command allowed"
 
