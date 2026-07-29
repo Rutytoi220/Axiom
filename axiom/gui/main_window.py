@@ -442,8 +442,18 @@ class MainWindow(QMainWindow):
         self.voice_btn.setStyleSheet("border: none; color: #89b4fa; font-weight: bold;")
         self.voice_btn.clicked.connect(self._toggle_voice)
 
+        self.pager_btn = QPushButton("🧠 Pager: L1")
+        self.pager_btn.setStyleSheet("border: none; color: #89b4fa; font-weight: bold;")
+        self.pager_btn.clicked.connect(self._open_infrastructure_dialog)
+
+        self.cloud_btn = QPushButton("☁️ Cloud Burst: Ready")
+        self.cloud_btn.setStyleSheet("border: none; color: #a6e3a1; font-weight: bold;")
+        self.cloud_btn.clicked.connect(self._open_infrastructure_dialog)
+
         sb.addWidget(self._status_mode)
         sb.addWidget(self._status_memory)
+        sb.addWidget(self.pager_btn)
+        sb.addWidget(self.cloud_btn)
         sb.addWidget(self.governor_btn)
         sb.addWidget(self._thermal_label)
         sb.addWidget(self.voice_btn)
@@ -850,4 +860,10 @@ class MainWindow(QMainWindow):
         """Open the eBPF Firewall dialog."""
         from axiom.gui.widgets.firewall_dialog import FirewallControlDialog
         dlg = FirewallControlDialog(self)
+        dlg.exec()
+
+    def _open_infrastructure_dialog(self) -> None:
+        """Open the Infrastructure Topology dialog."""
+        from axiom.gui.widgets.infrastructure_dialog import InfrastructureTopologyDialog
+        dlg = InfrastructureTopologyDialog(self)
         dlg.exec()

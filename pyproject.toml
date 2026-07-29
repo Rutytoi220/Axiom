@@ -53,6 +53,7 @@ dependencies = [
     "paho-mqtt>=1.6.0",
     "cryptography>=41.0.0",
     "docker>=7.0.0",
+    "boto3>=1.34.0",
 ]
 
 [project.optional-dependencies]
