@@ -1102,22 +1102,40 @@ Returns:
         self.add_parameter(ToolParameter(name='code', type='string', description='Python code to execute', required=True))
 
     def execute(self, code: str, **kwargs) -> ToolResult:  # type: ignore[override]
-        """Execute Python code."""
+        """Execute Python code with temporal debugging."""
+        from axiom.engine.temporal_debugger import TemporalDebuggerService
+        import json
+        
         try:
             safe_globals: Dict[str, Any] = {'__builtins__': {'print': print, 'len': len, 'range': range, 'str': str, 'int': int, 'float': float, 'list': list, 'dict': dict, 'sum': sum, 'max': max, 'min': min}}
             output_buffer = []
 
             def safe_print(*args, **kwargs):
-                """Auto-generated docstring.
-
-
-Returns:
-    Return value.
-"""
                 output_buffer.append(' '.join((str(a) for a in args)))
             safe_globals['print'] = safe_print
-            exec(code, safe_globals)
-            return ToolResult(success=True, output={'stdout': '\n'.join(output_buffer), 'result': 'Code executed successfully'})
+            
+            # Wrap execution in a function for the debugger
+            def _run_code():
+                exec(code, safe_globals)
+                
+            debugger = TemporalDebuggerService(buffer_size=50)
+            res = debugger.execute_with_time_travel(_run_code)
+            
+            if res["success"]:
+                return ToolResult(success=True, output={'stdout': '\n'.join(output_buffer), 'result': 'Code executed successfully'})
+            else:
+                # Execution failed, return the temporal trace!
+                error_context = f"{res['error']}\n\n[TEMPORAL TIME-TRAVEL TRACE]\n"
+                error_context += "The following shows the state of local variables leading up to the crash:\n"
+                
+                trace = res["temporal_trace"]
+                for i, state in enumerate(trace):
+                    # We only show the last 10 states to save context window, or format it cleanly
+                    if i > len(trace) - 15:
+                        error_context += f"Step {i} [Line {state.get('line')}]: {json.dumps(state.get('locals', {}))}\n"
+                        
+                return ToolResult(success=False, output=None, error=error_context)
+                
         except Exception as e:
             return ToolResult(success=False, output=None, error=str(e))
 

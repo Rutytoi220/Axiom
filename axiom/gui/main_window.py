@@ -215,6 +215,14 @@ class MainWindow(QMainWindow):
         tb.addWidget(self._iot_btn)
         
         tb.addSeparator()
+        # ---- eBPF Firewall Button ----
+        self._firewall_btn = QPushButton("🛡️ eBPF Firewall")
+        self._firewall_btn.setObjectName("firewallBtn")
+        self._firewall_btn.setStyleSheet("color: #f38ba8;")
+        self._firewall_btn.clicked.connect(self._open_firewall_dialog)
+        tb.addWidget(self._firewall_btn)
+        
+        tb.addSeparator()
 
         # ---- Security Audit Button ----
         self._audit_btn = QPushButton("🛡️ Security Log")
@@ -836,4 +844,10 @@ class MainWindow(QMainWindow):
         """Open the IoT/Physical World dialog."""
         from axiom.gui.widgets.iot_dialog import IoTControlDialog
         dlg = IoTControlDialog(self)
+        dlg.exec()
+
+    def _open_firewall_dialog(self) -> None:
+        """Open the eBPF Firewall dialog."""
+        from axiom.gui.widgets.firewall_dialog import FirewallControlDialog
+        dlg = FirewallControlDialog(self)
         dlg.exec()
