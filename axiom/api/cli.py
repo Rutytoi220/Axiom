@@ -1142,3 +1142,10 @@ if __name__ == '__main__':
         run_mcp_server()
     else:
         run_cli()
+
+# Pip entry-point fallback
+def main():
+    try:
+        run_cli()
+    except NameError:
+        print("[!] Fatal: run_cli not found in cli.py. Check entry definitions.")
