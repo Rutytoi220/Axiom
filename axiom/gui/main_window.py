@@ -457,11 +457,16 @@ class MainWindow(QMainWindow):
         self.power_label = QLabel("🔋 Power: Max Perf")
         self.power_label.setStyleSheet("color: #a6e3a1; font-weight: bold; padding-right: 10px;")
 
+        self.singularity_btn = QPushButton("🌌 Singularity")
+        self.singularity_btn.setStyleSheet("border: none; color: #cba6f7; font-weight: bold;")
+        self.singularity_btn.clicked.connect(self._open_singularity_dialog)
+
         sb.addWidget(self._status_mode)
         sb.addWidget(self._status_memory)
         sb.addWidget(self.pager_btn)
         sb.addWidget(self.cloud_btn)
         sb.addWidget(self.hardware_btn)
+        sb.addWidget(self.singularity_btn)
         sb.addWidget(self.power_label)
         sb.addWidget(self.governor_btn)
         sb.addWidget(self._thermal_label)
@@ -881,4 +886,10 @@ class MainWindow(QMainWindow):
         """Open the Hardware I/O Matrix dialog."""
         from axiom.gui.widgets.hardware_dialog import HardwareMatrixDialog
         dlg = HardwareMatrixDialog(self)
+        dlg.exec()
+
+    def _open_singularity_dialog(self) -> None:
+        """Open the Singularity Control dialog."""
+        from axiom.gui.widgets.singularity_dialog import SingularityControlDialog
+        dlg = SingularityControlDialog(self)
         dlg.exec()
