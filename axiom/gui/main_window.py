@@ -207,6 +207,14 @@ class MainWindow(QMainWindow):
         tb.addWidget(self._automation_btn)
         
         tb.addSeparator()
+        # ---- IoT / Physical Button ----
+        self._iot_btn = QPushButton("💡 IoT / Physical")
+        self._iot_btn.setObjectName("iotBtn")
+        self._iot_btn.setStyleSheet("color: #f9e2af;")
+        self._iot_btn.clicked.connect(self._open_iot_dialog)
+        tb.addWidget(self._iot_btn)
+        
+        tb.addSeparator()
 
         # ---- Security Audit Button ----
         self._audit_btn = QPushButton("🛡️ Security Log")
@@ -822,4 +830,10 @@ class MainWindow(QMainWindow):
             from axiom.core.events import EventBus
             self._scheduler_service = BackgroundSchedulerService(event_bus=EventBus())
         dlg = SchedulerDialog(self._scheduler_service, self)
+        dlg.exec()
+
+    def _open_iot_dialog(self) -> None:
+        """Open the IoT/Physical World dialog."""
+        from axiom.gui.widgets.iot_dialog import IoTControlDialog
+        dlg = IoTControlDialog(self)
         dlg.exec()

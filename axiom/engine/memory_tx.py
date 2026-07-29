@@ -6,6 +6,7 @@ from typing import Dict, Any, List, Optional
 from axiom.memory.vector_store import VectorMemoryEngine
 from axiom.engine.graph_memory import GraphMemoryEngine
 from axiom.engine.sharded_rag import ShardedRAGManager
+from axiom.security.zkp_enclave import SecureEnclaveManager
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,7 @@ class TransactionalMemoryManager:
             
         self.graph = GraphMemoryEngine()
         self.sharded_rag = ShardedRAGManager()
+        self.enclave = SecureEnclaveManager()
         self._staged_documents: List[Dict[str, Any]] = []
         self._in_transaction = False
         
@@ -55,9 +57,14 @@ class TransactionalMemoryManager:
             
             # We process all chunks locally as well for the local replica
             for doc in self._staged_documents:
-                # Add to local engine
-                await self.engine.add_document(doc["doc_id"], doc["text"], doc["metadata"])
-                self._extract_and_inject_graph(doc["text"])
+                # Check for Secure Enclave routing
+                if doc["metadata"].get("sensitive") is True:
+                    logger.info(f"Memory Transaction: Routing sensitive chunk {doc['doc_id']} to Secure Enclave.")
+                    self.enclave.store_sensitive_chunk(doc["doc_id"], doc["text"], doc["metadata"])
+                else:
+                    # Add to local engine
+                    await self.engine.add_document(doc["doc_id"], doc["text"], doc["metadata"])
+                    self._extract_and_inject_graph(doc["text"])
                 
             self._in_transaction = False
             self._staged_documents.clear()
