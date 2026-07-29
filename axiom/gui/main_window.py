@@ -450,10 +450,19 @@ class MainWindow(QMainWindow):
         self.cloud_btn.setStyleSheet("border: none; color: #a6e3a1; font-weight: bold;")
         self.cloud_btn.clicked.connect(self._open_infrastructure_dialog)
 
+        self.hardware_btn = QPushButton("🔌 Hardware I/O")
+        self.hardware_btn.setStyleSheet("border: none; color: #fab387; font-weight: bold;")
+        self.hardware_btn.clicked.connect(self._open_hardware_dialog)
+
+        self.power_label = QLabel("🔋 Power: Max Perf")
+        self.power_label.setStyleSheet("color: #a6e3a1; font-weight: bold; padding-right: 10px;")
+
         sb.addWidget(self._status_mode)
         sb.addWidget(self._status_memory)
         sb.addWidget(self.pager_btn)
         sb.addWidget(self.cloud_btn)
+        sb.addWidget(self.hardware_btn)
+        sb.addWidget(self.power_label)
         sb.addWidget(self.governor_btn)
         sb.addWidget(self._thermal_label)
         sb.addWidget(self.voice_btn)
@@ -866,4 +875,10 @@ class MainWindow(QMainWindow):
         """Open the Infrastructure Topology dialog."""
         from axiom.gui.widgets.infrastructure_dialog import InfrastructureTopologyDialog
         dlg = InfrastructureTopologyDialog(self)
+        dlg.exec()
+
+    def _open_hardware_dialog(self) -> None:
+        """Open the Hardware I/O Matrix dialog."""
+        from axiom.gui.widgets.hardware_dialog import HardwareMatrixDialog
+        dlg = HardwareMatrixDialog(self)
         dlg.exec()
