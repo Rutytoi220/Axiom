@@ -1111,41 +1111,135 @@ def run_cli() -> None:
     finally:
         cli.close()
 if __name__ == '__main__':
+    main()
+
+# Pip entry-point fallback
+def main():
+    import argparse
     import sys
     import logging.config
     from pathlib import Path
+    
+    # Configure root logging
     log_path = Path.home() / '.axiom' / 'daemon.log'
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    logging_config = {'version': 1, 'disable_existing_loggers': False, 'formatters': {'standard': {'format': '%(asctime)s [%(levelname)s] %(name)s: %(message)s'}}, 'handlers': {'file': {'level': 'DEBUG', 'class': 'logging.FileHandler', 'filename': str(log_path), 'formatter': 'standard'}, 'console': {'level': 'WARNING', 'class': 'logging.StreamHandler', 'formatter': 'standard'}}, 'root': {'handlers': ['file', 'console'], 'level': 'DEBUG'}}
+    logging_config = {
+        'version': 1, 'disable_existing_loggers': False, 
+        'formatters': {'standard': {'format': '%(asctime)s [%(levelname)s] %(name)s: %(message)s'}}, 
+        'handlers': {
+            'file': {'level': 'DEBUG', 'class': 'logging.FileHandler', 'filename': str(log_path), 'formatter': 'standard'}, 
+            'console': {'level': 'WARNING', 'class': 'logging.StreamHandler', 'formatter': 'standard'}
+        }, 
+        'root': {'handlers': ['file', 'console'], 'level': 'DEBUG'}
+    }
     logging.config.dictConfig(logging_config)
+    
+    parser = argparse.ArgumentParser(description="AXIOM - Local-First LLM Framework")
+    subparsers = parser.add_subparsers(dest='command', help="Available commands")
+    
+    # Daemon subcommands
+    daemon_parser = subparsers.add_parser('daemon', help="Manage the AXIOM background daemon")
+    daemon_parser.add_argument('action', choices=['start', 'install'], help="Action to perform")
+    
+    # Ask subcommand
+    ask_parser = subparsers.add_parser('ask', help="One-shot execution of a prompt")
+    ask_parser.add_argument('prompt', type=str, help="The prompt to execute")
+    ask_parser.add_argument('--verbose', action='store_true', help="Show tool execution details")
+    
+    # Chat subcommand
+    subparsers.add_parser('chat', help="Launch the interactive REPL")
+    
+    # HUD subcommand
+    subparsers.add_parser('hud', help="Launch the AXIOM PySide6 desktop HUD")
+    
+    # Pipe subcommand (for IPC)
+    pipe_parser = subparsers.add_parser('pipe', help="Pipe text to AXIOM")
+    pipe_parser.add_argument('prompt', nargs='?', default='', help="Optional task prompt")
+    
+    # MCP server fallback
+    subparsers.add_parser('mcp-server', help="Launch AXIOM as an MCP server")
+    
+    args, unknown = parser.parse_known_args()
+    
+    # If no command provided, show welcome DevEx and enter chat
+    if args.command is None:
+        config_path = Path.home() / ".config" / "axiom" / "settings.json"
+        if not config_path.exists():
+            from rich.console import Console
+            from rich.panel import Panel
+            console = Console()
+            welcome = (
+                "[bold cyan]Welcome to AXIOM v6.0 LTS![/bold cyan]\n\n"
+                "You are now running a local-first, privacy-respecting AI operating system.\n"
+                "AXIOM autonomously routes tasks, manages tools, and interacts with your system.\n\n"
+                "[bold yellow]Quick Start:[/bold yellow]\n"
+                " ▸ [green]axiom chat[/green]  : Enter the interactive REPL (default)\n"
+                " ▸ [green]axiom ask \"...\"[/green] : Run a quick one-shot command from your shell\n"
+                " ▸ [green]axiom hud[/green]   : Launch the beautiful PySide6 graphical interface\n"
+                " ▸ [green]axiom daemon start[/green] : Start the background AXIOM kernel\n\n"
+                "Press [bold magenta]Enter[/bold magenta] to continue into the REPL."
+            )
+            console.print(Panel(welcome, title="🚀 First Boot Detected", border_style="cyan"))
+            input()
+            # Save default config to avoid showing this again
+            from axiom.config import get_config
+            get_config().save()
+        run_cli()
+        return
 
-    if len(sys.argv) > 1 and sys.argv[1].lower() == 'hud':
+    if args.command == 'daemon':
+        if args.action == 'start':
+            from axiom.server.daemon import AxiomDaemonServer
+            import asyncio
+            async def run_daemon():
+                daemon = AxiomDaemonServer()
+                try:
+                    await daemon.run()
+                except asyncio.CancelledError:
+                    pass
+            try:
+                asyncio.run(run_daemon())
+            except KeyboardInterrupt:
+                print('\nDaemon stopped by user.')
+        elif args.action == 'install':
+            import subprocess
+            install_script = Path(__file__).parent.parent / 'scripts' / 'install_daemon.sh'
+            if install_script.exists():
+                subprocess.run(["bash", str(install_script)])
+            else:
+                print(f"[!] Error: Installer script not found at {install_script}")
+                
+    elif args.command == 'ask':
+        cli = CLI()
+        prompt = args.prompt
+        if args.verbose:
+            prompt += " --verbose"
+        try:
+            cli.do_ask(prompt)
+        finally:
+            cli.close()
+            
+    elif args.command == 'chat':
+        run_cli()
+        
+    elif args.command == 'hud':
         from axiom.gui.hud import run_hud
         run_hud()
-    elif len(sys.argv) > 1 and sys.argv[1].lower() == 'pipe':
-        prompt = sys.argv[2] if len(sys.argv) > 2 else ""
+        
+    elif args.command == 'pipe':
+        prompt = args.prompt
         if not sys.stdin.isatty():
             stdin_content = sys.stdin.read().strip()
             if stdin_content:
                 prompt = f"[Piped Terminal Input]:\n{stdin_content}\n\n[Task]: {prompt}"
-        
         if not prompt:
             print("Error: No prompt or piped input provided.")
             sys.exit(1)
-            
         import asyncio
         from axiom.client.ipc_client import AxiomDaemonClient
         client = AxiomDaemonClient()
         asyncio.run(client.submit_task_and_stream(prompt))
-    elif len(sys.argv) > 1 and sys.argv[1].lower() == 'mcp-server':
+        
+    elif args.command == 'mcp-server':
         from axiom.server.mcp_server import run_mcp_server
         run_mcp_server()
-    else:
-        run_cli()
-
-# Pip entry-point fallback
-def main():
-    try:
-        run_cli()
-    except NameError:
-        print("[!] Fatal: run_cli not found in cli.py. Check entry definitions.")
