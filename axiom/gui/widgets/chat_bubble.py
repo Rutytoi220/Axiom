@@ -126,8 +126,16 @@ class MessageBubble(QFrame):
         role_label.setObjectName(f"roleLabel_{role}")
         ts = QLabel(time.strftime("%H:%M"))
         ts.setObjectName("msgTimestamp")
+        
+        self._copy_btn = QToolButton()
+        self._copy_btn.setText("📋 Copy")
+        self._copy_btn.setStyleSheet("background: transparent; color: #a6adc8; border: none; font-size: 11px;")
+        self._copy_btn.setCursor(Qt.PointingHandCursor)
+        self._copy_btn.clicked.connect(self._copy_to_clipboard)
+
         header.addWidget(role_label)
         header.addStretch()
+        header.addWidget(self._copy_btn)
         header.addWidget(ts)
         layout.addLayout(header)
 
@@ -147,3 +155,48 @@ class MessageBubble(QFrame):
     def append_text(self, chunk: str) -> None:
         """Append a streamed chunk to the existing body text."""
         self._body.setText(self._body.text() + html.escape(chunk))
+
+    def _copy_to_clipboard(self) -> None:
+        """Copy the raw plain text of the bubble and attached annotations to the clipboard."""
+        import PySide6.QtGui as QtGui
+        import PySide6.QtWidgets as QtWidgets
+        
+        doc = QtGui.QTextDocument()
+        doc.setHtml(self._body.text())
+        full_text = doc.toPlainText().strip()
+        
+        # Traverse sibling widgets to find attached annotations (ToolPills/SwarmPills)
+        parent = self.parentWidget()
+        if parent and parent.layout():
+            layout = parent.layout()
+            idx = layout.indexOf(self)
+            if idx != -1:
+                # Look ahead for annotations belonging to this message
+                for i in range(idx + 1, layout.count()):
+                    item = layout.itemAt(i)
+                    if not item:
+                        continue
+                    widget = item.widget()
+                    if not widget:
+                        continue
+                        
+                    # Stop if we hit the next chat message
+                    if widget.objectName() == "msgBubble":
+                        break
+                        
+                    # Extract ToolPill data
+                    if widget.objectName() == "toolPill":
+                        summary = widget.findChild(QtWidgets.QLabel, "toolPillSummary")
+                        detail = widget.findChild(QtWidgets.QLabel, "toolPillDetail")
+                        
+                        s_text = summary.text().replace('<b>', '').replace('</b>', '') if summary else "Tool"
+                        d_text = detail.text() if detail else ""
+                        full_text += f"\n\n[🛠️ Tool Call: {s_text}]\n{d_text}"
+
+        clipboard = QtWidgets.QApplication.clipboard()
+        clipboard.setText(full_text.strip())
+        self._copy_btn.setText("✅ Copied!")
+        
+        # Reset button text after 2 seconds
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(2000, lambda: self._copy_btn.setText("📋 Copy"))

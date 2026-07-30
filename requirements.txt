@@ -7,3 +7,5 @@ numpy==1.24.3
 psutil
 rich>=13.0.0
 prompt_toolkit>=3.0.0
+structlog>=23.1.0
+opentelemetry-api

@@ -71,16 +71,11 @@ Returns:
             await self._init_db_connection()
 
     async def _init_db_connection(self) -> None:
-        """Auto-generated docstring.
-
-
-Returns:
-    Return value.
-"""
-        self._db = await aiosqlite.connect(self.db_path, timeout=30)
-        self._db.row_factory = aiosqlite.Row
-        await self._db.execute('PRAGMA journal_mode=WAL')
-        await self._db.execute('PRAGMA busy_timeout=30000')
+        """Initialize database connection using AxiomDatabaseManager."""
+        from axiom.core.database import AxiomDatabaseManager
+        self._db_mgr = AxiomDatabaseManager(self.db_path)
+        self._db = await self._db_mgr.get_connection()
+        
         async with self._db.execute('PRAGMA user_version') as cursor:
             row = await cursor.fetchone()
             current_version = row[0] if row else 0

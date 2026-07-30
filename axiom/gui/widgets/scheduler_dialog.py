@@ -1,150 +1,123 @@
-"""Scheduler Dialog UI for managing background jobs."""
+"""Automation Dialog UI.
 
+A minimalist interface to toggle core autonomous background
+triggers built in v5.0+ (REM Sleep, Power Governor, Watchdog, Interceptor).
+"""
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
-    QTableWidget, QTableWidgetItem, QHeaderView,
-    QLabel, QInputDialog, QMessageBox, QComboBox, QLineEdit
+    QLabel, QFrame, QWidget
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 class SchedulerDialog(QDialog):
-    """UI for managing scheduled tasks."""
+    """Minimalist UI for managing autonomous triggers."""
 
-    def __init__(self, scheduler_service, parent=None):
+    def __init__(self, scheduler_service=None, parent=None, event_bus=None):
         super().__init__(parent)
         self.scheduler_service = scheduler_service
-        self.setWindowTitle("AXIOM Automation - Background Scheduler")
-        self.setMinimumSize(700, 400)
-        self.setStyleSheet("background-color: #1e1e24; color: #d1d1d6;")
+        self.event_bus = event_bus
+        self.setWindowTitle("⏱️ AXIOM Automation Triggers")
+        self.setMinimumSize(500, 400)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #1e1e2e;
+                color: #cdd6f4;
+            }
+            QLabel {
+                font-size: 14px;
+            }
+        """)
 
         layout = QVBoxLayout(self)
         
         # Header
-        header = QLabel("<b>Background Jobs</b>")
-        header.setStyleSheet("font-size: 16px; color: #facc15;")
+        header = QLabel("<h2>Autonomous Background Triggers</h2>")
+        header.setStyleSheet("color: #a6e3a1; font-weight: bold;")
         layout.addWidget(header)
         
-        # Table
-        self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["Name", "Prompt", "Type", "Schedule", "Next Run"])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.table.setStyleSheet("""
-            QTableWidget { background-color: #2a2a35; border: 1px solid #4b4b60; border-radius: 4px; }
-            QHeaderView::section { background-color: #1f1f28; color: #a8a8b3; padding: 4px; border: 1px solid #4b4b60; }
+        desc = QLabel("Easily toggle AXIOM's core background subsystems without complex cron rules.")
+        desc.setStyleSheet("color: #a6adc8; margin-bottom: 20px;")
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        # Trigger List
+        self._add_toggle_row(layout, "🌌 Nightly REM Sleep", "Compacts GraphRAG memory at 03:00 AM.", "rem_sleep", True)
+        self._add_toggle_row(layout, "🔋 Power Governor", "Dynamically throttles AI models when on battery power.", "power_gov", True)
+        self._add_toggle_row(layout, "🔌 Hardware Interceptor", "Zero-trust sandbox for incoming USB/BLE mounts.", "hw_intercept", True)
+        self._add_toggle_row(layout, "📂 Directory Watchdog", "Pre-computes responses based on file system events.", "watchdog", False)
+        
+        layout.addStretch()
+
+    def _add_toggle_row(self, parent_layout, title: str, description: str, trigger_id: str, default_state: bool):
+        row = QFrame()
+        row.setStyleSheet("""
+            QFrame {
+                background-color: #313244;
+                border-radius: 8px;
+                padding: 10px;
+                margin-bottom: 10px;
+            }
         """)
-        layout.addWidget(self.table)
+        row_layout = QHBoxLayout(row)
         
-        # Toolbar
-        toolbar = QHBoxLayout()
+        text_layout = QVBoxLayout()
+        t_label = QLabel(f"<b>{title}</b>")
+        t_label.setStyleSheet("color: #cdd6f4; font-size: 15px;")
         
-        self.btn_add = QPushButton("➕ Add Job")
-        self.btn_add.setStyleSheet("background-color: #10b981; color: white; padding: 6px; border-radius: 4px; font-weight: bold;")
-        self.btn_add.clicked.connect(self._on_add)
+        d_label = QLabel(description)
+        d_label.setStyleSheet("color: #a6adc8; font-size: 12px;")
         
-        self.btn_pause = QPushButton("⏸️ Pause/Resume")
-        self.btn_pause.setStyleSheet("background-color: #f59e0b; color: white; padding: 6px; border-radius: 4px; font-weight: bold;")
-        self.btn_pause.clicked.connect(self._on_pause)
+        text_layout.addWidget(t_label)
+        text_layout.addWidget(d_label)
+        row_layout.addLayout(text_layout)
         
-        self.btn_delete = QPushButton("🗑️ Delete")
-        self.btn_delete.setStyleSheet("background-color: #ef4444; color: white; padding: 6px; border-radius: 4px; font-weight: bold;")
-        self.btn_delete.clicked.connect(self._on_delete)
+        row_layout.addStretch()
         
-        toolbar.addWidget(self.btn_add)
-        toolbar.addWidget(self.btn_pause)
-        toolbar.addWidget(self.btn_delete)
-        toolbar.addStretch()
+        btn = QPushButton("ON" if default_state else "OFF")
+        self._style_toggle_btn(btn, default_state)
+        btn.setProperty("trigger_id", trigger_id)
+        btn.setProperty("state", default_state)
+        btn.setFixedSize(60, 30)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.clicked.connect(lambda _, b=btn: self._on_toggle(b))
         
-        layout.addLayout(toolbar)
-        
-        self._refresh_table()
+        row_layout.addWidget(btn)
+        parent_layout.addWidget(row)
 
-    def _refresh_table(self):
-        self.table.setRowCount(0)
-        jobs = self.scheduler_service.get_jobs()
-        for i, job in enumerate(jobs):
-            self.table.insertRow(i)
-            
-            # Store job ID in the name item for reference
-            name_item = QTableWidgetItem(job["name"])
-            name_item.setData(Qt.UserRole, job["id"])
-            
-            self.table.setItem(i, 0, name_item)
-            self.table.setItem(i, 1, QTableWidgetItem(job["prompt"]))
-            self.table.setItem(i, 2, QTableWidgetItem(job["trigger_type"]))
-            self.table.setItem(i, 3, QTableWidgetItem(job["schedule"]))
-            self.table.setItem(i, 4, QTableWidgetItem(job["next_run_time"]))
-
-    def _get_selected_job_id(self):
-        rows = self.table.selectionModel().selectedRows()
-        if not rows:
-            QMessageBox.warning(self, "Selection Error", "Please select a job first.")
-            return None
-        return self.table.item(rows[0].row(), 0).data(Qt.UserRole)
+    def _style_toggle_btn(self, btn: QPushButton, state: bool):
+        if state:
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #a6e3a1;
+                    color: #11111b;
+                    font-weight: bold;
+                    border-radius: 15px;
+                }
+            """)
+        else:
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #45475a;
+                    color: #cdd6f4;
+                    font-weight: bold;
+                    border-radius: 15px;
+                }
+            """)
 
     @Slot()
-    def _on_add(self):
-        # We can implement a simple custom dialog or rely on QInputDialog for MVP
-        # Using a custom basic dialog layout for adding
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Add Job")
-        l = QVBoxLayout(dlg)
+    def _on_toggle(self, btn: QPushButton):
+        current_state = btn.property("state")
+        new_state = not current_state
+        trigger_id = btn.property("trigger_id")
         
-        l.addWidget(QLabel("Job Name:"))
-        name_input = QLineEdit()
-        l.addWidget(name_input)
+        btn.setProperty("state", new_state)
+        btn.setText("ON" if new_state else "OFF")
+        self._style_toggle_btn(btn, new_state)
         
-        l.addWidget(QLabel("Prompt Description:"))
-        prompt_input = QLineEdit()
-        l.addWidget(prompt_input)
+        logger.info(f"Automation Dialog: Toggled {trigger_id} to {new_state}")
         
-        l.addWidget(QLabel("Trigger Type:"))
-        type_input = QComboBox()
-        type_input.addItems(["interval", "cron"])
-        l.addWidget(type_input)
-        
-        l.addWidget(QLabel("Schedule (Seconds for interval, Cron exp for cron):"))
-        sched_input = QLineEdit()
-        l.addWidget(sched_input)
-        
-        btn_box = QHBoxLayout()
-        ok_btn = QPushButton("Save")
-        ok_btn.clicked.connect(dlg.accept)
-        btn_box.addWidget(ok_btn)
-        l.addLayout(btn_box)
-        
-        if dlg.exec() == QDialog.Accepted:
-            if name_input.text() and prompt_input.text() and sched_input.text():
-                try:
-                    self.scheduler_service.add_job(
-                        name=name_input.text(),
-                        prompt=prompt_input.text(),
-                        trigger_type=type_input.currentText(),
-                        schedule=sched_input.text()
-                    )
-                    self._refresh_table()
-                except Exception as e:
-                    QMessageBox.critical(self, "Error", f"Failed to add job: {e}")
-
-    @Slot()
-    def _on_pause(self):
-        job_id = self._get_selected_job_id()
-        if job_id:
-            # Check current status
-            jobs = self.scheduler_service.get_jobs()
-            job = next((j for j in jobs if j["id"] == job_id), None)
-            if job:
-                if job["next_run_time"] == "Paused":
-                    self.scheduler_service.resume_job(job_id)
-                else:
-                    self.scheduler_service.pause_job(job_id)
-                self._refresh_table()
-
-    @Slot()
-    def _on_delete(self):
-        job_id = self._get_selected_job_id()
-        if job_id:
-            reply = QMessageBox.question(self, "Delete Job", "Are you sure you want to delete this job?", QMessageBox.Yes | QMessageBox.No)
-            if reply == QMessageBox.Yes:
-                self.scheduler_service.remove_job(job_id)
-                self._refresh_table()
+        if self.event_bus:
+            self.event_bus.publish_sync(f"system.toggle.{trigger_id}", {"state": new_state})

@@ -91,3 +91,52 @@ Returns:
             except Exception:
                 return 0
         return await asyncio.to_thread(fetch)
+
+import structlog
+import uuid
+from contextvars import ContextVar
+
+# Context variable to hold the current correlation ID
+_correlation_id: ContextVar[str] = ContextVar("correlation_id", default="")
+
+def setup_structured_logging() -> None:
+    """Configure structlog for JSON output and context variables."""
+    structlog.configure(
+        processors=[
+            structlog.contextvars.merge_contextvars,
+            structlog.stdlib.add_logger_name,
+            structlog.stdlib.add_log_level,
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.JSONRenderer()
+        ],
+        wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+
+class StructuredTracer:
+    """Structured OpenTelemetry-style tracer using structlog.
+    
+    Assigns correlation UUIDs to trace lifecycles across the daemon.
+    """
+    
+    def __init__(self, logger_name: str = "axiom.tracer"):
+        self.logger = structlog.get_logger(logger_name)
+        
+    def start_trace(self, operation: str, **kwargs) -> str:
+        """Begin a new trace with a unique correlation ID."""
+        trace_id = str(uuid.uuid4())
+        _correlation_id.set(trace_id)
+        structlog.contextvars.bind_contextvars(correlation_id=trace_id)
+        self.logger.info(f"Trace started: {operation}", operation=operation, **kwargs)
+        return trace_id
+        
+    def log_step(self, step_name: str, **kwargs):
+        """Log a step in the current trace."""
+        self.logger.info(step_name, **kwargs)
+        
+    def end_trace(self, operation: str, **kwargs):
+        """End the current trace."""
+        self.logger.info(f"Trace ended: {operation}", operation=operation, **kwargs)
+        structlog.contextvars.clear_contextvars()

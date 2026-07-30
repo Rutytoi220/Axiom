@@ -1,4 +1,4 @@
-"""AXIOM Desktop v3.0 — Main Application Window.
+"""AXIOM Desktop v6.0 LTS — Main Application Window.
 
 Implements the modular layout:
   - Toolbar (model badge, auth mode selector, expert toggle)
@@ -77,7 +77,7 @@ class ChatInputEdit(QTextEdit):
 
 
 class MainWindow(QMainWindow):
-    """AXIOM Desktop v3.0 main application window."""
+    """AXIOM Desktop v6.0 LTS main application window."""
 
     def __init__(self, bridge: "AxiomBridge", parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -88,7 +88,7 @@ class MainWindow(QMainWindow):
         
         # Background services now run in the headless daemon
 
-        self.setWindowTitle("AXIOM Desktop v3.0")
+        self.setWindowTitle("AXIOM Desktop v6.0 LTS")
         self.setMinimumSize(900, 640)
         self.resize(1280, 800)
 
@@ -101,14 +101,9 @@ class MainWindow(QMainWindow):
         self._refresh_auth_ui()
         
         # Initial Welcome Message
-        self._add_bubble("assistant", "⚡ AXIOM Desktop v3.0 Online — Select a mode above or type a prompt below to begin.")
+        self._add_bubble("assistant", "⚡ AXIOM Desktop v6.0 LTS Online — Select a mode above or type a prompt below to begin.")
         
-        # Budget Updater
-        self._budget_timer = QTimer(self)
-        self._budget_timer.timeout.connect(self._update_budget_meter)
-        self._budget_timer.start(10000) # Every 10s
         # Defer the first update slightly to avoid import loops if any
-        QTimer.singleShot(100, self._update_budget_meter)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -200,83 +195,18 @@ class MainWindow(QMainWindow):
 
         tb.addSeparator()
         
-        # ---- Automation Button ----
-        self._automation_btn = QPushButton("⏱️ Automation")
-        self._automation_btn.setObjectName("automationBtn")
-        self._automation_btn.clicked.connect(self._open_scheduler_dialog)
-        tb.addWidget(self._automation_btn)
-        
-        tb.addSeparator()
-        # ---- IoT / Physical Button ----
-        self._iot_btn = QPushButton("💡 IoT / Physical")
-        self._iot_btn.setObjectName("iotBtn")
-        self._iot_btn.setStyleSheet("color: #f9e2af;")
-        self._iot_btn.clicked.connect(self._open_iot_dialog)
-        tb.addWidget(self._iot_btn)
-        
-        tb.addSeparator()
-        # ---- eBPF Firewall Button ----
-        self._firewall_btn = QPushButton("🛡️ eBPF Firewall")
-        self._firewall_btn.setObjectName("firewallBtn")
-        self._firewall_btn.setStyleSheet("color: #f38ba8;")
-        self._firewall_btn.clicked.connect(self._open_firewall_dialog)
-        tb.addWidget(self._firewall_btn)
-        
-        tb.addSeparator()
-
-        # ---- Security Audit Button ----
-        self._audit_btn = QPushButton("🛡️ Security Log")
-        self._audit_btn.setObjectName("auditBtn")
-        self._audit_btn.clicked.connect(self._open_audit_dialog)
-        tb.addWidget(self._audit_btn)
-        
-        tb.addSeparator()
-
-        # ---- Settings Button ----
-        self._settings_btn = QPushButton("⚙️ Settings")
-        self._settings_btn.setObjectName("settingsBtn")
-        self._settings_btn.clicked.connect(self._open_settings_dialog)
-        tb.addWidget(self._settings_btn)
-
-        tb.addSeparator()
-        
-        # ---- System Health Button ----
-        self._health_btn = QPushButton("❤️ System Health")
-        self._health_btn.setObjectName("healthBtn")
-        self._health_btn.setStyleSheet("color: #f38ba8;")
-        self._health_btn.clicked.connect(self._open_health_radar)
-        tb.addWidget(self._health_btn)
-
-        tb.addSeparator()
-        
-        # ---- Knowledge Graph Button ----
-        self._graph_btn = QPushButton("🕸️ Knowledge Graph")
-        self._graph_btn.setObjectName("graphBtn")
-        self._graph_btn.setStyleSheet("color: #cba6f7;")
-        self._graph_btn.clicked.connect(self._open_graph_dialog)
-        tb.addWidget(self._graph_btn)
-        
-        # ---- Recall Timeline Button ----
-        self._recall_btn = QPushButton("⏱️ Recall Timeline")
-        self._recall_btn.setObjectName("recallBtn")
-        self._recall_btn.setStyleSheet("color: #89b4fa;")
-        self._recall_btn.clicked.connect(self._open_recall_dialog)
-        tb.addWidget(self._recall_btn)
-
-        # ---- Cyber Audit Button ----
-        self._audit_btn = QPushButton("🛡️ Cyber Audit")
-        self._audit_btn.setObjectName("auditBtn")
-        self._audit_btn.setStyleSheet("color: #fab387;")
-        self._audit_btn.clicked.connect(self._open_security_dialog)
-        tb.addWidget(self._audit_btn)
-
-        tb.addSeparator()
-
-        # ---- Skill Library Button ----
-        self._skill_btn = QPushButton("🧩 Skill Library")
-        self._skill_btn.setObjectName("skillBtn")
-        self._skill_btn.clicked.connect(self._open_skill_dialog)
-        tb.addWidget(self._skill_btn)
+        # ---- System Hub Button ----
+        self._hub_btn = QPushButton("⚙️ System Hub")
+        self._hub_btn.setObjectName("hubBtn")
+        self._hub_btn.setStyleSheet("""
+            background-color: #313244;
+            color: #cdd6f4;
+            font-weight: bold;
+            border-radius: 4px;
+            padding: 5px 15px;
+        """)
+        self._hub_btn.clicked.connect(self._open_system_hub_dialog)
+        tb.addWidget(self._hub_btn)
 
         tb.addSeparator()
 
@@ -287,21 +217,7 @@ class MainWindow(QMainWindow):
         
         tb.addSeparator()
 
-        # ---- Daemon Status Monitor ----
-        self._daemon_status_label = QLabel("🔌 Daemon: Disconnected")
-        self._daemon_status_label.setStyleSheet("font-weight: 600; font-size: 13px; color: #f87171;")
-        tb.addWidget(self._daemon_status_label)
-        
-        tb.addSeparator()
 
-        # ---- Live Budget Meter ----
-        self._budget_btn = QPushButton("☁️ Claude: Budget")
-        self._budget_btn.setObjectName("budgetBtn")
-        self._budget_btn.setStyleSheet("font-weight: bold; border: none; padding: 2px 8px; border-radius: 4px; background: transparent; color: #cdd6f4;")
-        self._budget_btn.clicked.connect(self._open_budget_dialog)
-        tb.addWidget(self._budget_btn)
-        
-        tb.addSeparator()
 
         # ---- Ollama Health Monitor ----
         self._ollama_status_label = QLabel("🟡 Ollama: Checking...")
@@ -461,23 +377,48 @@ class MainWindow(QMainWindow):
         self.singularity_btn.setStyleSheet("border: none; color: #cba6f7; font-weight: bold;")
         self.singularity_btn.clicked.connect(self._open_singularity_dialog)
 
+        self._status_updates = QLabel("[ Updates: Checking... ]")
+        self._status_updates.setStyleSheet("font-weight: 600; color: #fab387; padding-right: 10px;")
+
         sb.addWidget(self._status_mode)
-        sb.addWidget(self._status_memory)
-        sb.addWidget(self.pager_btn)
-        sb.addWidget(self.cloud_btn)
-        sb.addWidget(self.hardware_btn)
-        sb.addWidget(self.singularity_btn)
-        sb.addWidget(self.power_label)
-        sb.addWidget(self.governor_btn)
-        sb.addWidget(self._thermal_label)
-        sb.addWidget(self.voice_btn)
+        
+        # Daemon Connection Status
+        self._status_daemon = QLabel("🔌 Daemon: Disconnected")
+        self._status_daemon.setStyleSheet("color: #f87171; font-weight: bold; padding-left: 5px; padding-right: 15px;")
+        sb.addWidget(self._status_daemon)
+        
+        sb.addPermanentWidget(self._status_updates)
         sb.addPermanentWidget(self._status_model)
+
+        
+        # Check for updates in background
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(1000, self._check_updates_async)
         
         # Memory polling timer
-        from PySide6.QtCore import QTimer
         self._memory_timer = QTimer(self)
         self._memory_timer.timeout.connect(self._update_memory_count)
         self._memory_timer.start(5000)
+
+    def _check_updates_async(self):
+        import asyncio
+        from axiom.services.updater import AxiomUpdateManager
+        
+        async def _check():
+            mgr = AxiomUpdateManager()
+            res = await mgr.check_for_updates()
+            if res.get("update_available"):
+                self._status_updates.setText(f"[ Updates: {res['latest_version']} Available ]")
+                self._status_updates.setStyleSheet("font-weight: 600; color: #f38ba8; padding-right: 10px;")
+            else:
+                self._status_updates.setText("[ Updates: Up-to-Date ]")
+                self._status_updates.setStyleSheet("font-weight: 600; color: #a6e3a1; padding-right: 10px;")
+                
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.run_coroutine_threadsafe(_check(), loop)
+        else:
+            asyncio.run(_check())
 
     def _update_memory_count(self) -> None:
         try:
@@ -514,11 +455,11 @@ class MainWindow(QMainWindow):
     @Slot(bool)
     def _on_daemon_connection_changed(self, connected: bool) -> None:
         if connected:
-            self._daemon_status_label.setText("⚡ Daemon: Connected")
-            self._daemon_status_label.setStyleSheet("font-weight: 600; font-size: 13px; color: #10b981;")
+            self._status_daemon.setText("⚡ Daemon: Connected")
+            self._status_daemon.setStyleSheet("color: #10b981; font-weight: bold; padding-left: 5px; padding-right: 15px;")
         else:
-            self._daemon_status_label.setText("🔌 Daemon: Disconnected")
-            self._daemon_status_label.setStyleSheet("font-weight: 600; font-size: 13px; color: #f87171;")
+            self._status_daemon.setText("🔌 Daemon: Disconnected")
+            self._status_daemon.setStyleSheet("color: #f87171; font-weight: bold; padding-left: 5px; padding-right: 15px;")
 
     # ------------------------------------------------------------------
     # Qt Slots
@@ -763,31 +704,7 @@ class MainWindow(QMainWindow):
         # Send toggle to voice daemon via IPC or local instance
         pass
 
-    @Slot()
-    def _open_budget_dialog(self) -> None:
-        from axiom.gui.widgets.budget_dialog import BudgetDialog
-        dialog = BudgetDialog(self)
-        dialog.exec()
-        self._update_budget_meter()
 
-    @Slot()
-    def _update_budget_meter(self):
-        try:
-            from axiom.engine.budget_mgr import TokenBudgetManager
-            mgr = TokenBudgetManager()
-            _, _, percent = mgr.can_afford_cloud_call(0)
-            
-            if percent >= 90:
-                self._budget_btn.setText("🔴 Claude: Capped (Local Only)")
-                self._budget_btn.setStyleSheet("font-weight: bold; border: none; padding: 2px 8px; border-radius: 4px; background: transparent; color: #f38ba8;")
-            elif percent >= 75:
-                self._budget_btn.setText(f"🟡 Claude: {100 - int(percent)}% Budget")
-                self._budget_btn.setStyleSheet("font-weight: bold; border: none; padding: 2px 8px; border-radius: 4px; background: transparent; color: #f9e2af;")
-            else:
-                self._budget_btn.setText(f"☁️ Claude: {100 - int(percent)}% Budget")
-                self._budget_btn.setStyleSheet("font-weight: bold; border: none; padding: 2px 8px; border-radius: 4px; background: transparent; color: #a6e3a1;")
-        except Exception as e:
-            pass
 
     @Slot()
     def _on_settings_updated(self):
@@ -892,4 +809,16 @@ class MainWindow(QMainWindow):
         """Open the Singularity Control dialog."""
         from axiom.gui.widgets.singularity_dialog import SingularityControlDialog
         dlg = SingularityControlDialog(self)
+        dlg.exec()
+
+    def _open_telemetry_dialog(self) -> None:
+        """Open the Telemetry Trace observer dialog."""
+        from axiom.gui.widgets.telemetry_dialog import TelemetryDialog
+        dlg = TelemetryDialog(self)
+        dlg.exec()
+
+    def _open_system_hub_dialog(self) -> None:
+        """Open the unified System Hub dialog."""
+        from axiom.gui.widgets.system_hub_dialog import SystemHubDialog
+        dlg = SystemHubDialog(self)
         dlg.exec()
