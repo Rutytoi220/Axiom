@@ -96,9 +96,22 @@ Returns:
             self._event_history.pop(0)
         self._published_events.add(event.event_type)
         handlers = self._matching_handlers(event.event_type)
+        
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
         for handler in handlers:
             try:
-                handler(event)
+                if loop:
+                    if asyncio.iscoroutinefunction(handler):
+                        loop.create_task(handler(event))
+                    else:
+                        loop.run_in_executor(None, handler, event)
+                else:
+                    handler(event)
             except Exception as exc:
                 logger.error('Handler %s raised for event %s: %s', getattr(handler, '__name__', handler), event.event_type, exc, exc_info=True)
         self._emit_meta_event(event.event_type, event.data)

@@ -1110,8 +1110,6 @@ def run_cli() -> None:
         print(f'Error: {e}')
     finally:
         cli.close()
-if __name__ == '__main__':
-    main()
 
 # Pip entry-point fallback
 def main():
@@ -1155,6 +1153,10 @@ def main():
     # Pipe subcommand (for IPC)
     pipe_parser = subparsers.add_parser('pipe', help="Pipe text to AXIOM")
     pipe_parser.add_argument('prompt', nargs='?', default='', help="Optional task prompt")
+    
+    # Profile subcommand
+    profile_parser = subparsers.add_parser('profile', help="Run the daemon with cProfile for performance telemetry")
+    profile_parser.add_argument('--duration', type=int, default=10, help="Duration in seconds to profile the engine")
     
     # MCP server fallback
     subparsers.add_parser('mcp-server', help="Launch AXIOM as an MCP server")
@@ -1240,6 +1242,47 @@ def main():
         client = AxiomDaemonClient()
         asyncio.run(client.submit_task_and_stream(prompt))
         
+    elif args.command == 'profile':
+        import cProfile
+        import pstats
+        import io
+        from rich.console import Console
+        from axiom.server.daemon import AxiomDaemonServer
+        import asyncio
+        
+        console = Console()
+        console.print(f"[bold cyan]Starting Performance Profiling for {args.duration} seconds...[/bold cyan]")
+        
+        pr = cProfile.Profile()
+        pr.enable()
+        
+        async def run_profiled_daemon():
+            daemon = AxiomDaemonServer()
+            daemon_task = asyncio.create_task(daemon.run())
+            await asyncio.sleep(args.duration)
+            daemon_task.cancel()
+            try:
+                await daemon_task
+            except asyncio.CancelledError:
+                pass
+                
+        try:
+            asyncio.run(run_profiled_daemon())
+        except KeyboardInterrupt:
+            pass
+            
+        pr.disable()
+        s = io.StringIO()
+        sortby = pstats.SortKey.CUMULATIVE
+        ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
+        ps.print_stats(15)
+        
+        console.print("\n[bold green]Profiling Complete. Top time-consuming calls:[/bold green]")
+        print(s.getvalue())
+        
     elif args.command == 'mcp-server':
         from axiom.server.mcp_server import run_mcp_server
         run_mcp_server()
+
+if __name__ == '__main__':
+    main()

@@ -59,10 +59,35 @@ class Engine:
     
     def _setup_internal_handlers(self) -> None:
         """Setup internal event handlers."""
+        self._last_activity = time.time()
+        self.event_bus.subscribe("*", self._update_activity)
         self.event_bus.subscribe("error.handler", self._handle_error)
         self.event_bus.subscribe("system.shutdown", self._handle_shutdown)
         self.event_bus.subscribe("llm.response.completed", self._handle_llm_response)
         self.event_bus.subscribe("system.anomaly", self._handle_system_anomaly)
+
+    def _update_activity(self, event: Event) -> None:
+        """Update last activity timestamp."""
+        self._last_activity = time.time()
+        
+    async def _idle_monitor(self) -> None:
+        """Monitor for deep idle state."""
+        import asyncio
+        import time
+        in_idle = False
+        while self._running:
+            now = time.time()
+            if now - self._last_activity > 60:
+                if not in_idle:
+                    in_idle = True
+                    logger.info("Deep Idle state entered. Suspending active background tasks.")
+                    self.event_bus.publish_sync("system.deep_idle.enter")
+            else:
+                if in_idle:
+                    in_idle = False
+                    logger.info("Deep Idle state exited. Restoring active background tasks.")
+                    self.event_bus.publish_sync("system.deep_idle.exit")
+            await asyncio.sleep(10)
 
     def _handle_system_anomaly(self, event: Event) -> None:
         """Handle system anomalies by consulting SmartRouter and sending to TTS."""
@@ -119,6 +144,13 @@ class Engine:
             self.os_watcher.start()
             # Start audio daemon
             self.audio_daemon.start()
+            
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._idle_monitor())
+        except RuntimeError:
+            pass
         
         # Log engine started event
         self.memory.log_event("engine.started", data={"started_at": self.started_at}, source="Engine")

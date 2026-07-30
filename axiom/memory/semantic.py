@@ -189,12 +189,21 @@ Returns:
         q_norm = np.linalg.norm(q_vec)
         if q_norm == 0:
             return []
+            
+        # Vectorized numpy math for zero-overhead cosine similarity
+        stored_vectors = [json.loads(row['embedding_json']) for row in rows]
+        s_matrix = np.array(stored_vectors, dtype=np.float32)
+        
+        # Calculate norms for all stored vectors simultaneously
+        s_norms = np.linalg.norm(s_matrix, axis=1)
+        s_norms[s_norms == 0] = 1.0  # Prevent division by zero
+        
+        # Calculate dot products and divide by norms to get cosine similarities
+        similarities = np.dot(s_matrix, q_vec) / (s_norms * q_norm)
+        
         scored = []
-        for row in rows:
-            stored = json.loads(row['embedding_json'])
-            s_vec = np.array(stored, dtype=np.float32)
-            s_norm = np.linalg.norm(s_vec)
-            base_sim = float(np.dot(q_vec, s_vec) / (q_norm * s_norm)) if s_norm > 0 else 0.0
+        for i, row in enumerate(rows):
+            base_sim = float(similarities[i])
             metrics = self._apply_decay(base_sim, row, now)
             scored.append({'id': row['id'], 'owner_id': row['owner_id'], 'owner_type': row['owner_type'], 'model': row['model'], **metrics})
         scored.sort(key=lambda x: x['similarity'], reverse=True)
