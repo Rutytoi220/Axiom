@@ -1158,6 +1158,9 @@ def main():
     profile_parser = subparsers.add_parser('profile', help="Run the daemon with cProfile for performance telemetry")
     profile_parser.add_argument('--duration', type=int, default=10, help="Duration in seconds to profile the engine")
     
+    # Update subcommand
+    subparsers.add_parser('update', help="Perform an Over-The-Air (OTA) update to the latest version")
+    
     # MCP server fallback
     subparsers.add_parser('mcp-server', help="Launch AXIOM as an MCP server")
     
@@ -1280,6 +1283,39 @@ def main():
         console.print("\n[bold green]Profiling Complete. Top time-consuming calls:[/bold green]")
         print(s.getvalue())
         
+    elif args.command == 'update':
+        from rich.console import Console
+        from axiom.services.updater import AxiomUpdateManager
+        import asyncio
+        
+        console = Console()
+        console.print("[bold cyan]AXIOM Over-The-Air (OTA) Updater[/bold cyan]")
+        
+        async def run_update():
+            updater = AxiomUpdateManager()
+            
+            with console.status("[bold yellow]Checking for updates...[/bold yellow]", spinner="dots"):
+                info = await updater.check_for_updates()
+                
+            if not info.get("update_available"):
+                console.print(f"[bold green]✓ AXIOM is up to date! (Version: {info.get('current_version')})[/bold green]")
+                return
+                
+            console.print(f"[bold yellow]New version available:[/bold yellow] {info.get('current_version')} -> {info.get('latest_version')}")
+            
+            with console.status(f"[bold yellow]Downloading and installing {info.get('latest_version')}...[/bold yellow]", spinner="bouncingBar"):
+                success = await updater.perform_update()
+                
+            if success:
+                console.print(f"[bold green]✓ Successfully updated to {info.get('latest_version')}![/bold green]")
+            else:
+                console.print("[bold red]✗ Update failed. Check logs for details.[/bold red]")
+                
+        try:
+            asyncio.run(run_update())
+        except KeyboardInterrupt:
+            console.print("\n[bold red]Update cancelled by user.[/bold red]")
+            
     elif args.command == 'mcp-server':
         from axiom.server.mcp_server import run_mcp_server
         run_mcp_server()

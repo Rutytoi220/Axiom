@@ -139,9 +139,15 @@ class Engine:
         
         # Start proactive watcher (respects config.proactive_kernel internally)
         import multiprocessing
+        import platform
         if multiprocessing.current_process().name == 'MainProcess':
             self.proactive_watcher.start()
-            self.os_watcher.start()
+            
+            if platform.system() == "Linux":
+                self.os_watcher.start()
+            else:
+                logger.info("OSWatcher disabled on non-Linux hosts (Graceful Degradation).")
+                
             # Start audio daemon
             self.audio_daemon.start()
             

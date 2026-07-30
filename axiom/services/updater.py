@@ -51,35 +51,112 @@ class AxiomUpdateManager:
         }
 
     async def perform_update(self, mock_mode: bool = False) -> bool:
-        """Executes 'git pull origin main' to sync changes."""
-        logger.info("AxiomUpdateManager: Initiating Over-The-Air Git Update...")
+        """Executes Over-The-Air Update using native Linux packages."""
+        logger.info("AxiomUpdateManager: Initiating Over-The-Air Update...")
         
-        def _pull():
+        def _get_package_type():
+            import platform
+            sys_name = platform.system()
+            if sys_name == "Windows":
+                return "exe"
+            elif sys_name == "Darwin":
+                return "dmg"
+            elif sys_name == "Linux":
+                try:
+                    with open("/etc/os-release") as f:
+                        content = f.read().lower()
+                        if "debian" in content or "ubuntu" in content or "pop" in content:
+                            return "deb"
+                        elif "fedora" in content or "centos" in content or "rhel" in content or "bazzite" in content:
+                            return "rpm"
+                except Exception as e:
+                    logger.error(f"AxiomUpdateManager: Could not read /etc/os-release - {e}")
+            return None
+
+        def _do_update():
             if mock_mode:
-                logger.info("AxiomUpdateManager: [MOCK] Executing 'git pull origin main'")
+                logger.info("AxiomUpdateManager: [MOCK] Update successful.")
                 return True
                 
+            pkg_type = _get_package_type()
+            if not pkg_type:
+                logger.error("AxiomUpdateManager: Unsupported OS. Only Debian/Fedora/Windows/macOS are supported for OTA updates.")
+                return False
+                
             try:
-                # We assume the user is running AXIOM from a git repository
-                if not os.path.exists(".git"):
-                    logger.error("AxiomUpdateManager: Not a git repository. Cannot perform OTA update.")
+                # 1. Get the latest release assets
+                req = urllib.request.Request(self.repo_api_url, headers={'User-Agent': 'Axiom-Updater'})
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    data = json.loads(response.read().decode())
+                    assets = data.get("assets", [])
+                    
+                download_url = None
+                for asset in assets:
+                    if asset.get("name", "").endswith(f".{pkg_type}"):
+                        download_url = asset.get("browser_download_url")
+                        break
+                        
+                if not download_url:
+                    logger.error(f"AxiomUpdateManager: No .{pkg_type} package found in the latest release assets.")
                     return False
                     
-                result = subprocess.run(
-                    ["git", "pull", "origin", "main"],
-                    capture_output=True,
-                    text=True,
-                    timeout=30
-                )
-                if result.returncode == 0:
-                    logger.info(f"AxiomUpdateManager: Update successful.\n{result.stdout}")
-                    return True
+                # 2. Download the package
+                import tempfile
+                import platform
+                
+                tmp_dir = tempfile.gettempdir()
+                tmp_file = os.path.join(tmp_dir, f"axiom_latest.{pkg_type}")
+                
+                logger.info(f"AxiomUpdateManager: Downloading {download_url} to {tmp_file}...")
+                urllib.request.urlretrieve(download_url, tmp_file)
+                
+                # 3. Install the package
+                logger.info("AxiomUpdateManager: Requesting privileges to install the package...")
+                
+                if pkg_type == "deb":
+                    cmd = ["pkexec", "dpkg", "-i", tmp_file]
+                elif pkg_type == "rpm":
+                    cmd = ["pkexec", "rpm", "-Uvh", tmp_file]
+                elif pkg_type == "exe":
+                    # Launch silent installer
+                    cmd = [tmp_file, "/S"]
+                elif pkg_type == "dmg":
+                    # Mount DMG, copy app, unmount
+                    cmd = f"hdiutil attach {tmp_file} && cp -R /Volumes/AXIOM/AXIOM.app /Applications/ && hdiutil detach /Volumes/AXIOM"
+                    
+                if pkg_type == "dmg":
+                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
                 else:
-                    logger.error(f"AxiomUpdateManager: Update failed.\n{result.stderr}")
+                    result = subprocess.run(cmd, capture_output=True, text=True)
+                    
+                if result.returncode != 0:
+                    logger.error(f"AxiomUpdateManager: Installation failed.\n{result.stderr}")
                     return False
+                    
+                logger.info("AxiomUpdateManager: Package installed successfully.")
+                
+                # 4. Restart Daemon
+                logger.info("AxiomUpdateManager: Restarting background daemon...")
+                if platform.system() == "Linux":
+                    subprocess.run(["systemctl", "--user", "restart", "axiom.service"], check=False)
+                elif platform.system() == "Darwin":
+                    # Launchd logic
+                    subprocess.run(["launchctl", "stop", "com.axiom.daemon"], check=False)
+                    subprocess.run(["launchctl", "start", "com.axiom.daemon"], check=False)
+                elif platform.system() == "Windows":
+                    # Windows service logic (or just inform user)
+                    logger.info("Windows OTA completed. Please restart AXIOM manually.")
+                return True
+                
+            except urllib.error.HTTPError as e:
+                if e.code in [403, 429]:
+                    logger.error("AxiomUpdateManager: GitHub API rate limit exceeded. Please try again later.")
+                else:
+                    logger.error(f"AxiomUpdateManager: HTTP Error during update - {e}")
+                return False
             except Exception as e:
                 logger.error(f"AxiomUpdateManager: Exception during update - {e}")
                 return False
 
-        success = await asyncio.to_thread(_pull)
+        success = await asyncio.to_thread(_do_update)
         return success

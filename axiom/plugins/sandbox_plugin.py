@@ -127,10 +127,15 @@ class SandboxRuntime:
     @staticmethod
     def detect_backend() -> SandboxBackend:
         """Probe the host for the best available isolation runtime."""
+        import platform
+        is_linux = platform.system() == "Linux"
+        
         if shutil.which("docker"):
             return SandboxBackend.DOCKER
-        if shutil.which("bwrap"):
+            
+        if is_linux and shutil.which("bwrap"):
             return SandboxBackend.BWRAP
+            
         return SandboxBackend.NONE
 
     # ------------------------------------------------------------------
