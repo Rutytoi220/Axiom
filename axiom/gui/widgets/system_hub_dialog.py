@@ -52,6 +52,48 @@ class SystemHubDialog(QDialog):
         header.setStyleSheet("color: #cdd6f4; font-weight: bold;")
         layout.addWidget(header)
         
+        # Profile Switcher
+        from axiom.services.profile_service import ProfileService, ProfileLevel
+        from PySide6.QtWidgets import QHBoxLayout, QButtonGroup
+        ps = ProfileService.instance()
+        current_profile = ps.get_profile()
+
+        profile_layout = QHBoxLayout()
+        profile_layout.setContentsMargins(0, 0, 0, 15)
+        profile_label = QLabel("UI Profile:")
+        profile_label.setStyleSheet("color: #a0a0b0; font-weight: bold;")
+        profile_layout.addWidget(profile_label)
+
+        self.btn_group = QButtonGroup(self)
+        self.btn_group.setExclusive(True)
+
+        btn_std = QPushButton("Standard")
+        btn_adv = QPushButton("Advanced")
+        btn_dev = QPushButton("Developer")
+        
+        btn_std.setCheckable(True)
+        btn_adv.setCheckable(True)
+        btn_dev.setCheckable(True)
+
+        if current_profile == ProfileLevel.STANDARD:
+            btn_std.setChecked(True)
+        elif current_profile == ProfileLevel.ADVANCED:
+            btn_adv.setChecked(True)
+        elif current_profile == ProfileLevel.DEVELOPER:
+            btn_dev.setChecked(True)
+
+        for b, lvl in [(btn_std, ProfileLevel.STANDARD), (btn_adv, ProfileLevel.ADVANCED), (btn_dev, ProfileLevel.DEVELOPER)]:
+            b.setStyleSheet("""
+                QPushButton { background-color: #181825; color: #a0a0b0; padding: 5px 15px; border-radius: 4px; border: 1px solid #313244; }
+                QPushButton:checked { background-color: #89b4fa; color: #11111b; font-weight: bold; }
+            """)
+            b.clicked.connect(lambda checked=False, l=lvl: ps.set_profile(l))
+            self.btn_group.addButton(b)
+            profile_layout.addWidget(b)
+
+        profile_layout.addStretch()
+        layout.addLayout(profile_layout)
+        
         # Grid Layout
         grid = QGridLayout()
         grid.setSpacing(15)

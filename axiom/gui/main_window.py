@@ -387,8 +387,25 @@ class MainWindow(QMainWindow):
         self._status_daemon.setStyleSheet("color: #f87171; font-weight: bold; padding-left: 5px; padding-right: 15px;")
         sb.addWidget(self._status_daemon)
         
+        # Intermediate / Advanced Widgets
+        sb.addWidget(self.power_label)
+        sb.addWidget(self._thermal_label)
+        sb.addWidget(self.governor_btn)
+        
+        # Developer / Cloud Widgets
+        sb.addPermanentWidget(self.cloud_btn)
+        sb.addPermanentWidget(self.hardware_btn)
+        sb.addPermanentWidget(self.pager_btn)
+        sb.addPermanentWidget(self.singularity_btn)
+        
         sb.addPermanentWidget(self._status_updates)
         sb.addPermanentWidget(self._status_model)
+
+        # Wire Profile Switcher
+        from axiom.services.profile_service import ProfileService, ProfileLevel
+        ps = ProfileService.instance()
+        ps.profile_changed.connect(self._apply_profile)
+        self._apply_profile(ps.get_profile())
 
         
         # Check for updates in background
@@ -430,6 +447,28 @@ class MainWindow(QMainWindow):
             self._status_memory.setText(f"🧠 Memory: Active ({c} Chunks)")
         except Exception:
             pass
+
+    @Slot(object)
+    def _apply_profile(self, level) -> None:
+        """Dynamically toggle visibility of HUD elements based on current profile."""
+        from axiom.services.profile_service import ProfileLevel
+        
+        # Intermediate / Advanced Widgets
+        show_advanced = level in (ProfileLevel.ADVANCED, ProfileLevel.DEVELOPER)
+        self.power_label.setVisible(show_advanced)
+        self._thermal_label.setVisible(show_advanced)
+        self.governor_btn.setVisible(show_advanced)
+        
+        # Developer / Cloud Widgets
+        show_developer = level == ProfileLevel.DEVELOPER
+        self.cloud_btn.setVisible(show_developer)
+        self.hardware_btn.setVisible(show_developer)
+        self.pager_btn.setVisible(show_developer)
+        self.singularity_btn.setVisible(show_developer)
+        
+        # Developer extra log toggles
+        if self._dock.isVisible() and not show_developer:
+            self._dock.hide()
 
     # ------------------------------------------------------------------
     # Bridge signal wiring

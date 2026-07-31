@@ -52,6 +52,7 @@ Returns:
     
     # UI / GUI Settings
     theme_mode: str = 'dark'  # 'system', 'dark', 'light'
+    ui_profile_level: str = 'standard' # 'standard', 'advanced', 'developer'
     auto_ollama_start: bool = True
     model_selection_mode: str = 'auto'  # 'auto', 'manual'
     auto_index_watchdog: bool = False
