@@ -175,31 +175,47 @@ def run_gui() -> None:
 
     bridge = AxiomBridge()
 
-    window = MainWindow(bridge=bridge)
-
-    # Update model label from config
-    config = get_config()
-    if hasattr(config, "ollama_model") and config.ollama_model:
-        window.update_model_label(config.ollama_model)
-
-    # --- System Tray ---
-    tray = _build_tray(app, window)
-
     # --- qasync event loop ---
+    # We must set this up BEFORE the windows so async signals can fire if needed
     loop = qasync.QEventLoop(app)
     asyncio.set_event_loop(loop)
     bridge.set_event_loop(loop)
 
-    window.show()
+    config = get_config()
+    window = None
+    tray = None
+    
+    def launch_main_hud():
+        nonlocal window, tray
+        window = MainWindow(bridge=bridge)
+        if hasattr(config, "ollama_model") and config.ollama_model:
+            window.update_model_label(config.ollama_model)
+        tray = _build_tray(app, window)
+        window.show()
+
+    # Check first launch
+    if getattr(config, "first_launch", True):
+        from axiom.gui.onboarding_window import OnboardingWindow
+        onboarding = OnboardingWindow(bridge, launch_main_hud)
+        # Keep reference to prevent GC
+        app._onboarding = onboarding
+        onboarding.show()
+    else:
+        launch_main_hud()
 
     def _on_ipc_connection() -> None:
         sock = server.nextPendingConnection()
         def on_ready_read():
             data = sock.readAll().data()
             if b"WAKEUP" in data:
-                window.show()
-                window.raise_()
-                window.activateWindow()
+                if window:
+                    window.show()
+                    window.raise_()
+                    window.activateWindow()
+                elif hasattr(app, "_onboarding"):
+                    app._onboarding.show()
+                    app._onboarding.raise_()
+                    app._onboarding.activateWindow()
             sock.disconnectFromServer()
         sock.readyRead.connect(on_ready_read)
         # Handle case where data is already available

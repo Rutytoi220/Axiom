@@ -51,8 +51,10 @@ Returns:
     allow_system_tools: bool = True
     
     # UI / GUI Settings
+    first_launch: bool = True
     theme_mode: str = 'dark'  # 'system', 'dark', 'light'
     ui_profile_level: str = 'standard' # 'standard', 'advanced', 'developer'
+    llm_complexity: str = 'detailed' # 'concise', 'detailed', 'academic'
     auto_ollama_start: bool = True
     model_selection_mode: str = 'auto'  # 'auto', 'manual'
     auto_index_watchdog: bool = False
