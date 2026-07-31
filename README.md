@@ -1,6 +1,6 @@
 <div align="center">
   <img src="axiom/gui/assets/logo.png" alt="AXIOM Logo" width="200">
-  <h1>AXIOM v5.3.0</h1>
+  <h1>AXIOM v6.6.0 LTS</h1>
   <p><strong>Sovereign, Self-Patching, Multimodal Linux AI Operating System Layer</strong></p>
 
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
