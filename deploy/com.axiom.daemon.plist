@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.axiom.daemon</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>sh</string>
+        <string>-c</string>
+        <!-- Use the user's PATH so the axiom command can be found -->
+        <string>export PATH="/usr/local/bin:/opt/homebrew/bin:$HOME/.local/bin:$PATH"; exec axiom daemon start</string>
+    </array>
+
+    <!-- Run automatically when the user logs in -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Keep the daemon running if it crashes -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>Crashed</key>
+        <true/>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/axiom-daemon.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/axiom-daemon.err</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+</dict>
+</plist>

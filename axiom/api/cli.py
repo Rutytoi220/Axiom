@@ -644,6 +644,30 @@ Returns:
             except Exception as e:
                 print(f'Failed to start daemon: {e}')
                 logger.exception('Daemon start failed')
+                
+                # OS-Aware Fatal Logging
+                import sys
+                import traceback
+                error_msg = f"AXIOM Daemon failed to start: {e}\n{traceback.format_exc()}"
+                
+                try:
+                    if sys.platform == "win32":
+                        import subprocess
+                        # Write to Windows Event Viewer Application Log
+                        subprocess.run([
+                            "powershell", "-Command",
+                            f"Write-EventLog -LogName Application -Source Application -EventId 1000 -EntryType Error -Message '{error_msg.replace('\'', '\'\'')}'"
+                        ], check=False)
+                    elif sys.platform == "darwin":
+                        import subprocess
+                        # Write to macOS Unified Logging System
+                        subprocess.run(["logger", "-p", "daemon.err", "-t", "AXIOM", error_msg], check=False)
+                    else:
+                        # Linux (systemd journald intercepts stdout/stderr automatically, but we can explicitly use logger)
+                        import subprocess
+                        subprocess.run(["logger", "-p", "daemon.err", "-t", "AXIOM", error_msg], check=False)
+                except Exception as log_err:
+                    print(f"Failed to write to OS system log: {log_err}")
         elif cmd == 'stop':
             print('Stopping AXIOM Daemon...')
             try:
