@@ -72,7 +72,11 @@ Returns:
                 if model != self.fallback_model:
                     logger.warning(f'Provider error for {model}: {e}. Falling back to {self.fallback_model}')
                     if self.fallback_model.startswith('ollama/'):
-                        kwargs['api_base'] = 'http://localhost:11434'
+                        try:
+                            from axiom.core.swarm_router import SwarmRouter
+                            kwargs['api_base'] = SwarmRouter.instance().get_ollama_base_url()
+                        except Exception:
+                            kwargs['api_base'] = 'http://localhost:11434'
                     return litellm.completion(model=self.fallback_model, messages=messages, **kwargs)
                 raise e
 
@@ -105,7 +109,11 @@ Returns:
                 model = self.fallback_model
                 
         if model.startswith('ollama/'):
-            kwargs['api_base'] = 'http://localhost:11434'
+            try:
+                from axiom.core.swarm_router import SwarmRouter
+                kwargs['api_base'] = SwarmRouter.instance().get_ollama_base_url()
+            except Exception:
+                kwargs['api_base'] = 'http://localhost:11434'
             
         stream_callback = kwargs.pop('stream_callback', None)
         if stream_callback:
@@ -134,7 +142,11 @@ Returns:
             kwargs['timeout'] = timeout
         model = kwargs.pop('model', self.config.model)
         if model.startswith('ollama/'):
-            kwargs['api_base'] = 'http://localhost:11434'
+            try:
+                from axiom.core.swarm_router import SwarmRouter
+                kwargs['api_base'] = SwarmRouter.instance().get_ollama_base_url()
+            except Exception:
+                kwargs['api_base'] = 'http://localhost:11434'
         litellm_tools = []
         for schema in tool_schemas:
             if 'type' in schema and 'function' in schema:

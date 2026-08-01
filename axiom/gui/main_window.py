@@ -288,7 +288,9 @@ class MainWindow(QMainWindow):
         self._tele_cpu.setStyleSheet("color:#a0a0b0; font-size:11px;")
         self._tele_ram = QLabel("RAM: —")
         self._tele_ram.setStyleSheet("color:#a0a0b0; font-size:11px;")
-        for w in (self._tele_model, self._tele_mode, self._tele_cpu, self._tele_ram):
+        self._swarm_status = QLabel("Compute: Local")
+        self._swarm_status.setStyleSheet("color:#6c7086; font-size:11px; font-weight:600;")
+        for w in (self._tele_model, self._tele_mode, self._tele_cpu, self._tele_ram, self._swarm_status):
             tele_row.addWidget(w)
         tele_row.addStretch()
         dock_layout.addLayout(tele_row)
@@ -476,12 +478,14 @@ class MainWindow(QMainWindow):
 
     def _connect_bridge(self) -> None:
         """Connect bridge signals to UI slots."""
+        # Daemon bridge bindings
         self._bridge.token_received.connect(self._on_token)
-        self._bridge.tool_status_changed.connect(self._on_tool_status)
-        self._bridge.telemetry_updated.connect(self._on_telemetry)
         self._bridge.response_finished.connect(self._on_response_finished)
+        self._bridge.telemetry_updated.connect(self._on_telemetry)
         self._bridge.error_occurred.connect(self._on_error)
+        self._bridge.tool_status_changed.connect(self._on_tool_status)
         self._bridge.request_gui_auth.connect(self._on_request_gui_auth)
+        self._bridge.swarm_status_changed.connect(self._on_swarm_status_changed)
         
         # Swarm signals
         self._bridge.swarm_agent_started.connect(self._on_swarm_started)
@@ -503,6 +507,21 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Qt Slots
     # ------------------------------------------------------------------
+
+    @Slot(dict)
+    def _on_swarm_status_changed(self, payload: dict) -> None:
+        active = payload.get("active", False)
+        endpoint = payload.get("endpoint", "")
+        if active:
+            self._swarm_status.setText(f"Swarm Compute: Active [{endpoint}]")
+            self._swarm_status.setStyleSheet("color: #74c7ec; font-size:11px; font-weight: bold; background-color: rgba(116, 199, 236, 0.1); border-radius: 4px; padding: 2px 4px;")
+            if self._dock.isVisible():
+                self._expert_log.append(f"[SWARM] Offloading inference to {endpoint}")
+        else:
+            self._swarm_status.setText("Compute: Local")
+            self._swarm_status.setStyleSheet("color: #6c7086; font-size:11px; font-weight:600;")
+            if self._dock.isVisible():
+                self._expert_log.append("[SWARM] Resumed local inference")
 
     @Slot(str, str, dict)
     def _on_request_gui_auth(self, tool_name: str, arguments: str, ctx: dict) -> None:

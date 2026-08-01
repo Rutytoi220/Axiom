@@ -60,6 +60,11 @@ Returns:
     auto_index_watchdog: bool = False
     monitored_paths: list[str] = field(default_factory=lambda: [str(Path.home() / 'Documents')])
 
+    # Swarm Compute
+    swarm_enabled: bool = False
+    remote_endpoints: list[str] = field(default_factory=list)
+    offload_strategy: str = 'thermal_trigger'
+
     @classmethod
     def from_dict(cls, config_dict: dict) -> 'AxiomConfig':
         """Create config from dictionary."""
@@ -96,7 +101,10 @@ Returns:
             'auto_ollama_start': self.auto_ollama_start,
             'model_selection_mode': self.model_selection_mode,
             'auto_index_watchdog': self.auto_index_watchdog,
-            'monitored_paths': self.monitored_paths
+            'monitored_paths': self.monitored_paths,
+            'swarm_enabled': self.swarm_enabled,
+            'remote_endpoints': self.remote_endpoints,
+            'offload_strategy': self.offload_strategy
         }
 
     def save(self) -> None:

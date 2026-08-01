@@ -51,6 +51,7 @@ class AxiomBridge(QObject):
     swarm_agent_started: Signal = Signal(str, str)
     swarm_agent_token: Signal = Signal(str, str)
     swarm_agent_completed: Signal = Signal(str, str)
+    swarm_status_changed: Signal = Signal(dict)
     connection_status_changed: Signal = Signal(bool)
 
     def __init__(self, parent: QObject | None = None) -> None:
@@ -147,4 +148,6 @@ class AxiomBridge(QObject):
             self.swarm_agent_token.emit(agent, str(payload.get("chunk")))
         elif event_type == "swarm.agent.completed":
             self.swarm_agent_completed.emit(agent, str(payload.get("result_summary")))
+        elif event_type == "swarm.status.changed":
+            self.swarm_status_changed.emit(payload)
 

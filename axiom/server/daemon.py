@@ -25,9 +25,11 @@ class AxiomDaemonServer:
         
         from axiom.core.telemetry import TelemetryDaemon
         from axiom.core.governor import ThermalGovernor
+        from axiom.core.swarm_router import SwarmRouter
         
         self.telemetry = TelemetryDaemon(event_bus=self.event_bus)
         self.governor = ThermalGovernor.instance(event_bus=self.event_bus)
+        self.swarm_router = SwarmRouter.instance(event_bus=self.event_bus)
         
         self.sys_watchdog = SystemHealthWatchdog(submit_task_callback=self._submit_task)
         
