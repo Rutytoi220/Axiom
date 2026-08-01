@@ -1,0 +1,30 @@
+[Unit]
+Description=AXIOM AI Orchestration Daemon
+Documentation=https://github.com/rutytoi/ChienGPT
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/axiom daemon start
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=axiomd
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.axiom %h/.config/axiom %h/.local/share/axiom %h/.cache
+
+[Install]
+WantedBy=default.target

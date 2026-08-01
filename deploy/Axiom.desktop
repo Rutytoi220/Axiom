@@ -1,0 +1,14 @@
+[Desktop Entry]
+Version=1.5
+Type=Application
+Name=AXIOM Desktop
+GenericName=AI Orchestration Platform
+Comment=Local-first AI orchestration framework with semantic memory and plugin extensibility
+Exec=axiom-gui
+Icon=axiom
+Terminal=false
+Categories=Development;ArtificialIntelligence;Science;
+Keywords=AI;LLM;Agent;Orchestration;Assistant;
+StartupNotify=true
+StartupWMClass=axiom
+SingleMainWindow=true
