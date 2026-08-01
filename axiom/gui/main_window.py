@@ -590,8 +590,13 @@ class MainWindow(QMainWindow):
     def _on_telemetry(self, data: dict) -> None:
         model = data.get("model", "—")
         mode = data.get("auth_mode", "BASIC")
-        cpu = data.get("cpu", 0)
-        ram = data.get("ram", 0)
+        cpu = data.get("cpu", 0.0)
+        ram = data.get("ram", 0.0)
+        
+        # New Hardware Sensors
+        cpu_temp = data.get("cpu_temp", -1.0)
+        gpu_temp = data.get("gpu_temp", -1.0)
+        vram = data.get("vram", -1.0)
 
         self._tele_model.setText(f"Model: {model}")
         self._tele_mode.setText(f"Mode: {mode}")
@@ -599,9 +604,35 @@ class MainWindow(QMainWindow):
         self._tele_ram.setText(f"RAM: {ram:.0f}%")
         self._model_label.setText(f"Model: {model}")
 
+        # Update Thermal Label
+        max_temp = max(cpu_temp, gpu_temp)
+        if max_temp > 90:
+            self._thermal_label.setText(f"🌡️ Thermal: Critical ({max_temp:.0f}°C)")
+            self._thermal_label.setStyleSheet("color: #f38ba8; font-weight: bold;")
+        elif max_temp > 75:
+            self._thermal_label.setText(f"🌡️ Thermal: High ({max_temp:.0f}°C)")
+            self._thermal_label.setStyleSheet("color: #f9e2af; font-weight: bold;")
+        elif max_temp > 0:
+            self._thermal_label.setText(f"🌡️ Thermal: Normal ({max_temp:.0f}°C)")
+            self._thermal_label.setStyleSheet("color: #a6e3a1; font-weight: bold;")
+        else:
+            self._thermal_label.setText("🌡️ Thermal: N/A")
+            self._thermal_label.setStyleSheet("color: #6c7086; font-weight: bold;")
+
+        # Update Power / VRAM Label
+        if vram >= 0:
+            self.power_label.setText(f"🔋 VRAM: {vram:.0f}%")
+            if vram > 90:
+                self.power_label.setStyleSheet("color: #f38ba8; font-weight: bold; padding-right: 10px;")
+            else:
+                self.power_label.setStyleSheet("color: #a6e3a1; font-weight: bold; padding-right: 10px;")
+        else:
+            self.power_label.setText("🔋 Power: Max Perf")
+            self.power_label.setStyleSheet("color: #a6e3a1; font-weight: bold; padding-right: 10px;")
+
         if self._dock.isVisible():
             self._expert_log.append(
-                f"[TELEMETRY] model={model} mode={mode} cpu={cpu:.0f}% ram={ram:.0f}%"
+                f"[TELEMETRY] model={model} mode={mode} cpu={cpu:.0f}% ram={ram:.0f}% vram={vram:.0f}%"
             )
 
     @Slot(str)

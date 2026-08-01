@@ -23,6 +23,12 @@ class AxiomDaemonServer:
         self.scheduler_service = BackgroundSchedulerService(event_bus=self.event_bus)
         self.scheduler_service.start()
         
+        from axiom.core.telemetry import TelemetryDaemon
+        from axiom.core.governor import ThermalGovernor
+        
+        self.telemetry = TelemetryDaemon(event_bus=self.event_bus)
+        self.governor = ThermalGovernor.instance(event_bus=self.event_bus)
+        
         self.sys_watchdog = SystemHealthWatchdog(submit_task_callback=self._submit_task)
         
         self.dir_watchdog = DirectoryWatchdog()
@@ -89,6 +95,7 @@ class AxiomDaemonServer:
     async def run(self):
         loop = asyncio.get_running_loop()
         self.dir_watchdog.start(loop)
+        self.telemetry.start()
         
         logger.info("Starting AXIOM Daemon WebSocket server on ws://127.0.0.1:9410")
         async with websockets.serve(self.handle_client, "127.0.0.1", 9410):
