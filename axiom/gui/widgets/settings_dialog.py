@@ -27,8 +27,10 @@ class SettingsDialog(QDialog):
         self.config = get_config()
         self._keys_path = Path.home() / '.config' / 'axiom' / 'keys.json'
         self._keys_path.parent.mkdir(parents=True, exist_ok=True)
+        self._loading = True
         self._build_ui()
         self._load_current_settings()
+        self._loading = False
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -189,10 +191,18 @@ class SettingsDialog(QDialog):
         self._save_settings()
 
     def _save_settings(self, *args):
+        # Don't save during initialization — widgets are still being populated
+        if self._loading:
+            return
+
         # Save general config
         self.config.theme_mode = self._theme_combo.currentText().lower()
         self.config.auto_ollama_start = self._auto_start_cb.isChecked()
-        self.config.model_selection_mode = self._routing_combo.currentData()
+
+        routing_mode = self._routing_combo.currentData()
+        if routing_mode is not None:
+            self.config.model_selection_mode = routing_mode
+
         self.config.auto_index_watchdog = self._watchdog_cb.isChecked()
         
         paths_str = self._paths_input.text()
