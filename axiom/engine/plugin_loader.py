@@ -31,6 +31,13 @@ class PluginLoaderService:
             if child.is_file() and child.suffix == '.py':
                 self._load_module(child)
                 
+        # Force import our internal cross-platform OS tools that use the @axiom.tool SDK
+        try:
+            import axiom.tools.os_vision
+            import axiom.tools.os_input
+        except ImportError as e:
+            logger.warning(f"Could not load internal OS plugins: {e}")
+
         # Register them with the tool registry
         # (In a real implementation, we would inject these into `axiom/tool_registry.py`)
         plugins = get_registered_plugins()
