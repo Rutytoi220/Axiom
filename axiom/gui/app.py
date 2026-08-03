@@ -153,7 +153,7 @@ def run_gui() -> None:
     app._ipc_server = server  # Prevent GC
 
     # Wayland/Desktop grouping (Qt 6.5+ automatically appends .desktop)
-    app.setDesktopFileName("axiom")
+    app.setDesktopFileName("Axiom")
     
     # Don't quit when closing the main window (keep tray running)
     app.setQuitOnLastWindowClosed(False)

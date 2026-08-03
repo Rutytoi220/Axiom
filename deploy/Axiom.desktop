@@ -10,5 +10,5 @@ Terminal=false
 Categories=Development;ArtificialIntelligence;Science;
 Keywords=AI;LLM;Agent;Orchestration;Assistant;
 StartupNotify=true
-StartupWMClass=axiom
+StartupWMClass=Axiom
 SingleMainWindow=true

@@ -57,14 +57,21 @@ class SwarmSupervisor:
             
             # Extract JSON from response
             import re
-            json_match = re.search(r"\{.*\}", content, re.DOTALL)
+            
+            # Fix common LLM JSON syntax errors (like missing colons or unquoted keys)
+            content_fixed = re.sub(r'("arguments"\s*)\{', r'\1: {', content)
+            
+            json_match = re.search(r"\{.*\}", content_fixed, re.DOTALL)
             if json_match:
-                data = json.loads(json_match.group(0))
-                if data.get("is_swarm_required") and data.get("tasks"):
-                    return [
-                        SwarmTask(agent_type=t["agent_type"], task_description=t["task_description"])
-                        for t in data["tasks"]
-                    ]
+                try:
+                    data = json.loads(json_match.group(0))
+                    if data.get("is_swarm_required") and data.get("tasks"):
+                        return [
+                            SwarmTask(agent_type=t["agent_type"], task_description=t["task_description"])
+                            for t in data["tasks"]
+                        ]
+                except json.JSONDecodeError:
+                    logger.debug(f"Failed to parse Swarm JSON. Raw: {json_match.group(0)}")
         except Exception as e:
             logger.error(f"Supervisor analysis failed: {e}")
             

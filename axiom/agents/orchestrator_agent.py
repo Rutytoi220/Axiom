@@ -320,8 +320,15 @@ Returns:
                     config = get_config()
                     if config.auth_mode == AuthMode.AUTOPILOT:
                         # Check if the LLM outputted markdown shell or tool names but didn't invoke them
-                        lazy_pattern = r'```(?:bash|sh|shell)'
-                        if re.search(lazy_pattern, content.lower()) or "tool_call" in content.lower():
+                        lazy_pattern = r'```(?:bash|sh|shell)\n?(.*?)\n?```'
+                        match = re.search(lazy_pattern, content, flags=re.IGNORECASE | re.DOTALL)
+                        if match and any(s.get('function', {}).get('name') == 'shell' for s in tool_schemas):
+                            cmd = match.group(1).strip()
+                            logger.info(f"[Anti-Laziness] Intercepted bash block. Converting to shell: {cmd}")
+                            tool_calls.append({'function': {'name': 'shell', 'arguments': {'command': cmd}}})
+                            content = '' # Wipe the conversational preamble so it doesn't leak to the UI
+                            response_msg['content'] = ''
+                        elif "tool_call" in content.lower():
                             logger.info("[Anti-Laziness] Intercepted tutorial-style response in Autopilot Mode. Forcing retry.")
                             observations.append({
                                 'error': '[System Warning]: Do not output raw markdown instructions. You are in Autopilot Mode—invoke the tool call schema directly to execute this action.'
@@ -414,8 +421,8 @@ Returns:
                         continue
                 if content:
                     content_str = str(content)
-                    content_str = re.sub('<think>[\\s\\S]*?(?:</think>|$)', '', content_str, flags=re.IGNORECASE)
-                    content_str = content_str.replace('</think>', '').replace('<think>', '').strip()
+                    content_str = re.sub('<(?:think|thought)>[\\s\\S]*?(?:</(?:think|thought)>|$)', '', content_str, flags=re.IGNORECASE)
+                    content_str = content_str.replace('</think>', '').replace('<think>', '').replace('</thought>', '').replace('<thought>', '').strip()
                     content_str = re.sub('^(assistant|role:\\s*assistant):?\\s*\\n+', '', content_str, flags=re.IGNORECASE).strip()
                     content_str = re.sub('^(?:Final Answer:|Please try again\\.)\\s*', '', content_str, flags=re.IGNORECASE).strip()
                     content_str = re.sub('<\\|.*?\\|>', '', content_str).strip()

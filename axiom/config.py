@@ -65,6 +65,9 @@ Returns:
     remote_endpoints: list[str] = field(default_factory=list)
     offload_strategy: str = 'thermal_trigger'
 
+    # Plugins
+    disabled_plugins: list[str] = field(default_factory=list)
+
     @classmethod
     def from_dict(cls, config_dict: dict) -> 'AxiomConfig':
         """Create config from dictionary."""
@@ -107,7 +110,8 @@ Returns:
             'monitored_paths': self.monitored_paths,
             'swarm_enabled': self.swarm_enabled,
             'remote_endpoints': self.remote_endpoints,
-            'offload_strategy': self.offload_strategy
+            'offload_strategy': self.offload_strategy,
+            'disabled_plugins': self.disabled_plugins
         }
 
     def save(self) -> None:

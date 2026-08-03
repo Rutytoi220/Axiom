@@ -24,7 +24,7 @@ Environment=PYTHONUNBUFFERED=1
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=%h/.axiom %h/.config/axiom %h/.local/share/axiom %h/.cache
+ReadWritePaths=%h/.axiom %h/.config/axiom %h/.local/share/axiom %h/.cache /tmp /var/tmp
 
 [Install]
 WantedBy=default.target

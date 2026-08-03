@@ -52,7 +52,7 @@ class AxiomBridge(QObject):
     swarm_agent_token: Signal = Signal(str, str)
     swarm_agent_completed: Signal = Signal(str, str)
     swarm_status_changed: Signal = Signal(dict)
-    connection_status_changed: Signal = Signal(bool)
+    connection_status_changed: Signal = Signal(str)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -64,10 +64,10 @@ class AxiomBridge(QObject):
         self._lock = threading.Lock()
 
     def _on_daemon_connect(self):
-        self.connection_status_changed.emit(True)
+        self.connection_status_changed.emit('connected')
         
     def _on_daemon_disconnect(self):
-        self.connection_status_changed.emit(False)
+        self.connection_status_changed.emit('disconnected')
 
     # ------------------------------------------------------------------
     # Public API (called from the Qt main thread)
@@ -83,14 +83,82 @@ class AxiomBridge(QObject):
 
     async def _connect_to_daemon(self):
         success = await self._client.connect()
-        if not success:
-            logger.info("Daemon offline, attempting to start via systemctl...")
+        if success:
+            return
+
+        # Check if auto-start is enabled
+        from axiom.config import get_config
+        config = get_config()
+        if not getattr(config, 'auto_ollama_start', True):
+            logger.info("Daemon offline and auto-start is disabled.")
+            return
+
+        logger.info("Daemon offline, attempting to auto-start...")
+        self.connection_status_changed.emit('connecting')
+
+        # Strategy 1: Try systemd user service (Linux)
+        daemon_started = False
+        try:
+            result = subprocess.run(
+                ['systemctl', '--user', 'start', 'axiomd.service'],
+                check=False, capture_output=True, timeout=5
+            )
+            if result.returncode == 0:
+                daemon_started = True
+                logger.info("Started daemon via systemctl --user start axiomd.service")
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
+        # Strategy 2: Spawn daemon subprocess directly as fallback
+        if not daemon_started:
             try:
-                subprocess.run(['systemctl', '--user', 'start', 'axiom.service'], check=False)
-                await asyncio.sleep(1.0)
-                await self._client.connect()
+                import sys
+                python = sys.executable
+                subprocess.Popen(
+                    [python, '-m', 'axiom.api.cli', 'daemon', 'start'],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True
+                )
+                daemon_started = True
+                logger.info("Started daemon via subprocess fallback.")
             except Exception as e:
-                logger.error(f"Failed to start daemon: {e}")
+                logger.error(f"Failed to start daemon subprocess: {e}")
+
+        if not daemon_started:
+            logger.error("All daemon auto-start strategies failed.")
+            return
+
+        # Retry connection with backoff (daemon needs time to boot, especially if pulling models)
+        for attempt in range(15):  # Up to ~40 seconds total wait
+            delay = 1.0 + (attempt * 0.5)
+            # Cap delay at 3.0s per tick
+            if delay > 3.0:
+                delay = 3.0
+            await asyncio.sleep(delay)
+            success = await self._client.connect()
+            if success:
+                logger.info(f"Connected to daemon on attempt {attempt + 1}.")
+                return
+            logger.debug(f"Daemon connect attempt {attempt + 1} failed, retrying...")
+
+        logger.error("Daemon started but could not connect after 15 retries.")
+
+    def get_available_models(self) -> list[str]:
+        """Fetch available models synchronously for the UI."""
+        try:
+            result = subprocess.run(["ollama", "list"], capture_output=True, text=True, check=True)
+            lines = result.stdout.strip().split('\n')[1:]
+            models = set()
+            for line in lines:
+                if line.strip():
+                    name = line.split()[0]
+                    if name != "NAME":
+                        models.add(name)
+            return sorted(list(models))
+        except Exception as e:
+            logger.error(f"Failed to fetch available models: {e}")
+            return []
 
     def refresh_models(self) -> None:
         """Trigger a background refresh of the available models."""
@@ -125,9 +193,9 @@ class AxiomBridge(QObject):
         payload = data.get("payload", {})
         
         if event_type == "llm.token":
-            self.token_received.emit(payload.get("chunk", ""))
+            self.token_received.emit(payload.get("token", ""))
         elif event_type.startswith("tool."):
-            tool_id = payload.get("tool_id", "Unknown Tool")
+            tool_id = payload.get("tool_id") or payload.get("tool_name", "Unknown Tool")
             if event_type == "tool.started":
                 self.tool_status_changed.emit(tool_id, f"Running {tool_id}...")
             elif event_type == "tool.finished":

@@ -75,11 +75,16 @@ class TelemetryDaemon:
         try:
             temps = psutil.sensors_temperatures()
             if temps:
-                # Grab first available temp sensor, often coretemp
-                for name, entries in temps.items():
-                    if entries:
-                        cpu_temp = entries[0].current
-                        break
+                # Prioritize known CPU temp sensors over random ACPI zones
+                if 'coretemp' in temps and temps['coretemp']:
+                    cpu_temp = temps['coretemp'][0].current
+                elif 'k10temp' in temps and temps['k10temp']:
+                    cpu_temp = temps['k10temp'][0].current
+                else:
+                    for name, entries in temps.items():
+                        if entries:
+                            cpu_temp = entries[0].current
+                            break
         except Exception:
             pass
 

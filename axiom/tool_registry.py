@@ -106,7 +106,23 @@ Returns:
 
     def list_tools(self) -> Dict[str, BaseTool]:
         """Return a shallow copy of all registered tools keyed by ``tool_id``."""
-        return self._core_registry.list_tools()
+        tools = self._core_registry.list_tools()
+        import json
+        from pathlib import Path
+        config_path = Path.home() / ".config" / "axiom" / "settings.json"
+        
+        disabled = []
+        try:
+            if config_path.exists():
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    disabled = data.get('disabled_plugins', [])
+        except Exception:
+            pass
+            
+        if disabled:
+            return {k: v for k, v in tools.items() if k not in disabled}
+        return tools
 
     def __contains__(self, tool_id: str) -> bool:
         """Auto-generated docstring.

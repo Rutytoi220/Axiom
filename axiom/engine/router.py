@@ -49,8 +49,46 @@ Returns:
         self.telemetry = telemetry_daemon
         self.event_bus = event_bus
         self.cloud_adapter = CloudAdapter()
-        self.model_tiers = {IntentCategory.CHAT: 'ollama/llama3.1:latest', IntentCategory.SYSTEM: 'ollama/qwen3:8b', IntentCategory.CODE: 'ollama/qwen3-coder:latest', IntentCategory.VISION: 'ollama/qwen3-vl:2b', IntentCategory.REASONING: 'ollama/laguna-xs-2.1:q4_K_M'}
+        self.model_tiers = self._resolve_dynamic_tiers()
         self._current_active_model: Optional[str] = None
+
+    def _resolve_dynamic_tiers(self) -> Dict[IntentCategory, str]:
+        """Dynamically select the best installed models for each tier."""
+        default_tiers = {
+            IntentCategory.CHAT: 'ollama/llama3.1:latest', 
+            IntentCategory.SYSTEM: 'ollama/qwen3:8b', 
+            IntentCategory.CODE: 'ollama/qwen3-coder:latest', 
+            IntentCategory.VISION: 'ollama/qwen3-vl:2b', 
+            IntentCategory.REASONING: 'ollama/laguna-xs-2.1:q4_K_M'
+        }
+        try:
+            import requests
+            r = requests.get('http://localhost:11434/api/tags', timeout=2)
+            if r.status_code == 200:
+                models = [m['name'] for m in r.json().get('models', [])]
+            else:
+                return default_tiers
+        except Exception:
+            return default_tiers
+
+        if not models:
+            return default_tiers
+
+        def pick_best(keywords: List[str], fallback: str) -> str:
+            for kw in keywords:
+                for m in models:
+                    if kw.lower() in m.lower():
+                        return f"ollama/{m}"
+            # If no keyword matches, just return the first available model as absolute fallback
+            return f"ollama/{models[0]}" if models else fallback
+
+        return {
+            IntentCategory.CODE: pick_best(['laguna', 'coder', 'deepseek', 'qwen', 'llama'], default_tiers[IntentCategory.CODE]),
+            IntentCategory.CHAT: pick_best(['llama', 'mistral', 'gemma', 'qwen', 'laguna'], default_tiers[IntentCategory.CHAT]),
+            IntentCategory.VISION: pick_best(['vl', 'llava', 'vision', 'pixtral'], default_tiers[IntentCategory.VISION]),
+            IntentCategory.REASONING: pick_best(['r1', 'reason', 'math', 'laguna', 'deepseek'], default_tiers[IntentCategory.REASONING]),
+            IntentCategory.SYSTEM: pick_best(['qwen', 'llama', 'mistral', 'laguna'], default_tiers[IntentCategory.SYSTEM])
+        }
 
     def _has_image(self, messages: List[Dict[str, Any]]) -> bool:
         """Check if any message contains an image payload."""
@@ -192,3 +230,7 @@ Returns:
     def is_available(self) -> bool:
         """Check availability."""
         return self.llm_client.is_available()
+
+    def __getattr__(self, name: str) -> Any:
+        """Transparently forward all un-implemented methods to the underlying LLM client."""
+        return getattr(self.llm_client, name)

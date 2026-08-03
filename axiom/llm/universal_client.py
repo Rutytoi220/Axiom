@@ -99,6 +99,9 @@ Returns:
             kwargs['timeout'] = timeout
         model = kwargs.pop('model', self.config.model)
         
+        if '/' not in model and model != 'cloud':
+            model = f"ollama/{model}"
+            
         if model.startswith('claude-3-5') or model == 'cloud':
             if self.federation.is_configured:
                 # We have to run it via the async wrapper
@@ -107,6 +110,8 @@ Returns:
             else:
                 logger.warning("Cloud model requested but federation is not configured. Falling back to local.")
                 model = self.fallback_model
+                if '/' not in model:
+                    model = f"ollama/{model}"
                 
         if model.startswith('ollama/'):
             try:
@@ -141,6 +146,10 @@ Returns:
         if timeout:
             kwargs['timeout'] = timeout
         model = kwargs.pop('model', self.config.model)
+        
+        if '/' not in model and model != 'cloud':
+            model = f"ollama/{model}"
+            
         if model.startswith('ollama/'):
             try:
                 from axiom.core.swarm_router import SwarmRouter
@@ -220,6 +229,14 @@ Returns:
         except Exception as e:
             logger.error(f'UniversalLLMClient chat_with_tools error: {e}')
             raise e
+
+    def generate(self, prompt, **kwargs) -> dict:
+        """Backward compatibility stub for legacy components."""
+        if isinstance(prompt, str):
+            messages = [{"role": "user", "content": prompt}]
+        else:
+            messages = prompt
+        return {"content": self.chat(messages, **kwargs)}
 
     def is_available(self) -> bool:
         """Auto-generated docstring.

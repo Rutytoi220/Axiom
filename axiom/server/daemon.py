@@ -63,8 +63,28 @@ class AxiomDaemonServer:
         }
         msg_str = json.dumps(msg, default=str)
         
-        for ws in list(self.clients):
-            asyncio.create_task(self._send_safe(ws, msg_str))
+        # We may be inside a ThreadPoolExecutor (e.g. from orchestrator LLM calls)
+        # We must schedule the async task on the main loop thread-safely
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # We are not in the main thread with a running loop, find the actual loop
+            # Fallback for some environments, though get_running_loop might throw here
+            pass
+            
+        # Instead, let's just use the server's main loop if we can capture it
+        if hasattr(self, '_loop') and self._loop:
+            for ws in list(self.clients):
+                asyncio.run_coroutine_threadsafe(self._send_safe(ws, msg_str), self._loop)
+        else:
+            # Fallback if _loop not set
+            for ws in list(self.clients):
+                try:
+                    asyncio.get_event_loop().call_soon_threadsafe(
+                        lambda w=ws, m=msg_str: asyncio.create_task(self._send_safe(w, m))
+                    )
+                except Exception:
+                    pass
 
     async def _send_safe(self, ws, msg: str):
         try:
@@ -83,11 +103,10 @@ class AxiomDaemonServer:
                     if action == "submit_task":
                         prompt = data.get("prompt")
                         if prompt:
-                            # Run async in executor to avoid blocking the websocket loop
+                            # Run in executor to avoid blocking the websocket loop.
+                            # run_in_executor returns a Future and schedules it automatically.
                             loop = asyncio.get_running_loop()
-                            asyncio.create_task(
-                                loop.run_in_executor(None, self.cli.orchestrator.run, prompt, True)
-                            )
+                            loop.run_in_executor(None, self.cli.orchestrator.run, prompt, True)
                 except Exception as e:
                     logger.error(f"Error handling WS message: {e}")
         finally:
@@ -96,6 +115,7 @@ class AxiomDaemonServer:
 
     async def run(self):
         loop = asyncio.get_running_loop()
+        self._loop = loop
         self.dir_watchdog.start(loop)
         self.telemetry.start()
         

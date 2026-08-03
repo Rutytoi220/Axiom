@@ -207,6 +207,20 @@ class MainWindow(QMainWindow):
         """)
         self._hub_btn.clicked.connect(self._open_system_hub_dialog)
         tb.addWidget(self._hub_btn)
+        
+        # ---- Plugin Hub Button ----
+        self._plugin_btn = QPushButton("🔌 Plugin Hub")
+        self._plugin_btn.setObjectName("pluginBtn")
+        self._plugin_btn.setStyleSheet("""
+            background-color: #18181b;
+            border: 1px solid #2ecc71;
+            color: #2ecc71;
+            font-weight: bold;
+            border-radius: 4px;
+            padding: 5px 15px;
+        """)
+        self._plugin_btn.clicked.connect(self._open_plugin_dialog)
+        tb.addWidget(self._plugin_btn)
 
         tb.addSeparator()
 
@@ -495,11 +509,14 @@ class MainWindow(QMainWindow):
         # Daemon Connection
         self._bridge.connection_status_changed.connect(self._on_daemon_connection_changed)
 
-    @Slot(bool)
-    def _on_daemon_connection_changed(self, connected: bool) -> None:
-        if connected:
+    @Slot(str)
+    def _on_daemon_connection_changed(self, state: str) -> None:
+        if state == 'connected':
             self._status_daemon.setText("⚡ Daemon: Connected")
             self._status_daemon.setStyleSheet("color: #10b981; font-weight: bold; padding-left: 5px; padding-right: 15px;")
+        elif state == 'connecting':
+            self._status_daemon.setText("⏳ Daemon: Starting...")
+            self._status_daemon.setStyleSheet("color: #f59e0b; font-weight: bold; padding-left: 5px; padding-right: 15px;")
         else:
             self._status_daemon.setText("🔌 Daemon: Disconnected")
             self._status_daemon.setStyleSheet("color: #f87171; font-weight: bold; padding-left: 5px; padding-right: 15px;")
@@ -718,6 +735,12 @@ class MainWindow(QMainWindow):
                     self._on_ollama_start_clicked()
                     
         self._first_ollama_ping = False
+
+    @Slot()
+    def _open_plugin_dialog(self) -> None:
+        from axiom.gui.widgets.plugin_manager import PluginManagerDialog
+        dlg = PluginManagerDialog(self)
+        dlg.exec()
 
     @Slot()
     def _open_settings_dialog(self) -> None:
