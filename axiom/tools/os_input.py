@@ -4,10 +4,9 @@ import shutil
 import subprocess
 from axiom.sdk.plugin import tool
 
-def _is_wayland() -> bool:
-    """Check if the current display server is Wayland."""
-    is_linux = sys.platform.startswith("linux")
-    return is_linux and os.environ.get("WAYLAND_DISPLAY") is not None
+def _is_linux() -> bool:
+    """Check if the current OS is Linux."""
+    return sys.platform.startswith("linux")
 
 @tool(
     name="move_mouse",
@@ -15,9 +14,9 @@ def _is_wayland() -> bool:
 )
 def move_mouse(x: int, y: int) -> str:
     """Moves the mouse cursor to absolute (x, y)."""
-    if _is_wayland():
+    if _is_linux():
         if not shutil.which("ydotool"):
-            return "Error: 'ydotool' is required on Linux Wayland for mouse control. Please install it and ensure the ydotool daemon (ydotoold) is running."
+            return "Error: 'ydotool' is required on Linux for mouse control. Please install it and ensure the ydotool daemon (ydotoold) is running."
         try:
             # -a for absolute positioning
             subprocess.run(["ydotool", "mousemove", "-a", "-x", str(x), "-y", str(y)], check=True, capture_output=True, text=True)
@@ -40,9 +39,9 @@ def move_mouse(x: int, y: int) -> str:
 )
 def click_mouse(button: str = 'left') -> str:
     """Clicks the mouse."""
-    if _is_wayland():
+    if _is_linux():
         if not shutil.which("ydotool"):
-            return "Error: 'ydotool' is required on Linux Wayland for mouse control. Please install it and ensure the ydotool daemon (ydotoold) is running."
+            return "Error: 'ydotool' is required on Linux for mouse control. Please install it and ensure the ydotool daemon (ydotoold) is running."
         try:
             # ydotool uses hex codes for mouse buttons: 0xC0=left, 0xC1=right, 0xC2=middle
             ydotool_btn = "0xC0"
@@ -71,9 +70,9 @@ def click_mouse(button: str = 'left') -> str:
 )
 def type_text(text: str) -> str:
     """Types text on the keyboard."""
-    if _is_wayland():
+    if _is_linux():
         if not shutil.which("ydotool"):
-            return "Error: 'ydotool' is required on Linux Wayland for keyboard control. Please install it and ensure the ydotool daemon (ydotoold) is running."
+            return "Error: 'ydotool' is required on Linux for keyboard control. Please install it and ensure the ydotool daemon (ydotoold) is running."
         try:
             subprocess.run(["ydotool", "type", text], check=True, capture_output=True, text=True)
             return "Text typed successfully via ydotool."
