@@ -204,6 +204,31 @@ Returns:
         self._tool_call_history = []
         override_prompt = None
         force_text_response = False
+        
+        # [NEW] Phase 4.0 - Persistent Vector Memory Recall
+        try:
+            import asyncio
+            from axiom.memory.vector_store import LongTermMemory
+            
+            async def _run_recall():
+                hippocampus = LongTermMemory()
+                return await hippocampus.recall_memory(task)
+                
+            try:
+                loop = asyncio.get_running_loop()
+                import concurrent.futures
+                future = asyncio.run_coroutine_threadsafe(_run_recall(), loop)
+                recalled = future.result(timeout=10.0)
+            except RuntimeError:
+                recalled = asyncio.run(_run_recall())
+                
+            if recalled:
+                mem_str = "\n".join(recalled)
+                override_prompt = f"<LongTermMemory>\nBased on past interactions, remember this context:\n{mem_str}\n</LongTermMemory>"
+                logger.info(f"[Hippocampus] Successfully injected {len(recalled)} long-term memories into context.")
+        except Exception as e:
+            logger.warning(f"Hippocampus recall failed: {e}")
+            
         txn = WorkspaceTransactionManager(bus=self._bus if hasattr(self, '_bus') else getattr(self, 'bus', None), verbose=True)
         
         # --- SWARM SUPERVISOR INTERCEPT ---
@@ -251,6 +276,37 @@ Returns:
             self._log(f"[SwarmSupervisor] Fallback to single-agent due to error: {e}", steps)
         # --- END SWARM SUPERVISOR ---
         
+
+        # [NEW] NeuralRouter Integration
+        available_models = []
+        if hasattr(self._llm, '_get_installed_models'):
+            available_models = self._llm._get_installed_models()
+        elif hasattr(self._llm, 'models'):
+            available_models = self._llm.models
+
+        if available_models:
+            try:
+                import asyncio
+                from axiom.engine.adaptive_router import NeuralRouter
+        
+                async def _run_router():
+                    router = NeuralRouter()
+                    return await router.route(task_type=intent, user_prompt=task, available_models=available_models)
+        
+                try:
+                    loop = asyncio.get_running_loop()
+                    import concurrent.futures
+                    future = asyncio.run_coroutine_threadsafe(_run_router(), loop)
+                    best_model = future.result(timeout=10.0)
+                except RuntimeError:
+                    best_model = asyncio.run(_run_router())
+        
+                if best_model and hasattr(self._llm, 'config'):
+                    self._llm.config.model = f"ollama/{best_model}" if not best_model.startswith("ollama/") else best_model
+                    logger.info(f"[NeuralRouter] Dynamically routed to: {best_model}")
+            except Exception as e:
+                logger.warning(f"NeuralRouter integration failed, falling back to legacy routing: {e}")
+
         txn.begin()
         self._persist_step(session_id, 'user', {'task': task})
         self._log(f'Session {session_id}: starting state machine', steps)
@@ -261,11 +317,12 @@ Returns:
         except Exception as exc:
             self._log(f'LLM availability check failed, continuing: {exc}', steps)
         executed_signatures: set[str] = set()
-        while state != AgentState.EXIT and rounds < MAX_TOOL_ROUNDS:
+        MAX_STEPS = 5
+        while state != AgentState.EXIT and rounds < MAX_STEPS:
             if deadline and time.time() > deadline:
                 final_response = 'Task processing timed out.'
                 self._log('Task timed out before completion.', steps)
-                self._emit('plan.failed', {'reason': 'timeout', 'step': rounds, 'total_steps': MAX_TOOL_ROUNDS})
+                self._emit('plan.failed', {'reason': 'timeout', 'step': rounds, 'total_steps': MAX_STEPS})
                 txn.rollback()
                 break
             rounds += 1
@@ -456,7 +513,7 @@ Returns:
                             self._persist_step(session_id, 'reasoning', retry_message)
                     else:
                         self._persist_step(session_id, 'reasoning', response_msg)
-                    state = AgentState.REFLECT
+                    state = AgentState.EXIT
             elif state == AgentState.ACT:
                 executed_tool_ids_this_round = set()
                 file_mutators = 0
@@ -548,7 +605,7 @@ Returns:
                     state = AgentState.THINK
                     self._log('OBSERVE: Large document detected. Bypassing REFLECT to force synthesis.', steps)
                 else:
-                    state = AgentState.REFLECT
+                    state = AgentState.THINK
             elif state == AgentState.REFLECT:
                 reflection = self._reflect(task, plan, observations, final_response)
                 self._persist_step(session_id, 'reflection', reflection)
@@ -573,9 +630,30 @@ Returns:
                 self._save_plan(session_id, plan)
             round_duration_ms = (time.perf_counter() - round_start_time) * 1000
             self._emit('loop.cycle', {'session_id': session_id, 'round': rounds, 'state': state.value if hasattr(state, 'value') else str(state), 'duration_ms': round_duration_ms, 'queue_depth': len(pending_calls) if state == AgentState.ACT else 0})
+
+        # [NEW] NeuralRouter Telemetry Loop
+        try:
+            latency = (time.perf_counter() - round_start_time)
+            success_score = 1 if response_msg.get('tool_calls') or response_msg.get('content') else 0
+            current_model = getattr(getattr(self._llm, 'config', None), 'model', 'unknown').replace("ollama/", "")
+    
+            async def _log_telemetry():
+                from axiom.engine.adaptive_router import TelemetryDB
+                db = TelemetryDB()
+                await db.update_metrics(current_model, intent, latency, success_score)
+    
+            try:
+                loop = asyncio.get_running_loop()
+                asyncio.run_coroutine_threadsafe(_log_telemetry(), loop)
+            except RuntimeError:
+                # Fallback for synchronous thread environment (like standard CLI testing)
+                asyncio.run(_log_telemetry())
+        except Exception as e:
+            logger.warning(f"Failed to log routing telemetry: {e}")
+
         if not final_response:
             final_response = 'Task processing reached maximum rounds. Review tool results for partial progress.'
-            self._emit('plan.failed', {'reason': 'max_rounds', 'step': rounds, 'total_steps': MAX_TOOL_ROUNDS})
+            self._emit('plan.failed', {'reason': 'max_rounds', 'step': rounds, 'total_steps': MAX_STEPS})
             txn.rollback()
         else:
             txn.commit()
@@ -586,6 +664,24 @@ Returns:
             final_response = CHAT_ECHO_RETRY_FALLBACK if intent == 'chat' else PRUNED_ECHO_INDICATOR
         if final_response.strip() and (not is_empty_warning) and (not is_echo):
             self._chat_history = (self._chat_history + [{'role': 'user', 'content': task}, {'role': 'assistant', 'content': final_response}])[-20:]
+            
+            # [NEW] Phase 4.0 - Persistent Vector Memory Storage
+            try:
+                import asyncio
+                from axiom.memory.vector_store import LongTermMemory
+                
+                async def _store_memory():
+                    hippocampus = LongTermMemory()
+                    await hippocampus.store_memory(task, final_response)
+                    
+                try:
+                    loop = asyncio.get_running_loop()
+                    asyncio.run_coroutine_threadsafe(_store_memory(), loop)
+                except RuntimeError:
+                    asyncio.run(_store_memory())
+            except Exception as e:
+                logger.warning(f"Hippocampus storage failed: {e}")
+                
         if self._context_manager.should_summarize(self._chat_history):
             self._persist_summary(session_id, self._chat_history)
         self._persist_step(session_id, 'assistant', {'response': final_response})
@@ -894,6 +990,18 @@ Returns:
                         result_dict = self._structured_tool_result(tool_name, arguments, payload, bool(getattr(result, 'success', True)))
         except Exception as exc:
             result_dict = self._structured_tool_result(tool_name, arguments, {'error': _scrub_jargon(str(exc))}, False)
+            
+        out_str = result_dict.get('result', {}).get('output')
+        if isinstance(out_str, str) and out_str.startswith("SCREENSHOT_BASE64:"):
+            b64 = out_str.replace("SCREENSHOT_BASE64:", "")
+            result_dict['result']['output'] = {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Here is the screenshot. Where are the coordinates for the target?"},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
+                ]
+            }
+
         duration_ms = (time.perf_counter() - start_time) * 1000
         self._emit('tool.executed', {'tool_name': tool_name, 'arguments': arguments, 'duration_ms': duration_ms, 'success': result_dict.get('success', False), 'error': result_dict.get('result', {}).get('error', None)})
         if tool_name == 'safe_file_search':

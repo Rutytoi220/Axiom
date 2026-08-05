@@ -53,6 +53,7 @@ class AxiomBridge(QObject):
     swarm_agent_completed: Signal = Signal(str, str)
     swarm_status_changed: Signal = Signal(dict)
     connection_status_changed: Signal = Signal(str)
+    tools_received: Signal = Signal(list)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -179,6 +180,16 @@ class AxiomBridge(QObject):
             return
         asyncio.run_coroutine_threadsafe(self._client.submit_task(user_input), self._loop)
 
+    def request_tools(self) -> None:
+        if self._loop is None or not self._client.is_connected:
+            return
+        asyncio.run_coroutine_threadsafe(self._client.request_tools(), self._loop)
+
+    def toggle_tool(self, tool_id: str, enabled: bool) -> None:
+        if self._loop is None or not self._client.is_connected:
+            return
+        asyncio.run_coroutine_threadsafe(self._client.toggle_tool(tool_id, enabled), self._loop)
+
     # ------------------------------------------------------------------
     # Internal async task runner
     # ------------------------------------------------------------------
@@ -189,6 +200,11 @@ class AxiomBridge(QObject):
 
     def _on_daemon_event(self, data: dict) -> None:
         """Route incoming daemon JSON events to Qt signals."""
+        msg_type = data.get("type", "")
+        if msg_type == "response" and data.get("action") == "get_tools":
+            self.tools_received.emit(data.get("data", []))
+            return
+            
         event_type = data.get("event_type", "")
         payload = data.get("payload", {})
         

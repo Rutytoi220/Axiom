@@ -387,3 +387,108 @@ class VectorMemoryEngine:
 
     def count(self) -> int:
         return self.store.count()
+
+class LongTermMemory:
+    """Persistent Long-Term Memory (Hippocampus) utilizing ChromaDB and Ollama embeddings."""
+    
+    def __init__(self, location: Optional[str] = None):
+        try:
+            import chromadb
+        except ImportError:
+            raise ImportError("chromadb is not installed. Run `pip install chromadb`.")
+            
+        db_dir = Path(location) if location else Path.home() / ".local" / "share" / "axiom" / "memory"
+        db_dir.mkdir(parents=True, exist_ok=True)
+        self.client = chromadb.PersistentClient(path=str(db_dir))
+        self.collection = self.client.get_or_create_collection(
+            name="axiom_hippocampus",
+            metadata={"hnsw:space": "cosine"}
+        )
+        self.embedding_url = "http://localhost:11434/api/embeddings"
+        self.embedding_model = "nomic-embed-text:latest"
+
+    async def _get_embedding(self, text: str) -> List[float]:
+        """Asynchronously call Ollama to get embeddings."""
+        import aiohttp
+        payload = {
+            "model": self.embedding_model,
+            "prompt": text
+        }
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(self.embedding_url, json=payload, timeout=10.0) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        return data.get("embedding", [])
+                    else:
+                        logger.error(f"[LongTermMemory] Embedding API failed with status {response.status}")
+                        return []
+        except Exception as e:
+            logger.error(f"[LongTermMemory] Exception during embedding generation: {e}")
+            return []
+
+    async def store_memory(self, user_prompt: str, ai_response: str) -> None:
+        """Embeds the interaction and upserts it into the database."""
+        if not user_prompt or not ai_response:
+            return
+            
+        embedding = await self._get_embedding(user_prompt)
+        if not embedding:
+            return
+            
+        import hashlib
+        m = hashlib.md5()
+        interaction_text = f"{user_prompt} ||| {ai_response}"
+        m.update(interaction_text.encode("utf-8"))
+        point_id = str(uuid.UUID(m.hexdigest()))
+        
+        metadata = {
+            "user_prompt": user_prompt,
+            "ai_response": ai_response,
+            "type": "interaction"
+        }
+        
+        try:
+            self.collection.upsert(
+                ids=[point_id],
+                embeddings=[embedding],
+                metadatas=[metadata],
+                documents=[interaction_text]
+            )
+            logger.info(f"[LongTermMemory] Successfully stored interaction in Hippocampus.")
+        except Exception as e:
+            logger.error(f"[LongTermMemory] Failed to upsert memory: {e}")
+
+    async def recall_memory(self, query: str, top_k: int = 3) -> List[str]:
+        """Embeds the incoming query and returns the top k most relevant past interactions."""
+        if not query:
+            return []
+            
+        embedding = await self._get_embedding(query)
+        if not embedding:
+            return []
+            
+        try:
+            results = self.collection.query(
+                query_embeddings=[embedding],
+                n_results=top_k,
+                include=["metadatas", "distances"]
+            )
+            
+            recalled = []
+            if results["ids"] and len(results["ids"]) > 0:
+                for idx, point_id in enumerate(results["ids"][0]):
+                    metadata = results["metadatas"][0][idx] if results["metadatas"] else {}
+                    distance = results["distances"][0][idx] if results["distances"] else 1.0
+                    
+                    # Assuming a cosine distance threshold (e.g. < 0.4 means highly relevant)
+                    if distance < 0.4:
+                        prompt = metadata.get("user_prompt", "")
+                        response = metadata.get("ai_response", "")
+                        if prompt and response:
+                            recalled.append(f"- [Past Prompt]: {prompt}\n  [Past Response]: {response}")
+                            
+            return recalled
+        except Exception as e:
+            logger.error(f"[LongTermMemory] Failed to recall memory: {e}")
+            return []

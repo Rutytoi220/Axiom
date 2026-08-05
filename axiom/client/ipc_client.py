@@ -52,7 +52,7 @@ class AxiomDaemonClient:
             async for message in self.ws:
                 try:
                     data = json.loads(message)
-                    if data.get("type") == "event":
+                    if data.get("type") in ("event", "response"):
                         if self.on_event:
                             self.on_event(data)
                 except json.JSONDecodeError:
@@ -61,6 +61,30 @@ class AxiomDaemonClient:
             logger.warning("Daemon connection closed")
         finally:
             await self.disconnect()
+
+    async def request_tools(self):
+        if not self.ws or not self._connected:
+            return False
+        try:
+            await self.ws.send(json.dumps({"action": "get_tools"}))
+            return True
+        except Exception as e:
+            logger.error(f"Failed to request tools: {e}")
+            return False
+
+    async def toggle_tool(self, tool_id: str, enabled: bool):
+        if not self.ws or not self._connected:
+            return False
+        try:
+            await self.ws.send(json.dumps({
+                "action": "toggle_tool",
+                "tool_id": tool_id,
+                "enabled": enabled
+            }))
+            return True
+        except Exception as e:
+            logger.error(f"Failed to toggle tool: {e}")
+            return False
 
     async def submit_task(self, prompt: str):
         if not self.ws or not self._connected:

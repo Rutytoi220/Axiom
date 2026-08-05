@@ -6,6 +6,8 @@ complexity using an LLM-driven micro-model classification.
 import logging
 from typing import Dict, Any, List, Optional
 import time
+import asyncio
+import httpx
 from enum import Enum
 from pydantic import BaseModel
 import litellm
@@ -52,25 +54,114 @@ Returns:
         self.model_tiers = self._resolve_dynamic_tiers()
         self._current_active_model: Optional[str] = None
 
+    async def _async_get_installed_models(self) -> List[str]:
+        """Fetch current installed models from Ollama asynchronously."""
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.get('http://localhost:11434/api/tags', timeout=2.0)
+                if r.status_code == 200:
+                    return [m['name'] for m in r.json().get('models', [])]
+        except Exception as e:
+            logger.warning(f"[SmartRouter] Failed to fetch installed models: {e}")
+        return []
+
+    def _get_installed_models(self) -> List[str]:
+        """Synchronous wrapper for installed models (fallback for init)."""
+        try:
+            return asyncio.run(self._async_get_installed_models())
+        except RuntimeError:
+            # If there's an event loop running, we just return empty as fallback.
+            return []
+
+    async def _async_fetch_all_metadata(self, models: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Fetch deep introspection data for multiple models asynchronously."""
+        results = {}
+        async with httpx.AsyncClient() as client:
+            for model_name in models:
+                try:
+                    r = await client.post('http://localhost:11434/api/show', json={"name": model_name}, timeout=2.0)
+                    if r.status_code == 200:
+                        results[model_name] = r.json()
+                except Exception as e:
+                    logger.warning(f"[SmartRouter] Failed to fetch metadata for {model_name} (corrupted/timeout): {e}")
+        return results
+
+    def _score_for_tools(self, details: Dict[str, Any]) -> float:
+        """Score a model dynamically based purely on its capabilities and parameter metadata."""
+        if not details:
+            return 0.0
+
+        score = 0.0
+        
+        # 1. Tool Competency (+100)
+        template = details.get("template", "")
+        system = details.get("system", "")
+        if template or system:
+            combined = template + "\n" + system
+            if '{{ .Tools }}' in combined or '{{- if .Tools }}' in combined or '{{.Tools}}' in combined:
+                score += 100.0
+
+        # 2. Parameter Weighting (+X)
+        param_size_str = details.get("details", {}).get("parameter_size", "0B")
+        param_val = 0.0
+        if param_size_str and param_size_str.endswith("B"):
+            try:
+                param_val = float(param_size_str[:-1])
+            except ValueError:
+                param_val = 0.0
+        score += param_val
+
+        # 3. VRAM Safety Cap (-200 if > 40B)
+        if param_val > 40.0:
+            score -= 200.0
+            
+        return score
+
+    def _score_for_vision(self, details: Dict[str, Any], model_name: str) -> float:
+        """Score a model dynamically based on vision capabilities."""
+        if not details:
+            return 0.0
+
+        score = 0.0
+        
+        # 1. Explicit Vision Metadata
+        modelfile = details.get("modelfile", "").lower()
+        families = [f.lower() for f in details.get("details", {}).get("families", [])]
+        
+        if "clip" in modelfile or "vision" in modelfile or "clip" in families:
+            score += 100.0
+
+        # 2. Gemma 3/4 Priority (+150 points for Tier 1 Multimodal)
+        if "gemma4" in model_name.lower() or "gemma3" in model_name.lower():
+            score += 150.0
+
+        # 3. Parameter Weighting (+X)
+        param_size_str = details.get("details", {}).get("parameter_size", "0B")
+        param_val = 0.0
+        if param_size_str and param_size_str.endswith("B"):
+            try:
+                param_val = float(param_size_str[:-1])
+            except ValueError:
+                param_val = 0.0
+        score += param_val
+
+        # 4. Fallback Name Heuristics (if metadata lacks explicit signs)
+        if score < 50.0:
+            if "-vl" in model_name.lower() or "vision" in model_name.lower() or "llava" in model_name.lower():
+                score += 50.0
+
+        return score
+
     def _resolve_dynamic_tiers(self) -> Dict[IntentCategory, str]:
         """Dynamically select the best installed models for each tier."""
         default_tiers = {
             IntentCategory.CHAT: 'ollama/llama3.1:latest', 
-            IntentCategory.SYSTEM: 'ollama/qwen3:8b', 
-            IntentCategory.CODE: 'ollama/qwen3-coder:latest', 
+            IntentCategory.SYSTEM: 'ollama/qwen2.5-coder:7b', 
+            IntentCategory.CODE: 'ollama/qwen2.5-coder:latest', 
             IntentCategory.VISION: 'ollama/qwen3-vl:2b', 
             IntentCategory.REASONING: 'ollama/laguna-xs-2.1:q4_K_M'
         }
-        try:
-            import requests
-            r = requests.get('http://localhost:11434/api/tags', timeout=2)
-            if r.status_code == 200:
-                models = [m['name'] for m in r.json().get('models', [])]
-            else:
-                return default_tiers
-        except Exception:
-            return default_tiers
-
+        models = self._get_installed_models()
         if not models:
             return default_tiers
 
@@ -79,7 +170,6 @@ Returns:
                 for m in models:
                     if kw.lower() in m.lower():
                         return f"ollama/{m}"
-            # If no keyword matches, just return the first available model as absolute fallback
             return f"ollama/{models[0]}" if models else fallback
 
         return {
@@ -87,7 +177,7 @@ Returns:
             IntentCategory.CHAT: pick_best(['llama', 'mistral', 'gemma', 'qwen', 'laguna'], default_tiers[IntentCategory.CHAT]),
             IntentCategory.VISION: pick_best(['vl', 'llava', 'vision', 'pixtral'], default_tiers[IntentCategory.VISION]),
             IntentCategory.REASONING: pick_best(['r1', 'reason', 'math', 'laguna', 'deepseek'], default_tiers[IntentCategory.REASONING]),
-            IntentCategory.SYSTEM: pick_best(['qwen', 'llama', 'mistral', 'laguna'], default_tiers[IntentCategory.SYSTEM])
+            IntentCategory.SYSTEM: pick_best(['coder', 'qwen', 'llama', 'mistral', 'laguna'], default_tiers[IntentCategory.SYSTEM])
         }
 
     def _has_image(self, messages: List[Dict[str, Any]]) -> bool:
@@ -124,8 +214,6 @@ Returns:
             content = response.choices[0].message.content
             import json
             decision = RouterDecision.model_validate_json(content)
-            if decision.category == IntentCategory.VISION:
-                return IntentCategory.SYSTEM
             return decision.category
         except Exception as e:
             logger.warning(f'SmartRouter classification failed: {e}. Falling back to SYSTEM intent.')
@@ -146,7 +234,10 @@ Returns:
                 self.event_bus.publish(Event('model.routed', 'SmartRouter', data={'target': selected_model, 'intent': 'MANUAL'}))
             return selected_model
 
-        target_intent = self._classify_task(messages, tool_schemas)
+        if tool_schemas:
+            target_intent = IntentCategory.SYSTEM
+        else:
+            target_intent = self._classify_task(messages, tool_schemas)
         
         # Check for explicitly requested cloud tier
         is_cloud_requested = False
@@ -185,7 +276,50 @@ Returns:
                 else:
                     logger.warning(f'Emergency Downgrade: Code task requested, but RAM is critically low ({ram_avail:.1f}%). Downgrading to Orchestration to prevent OOM crash.')
                     target_intent = IntentCategory.SYSTEM
-        target_model_name = self.model_tiers.get(target_intent)
+        if target_intent in (IntentCategory.SYSTEM, IntentCategory.VISION):
+            # Dynamic probing for tool scoring
+            try:
+                models = asyncio.run(self._async_get_installed_models())
+            except RuntimeError:
+                # Fallback if loop is running
+                models = self._get_installed_models()
+                
+            if not models:
+                raise RuntimeError("No models installed in Ollama. Cannot execute tool calls.")
+            
+            # Fetch all metadata asynchronously
+            try:
+                metadata_map = asyncio.run(self._async_fetch_all_metadata(models))
+            except RuntimeError:
+                metadata_map = {}
+                logger.error("[SmartRouter] Could not run async metadata fetch due to existing event loop.")
+            
+            # Score all installed models
+            scored_models = []
+            for m in models:
+                details = metadata_map.get(m, {})
+                if target_intent == IntentCategory.VISION:
+                    score = self._score_for_vision(details, m)
+                else:
+                    score = self._score_for_tools(details)
+                scored_models.append((m, score))
+                
+            scored_models.sort(key=lambda x: x[1], reverse=True)
+            best_model = scored_models[0][0]
+            best_score = scored_models[0][1]
+            
+            # Graceful Degradation for Vision
+            if target_intent == IntentCategory.VISION and best_score < 10.0:
+                raise RuntimeError("Error: A visual task was requested, but no Vision-Language Model (VLM) is installed. Please run 'ollama pull qwen3-vl:2b' (or similar).")
+                
+            target_model_name = f"ollama/{best_model}"
+            
+            # Re-cache the tier mapping for consistency
+            self.model_tiers[target_intent] = target_model_name
+            logger.info(f"[SmartRouter] Selected {target_model_name} with score {best_score}")
+        else:
+            target_model_name = self.model_tiers.get(target_intent)
+            
         selected_model: str = str(target_model_name or getattr(getattr(self.llm_client, 'config', None), 'model', 'ollama/qwen3:8b'))
         if self._current_active_model and self._current_active_model != selected_model:
             logger.info(f'SmartRouter Swapping Model: {self._current_active_model} -> {selected_model} (Intent: {target_intent.value})')

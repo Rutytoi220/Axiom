@@ -89,7 +89,7 @@ class MainWindow(QMainWindow):
         # Background services now run in the headless daemon
 
         self.setWindowTitle("AXIOM Desktop v6.0 LTS")
-        self.setMinimumSize(900, 640)
+        self.setMinimumSize(400, 640)
         self.resize(1280, 800)
 
         self._build_toolbar()
@@ -129,16 +129,36 @@ class MainWindow(QMainWindow):
         tb.setMovable(False)
         tb.setIconSize(QSize(16, 16))
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, tb)
+        
+        scroll = QScrollArea()
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        
+        container = QWidget()
+        h_layout = QHBoxLayout(container)
+        h_layout.setContentsMargins(4, 4, 4, 4)
+        h_layout.setSpacing(6)
+        
+        scroll.setWidget(container)
+        tb.addWidget(scroll)
+        
+        def _add_sep():
+            sep = QFrame()
+            sep.setFrameShape(QFrame.Shape.VLine)
+            sep.setFrameShadow(QFrame.Shadow.Sunken)
+            h_layout.addWidget(sep)
 
         # AXIOM brand label
         brand = QLabel("  AXIOM")
         brand.setStyleSheet("font-weight:800; font-size:15px; color:#10b981; letter-spacing:0.06em;")
-        tb.addWidget(brand)
+        h_layout.addWidget(brand)
 
         spacer1 = QWidget()
         spacer1.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         spacer1.setStyleSheet("background: transparent;")
-        tb.addWidget(spacer1)
+        h_layout.addWidget(spacer1)
 
         # ---- Auth Mode Buttons ----
         auth_frame = QFrame()
@@ -169,19 +189,24 @@ class MainWindow(QMainWindow):
         self._btn_autopilot.clicked.connect(lambda: self._set_auth_mode(AuthMode.AUTOPILOT))
         self._btn_strict.clicked.connect(lambda: self._set_auth_mode(AuthMode.STRICT))
 
-        tb.addWidget(auth_frame)
+        h_layout.addWidget(auth_frame)
 
-        tb.addSeparator()
+        spacer2 = QWidget()
+        spacer2.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        spacer2.setStyleSheet("background: transparent;")
+        h_layout.addWidget(spacer2)
 
         # ---- Expert Mode Toggle ----
         self._expert_btn = QPushButton("⚙️ Expert Mode: OFF")
+        self._expert_btn.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Fixed)
         self._expert_btn.setObjectName("expertToggleBtn")
         self._expert_btn.setCheckable(True)
         self._expert_btn.clicked.connect(self._toggle_expert_dock)
-        tb.addWidget(self._expert_btn)
+        h_layout.addWidget(self._expert_btn)
         
         # ---- Master Kernel Supervisor Toggle ----
         self._kernel_btn = QPushButton("🧠 AXIOM Kernel v5.0")
+        self._kernel_btn.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Fixed)
         self._kernel_btn.setObjectName("kernelBtn")
         self._kernel_btn.setStyleSheet("""
             background-color: #89b4fa;
@@ -191,12 +216,13 @@ class MainWindow(QMainWindow):
             padding: 5px 15px;
         """)
         self._kernel_btn.clicked.connect(self._open_kernel_dialog)
-        tb.addWidget(self._kernel_btn)
+        h_layout.addWidget(self._kernel_btn)
 
-        tb.addSeparator()
+        _add_sep()
         
         # ---- System Hub Button ----
         self._hub_btn = QPushButton("⚙️ System Hub")
+        self._hub_btn.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Fixed)
         self._hub_btn.setObjectName("hubBtn")
         self._hub_btn.setStyleSheet("""
             background-color: #313244;
@@ -206,10 +232,11 @@ class MainWindow(QMainWindow):
             padding: 5px 15px;
         """)
         self._hub_btn.clicked.connect(self._open_system_hub_dialog)
-        tb.addWidget(self._hub_btn)
+        h_layout.addWidget(self._hub_btn)
         
         # ---- Plugin Hub Button ----
         self._plugin_btn = QPushButton("🔌 Plugin Hub")
+        self._plugin_btn.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Fixed)
         self._plugin_btn.setObjectName("pluginBtn")
         self._plugin_btn.setStyleSheet("""
             background-color: #18181b;
@@ -220,31 +247,36 @@ class MainWindow(QMainWindow):
             padding: 5px 15px;
         """)
         self._plugin_btn.clicked.connect(self._open_plugin_dialog)
-        tb.addWidget(self._plugin_btn)
+        h_layout.addWidget(self._plugin_btn)
 
-        tb.addSeparator()
+        _add_sep()
 
         # ---- Model badge ----
         self._model_label = QLabel("Model: —")
         self._model_label.setObjectName("modelLabel")
-        tb.addWidget(self._model_label)
+        h_layout.addWidget(self._model_label)
         
-        tb.addSeparator()
+        _add_sep()
 
 
 
         # ---- Ollama Health Monitor ----
         self._ollama_status_label = QLabel("🟡 Ollama: Checking...")
         self._ollama_status_label.setStyleSheet("font-weight: 600; font-size: 13px; color: #fbbf24;")
-        tb.addWidget(self._ollama_status_label)
+        h_layout.addWidget(self._ollama_status_label)
         
         self._ollama_start_btn = QPushButton("🚀 Start Ollama")
         self._ollama_start_btn.setStyleSheet("background-color: #f59e0b; color: white; font-weight: bold; border: none; padding: 4px 10px; border-radius: 4px; margin-left: 5px;")
         self._ollama_start_btn.clicked.connect(self._on_ollama_start_clicked)
-        self._ollama_start_action = tb.addWidget(self._ollama_start_btn)
+        
+        self._ollama_start_action = QWidget()
+        btn_layout = QHBoxLayout(self._ollama_start_action)
+        btn_layout.setContentsMargins(0, 0, 0, 0)
+        btn_layout.addWidget(self._ollama_start_btn)
+        h_layout.addWidget(self._ollama_start_action)
         self._ollama_start_action.setVisible(False)
 
-        tb.addWidget(QWidget())  # right padding
+        h_layout.addWidget(QWidget())  # right padding
         
         # Initialize the health monitor
         from axiom.services.ollama_monitor import OllamaHealthMonitor
@@ -738,8 +770,9 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def _open_plugin_dialog(self) -> None:
+        """Open the Plugin Hub dialog."""
         from axiom.gui.widgets.plugin_manager import PluginManagerDialog
-        dlg = PluginManagerDialog(self)
+        dlg = PluginManagerDialog(self._bridge, self)
         dlg.exec()
 
     @Slot()

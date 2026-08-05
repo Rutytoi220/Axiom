@@ -107,6 +107,47 @@ class AxiomDaemonServer:
                             # run_in_executor returns a Future and schedules it automatically.
                             loop = asyncio.get_running_loop()
                             loop.run_in_executor(None, self.cli.orchestrator.run, prompt, True)
+                    elif action == "get_tools":
+                        tools = self.cli.orchestrator._tool_registry._core_registry.list_tools()
+                        from axiom.config import get_config
+                        disabled = getattr(get_config(), "disabled_plugins", [])
+                        
+                        tool_list = []
+                        for tid, t in sorted(tools.items()):
+                            desc = getattr(t, 'description', '')
+                            if not desc and t.__doc__:
+                                desc = t.__doc__.strip().split('\n')[0]
+                            tool_list.append({
+                                "id": tid,
+                                "description": desc or "No description provided.",
+                                "enabled": tid not in disabled
+                            })
+                            
+                        await websocket.send(json.dumps({
+                            "type": "response",
+                            "action": "get_tools",
+                            "data": tool_list
+                        }))
+                    elif action == "toggle_tool":
+                        tool_id = data.get("tool_id")
+                        enabled = data.get("enabled")
+                        from axiom.config import get_config
+                        config = get_config()
+                        disabled_list = getattr(config, 'disabled_plugins', [])
+                        
+                        if enabled and tool_id in disabled_list:
+                            disabled_list.remove(tool_id)
+                        elif not enabled and tool_id not in disabled_list:
+                            disabled_list.append(tool_id)
+                            
+                        config.disabled_plugins = disabled_list
+                        config.save()
+                        
+                        await websocket.send(json.dumps({
+                            "type": "response",
+                            "action": "toggle_tool",
+                            "success": True
+                        }))
                 except Exception as e:
                     logger.error(f"Error handling WS message: {e}")
         finally:

@@ -35,6 +35,7 @@ class PluginLoaderService:
         try:
             import axiom.tools.os_vision
             import axiom.tools.os_input
+            import axiom.tools.screen_perception
         except ImportError as e:
             logger.warning(f"Could not load internal OS plugins: {e}")
 
