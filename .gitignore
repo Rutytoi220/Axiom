@@ -139,3 +139,6 @@ INFINITE POWER/
 *~
 .project
 .pydevproject
+
+# Tests
+tests/

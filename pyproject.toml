@@ -1,106 +1,35 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
+requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "local-axiom-agent"
+name = "axiom-core"
 version = "1.0.0"
-description = "A local-first AI orchestration framework"
-readme = "README.md"
-requires-python = ">=3.12"
-license = {text = "MIT"}
 authors = [
-    {name = "rutytoi", email = "charlesbbm@outlook.fr"}
+  { name="AXIOM Contributors", email="admin@axiom.local" },
 ]
-keywords = ["ai", "llm", "orchestration", "agents", "tools", "local-first"]
+description = "A Local-First AI Operating System for Linux."
+readme = "README.md"
+requires-python = ">=3.9"
 classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: Developers",
-    "Topic :: Software Development :: Libraries",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.12",
+    "Operating System :: POSIX :: Linux",
 ]
-
 dependencies = [
-    "mcp",
-    "faster-whisper",
-    "sounddevice",
-    "soundfile",
-    "requests>=2.28.0",
-    "aiosqlite>=0.19.0",
-    "psutil>=5.9.0",
-    "numpy>=1.24.0",
-    "pyautogui>=0.9.53",
-    "pillow>=10.1.0",
-    "cryptography>=41.0.0",
-    "fusepy>=3.0.1",
-    "pynvml>=11.5.0",
-    "opencv-python>=4.8.0",
-    "pyttsx3>=2.90",
-    "websockets>=12.0",
-    "watchdog>=3.0.0",
-    "textual>=0.40.0",
-    "rich>=13.0.0",
-    "pypdf>=3.0.0",
-    "prompt_toolkit>=3.0.0",
+    "PySide6>=6.0",
+    "aiosqlite>=0.20.0",
     "chromadb>=0.4.0",
-    "apscheduler>=3.10.0",
-    "anthropic>=0.30.0",
-    "playwright>=1.40.0",
-    "watchdog>=3.0.0",
-    "paho-mqtt>=1.6.0",
-    "cryptography>=41.0.0",
-    "docker>=7.0.0",
-    "boto3>=1.34.0",
-    "pyudev>=0.24.0",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.0",
-    "pytest-asyncio>=0.21.0",
-    "pytest-cov>=3.0",
-    "pytest-qt>=4.0",
-    "black>=22.0",
-    "flake8>=4.0",
-    "mypy>=0.950",
-    "isort>=5.0",
-]
-gui = [
-    "PySide6>=6.5.0",
-    "qasync>=0.27.0",
-]
-build = [
-    "pyinstaller>=6.0.0",
+    "faster-whisper>=1.0.0",
+    "openwakeword>=0.4.0",
+    "pyttsx3>=2.90",
+    "litellm>=1.93.0",
+    "pydantic>=2.0",
+    "sounddevice>=0.4.0"
 ]
 
 [project.scripts]
-axiom = "axiom.api.cli:main"
-axiom-gui = "axiom.gui.app:main"
-
-[tool.black]
-line-length = 100
-target-version = ["py312"]
-include = '\.pyi?$'
-
-[tool.isort]
-profile = "black"
-line_length = 100
-
-[tool.mypy]
-python_version = "3.12"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = false
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py"]
-addopts = "--cov=axiom --cov-report=html --ignore=tests/fixtures"
-asyncio_mode = "auto"
+axiom = "axiom.gui.app:main"
+axiomd = "main:daemon_entry_point"
 
 [tool.setuptools.packages.find]
-where = ["."]
 include = ["axiom*"]

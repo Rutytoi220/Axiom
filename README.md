@@ -1,75 +1,42 @@
-<div align="center">
-  <img src="axiom/gui/assets/logo.png" alt="AXIOM Logo" width="200">
-  <h1>AXIOM v6.6.0 LTS</h1>
-  <p><strong>Sovereign, Self-Patching, Multimodal Linux AI Operating System Layer</strong></p>
+# AXIOM: Local-First AI Operating System for Linux
 
-  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-  [![Platform: Linux/Wayland](https://img.shields.io/badge/Platform-Linux%2FWayland-blue.svg)](#)
-  [![Python: 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-  [![Build Status](https://github.com/rutytoi/axiom/actions/workflows/release.yml/badge.svg)](https://github.com/rutytoi/axiom/actions/workflows/release.yml)
-  [![Release](https://img.shields.io/badge/Release-v5.3.0-green.svg)](#)
-</div>
+AXIOM (`axiom-core`) is a professional, local-first Linux developer utility and AI operating system. Built from the ground up for privacy, speed, and deep system integration, AXIOM acts as a native desktop AI that thinks, remembers, and executes autonomously.
 
----
+## 🚀 Core Features
 
-## 🧠 What is AXIOM?
+- **🧠 Neural Routing & Swarm Architecture**: Dynamically spawns background specialist agents (Coders, Researchers) depending on task complexity using a resilient ReAct Tool Chaining loop.
+- **📚 Vector Memory**: Persistent, distributed memory storage via ChromaDB and a dedicated SQLite Session database to effortlessly recall past conversations and deep context.
+- **👁️ Sensory Engine**: Built-in, 100% offline Voice capabilities. Use privacy-first Push-to-Talk or JARVIS-style Wake Word ("Hey AXIOM") powered by `faster-whisper` and `openwakeword`, with responses synthesized directly via Linux native `espeak`/`pyttsx3`.
+- **💻 Native Linux UI**: A dense, PySide6-powered interface designed for professionals. Dynamic QSS dark-mode theming, terminal-style log output, and a non-intrusive Swarm HUD.
 
-AXIOM is not just another LLM wrapper. It is a **Sovereign AI Operating System Layer** designed to bridge the gap between local LLMs and deep system integration. Evolving from a simple AI client into a self-evolving kernel, AXIOM provides a secure, private, and multimodal environment for autonomous agents to interact with your Linux desktop, hardware, and local network.
+## ⚡ Quickstart
 
-By prioritizing **local-first privacy** and **hybrid federation**, AXIOM allows you to leverage the power of massive cloud models (Anthropic Claude, GPT-4) only when necessary, while keeping the majority of reasoning and data processing on your own silicon via **Ollama**.
+AXIOM is designed to be installed easily into any Python environment.
 
----
-
-## 🚀 Key Features Matrix
-
-| Feature | Description | Implementation |
-| :--- | :--- | :--- |
-| 🧠 **Sovereign Kernel** | Master daemon architecture with live code evolution and self-patching. | `axiom.kernel` |
-| 🛡️ **Total Isolation** | Rootless `bwrap` containers & disposable QEMU/KVM micro-VMs for tool execution. | `axiom.security` |
-| 📁 **AxiomFS** | Semantic FUSE filesystem. Browse GraphRAG memory as dynamic Linux directories. | `axiom.fs` |
-| 🎙️ **Jarvis HUD** | Floating Wayland overlay with GPU-accelerated Whisper STT and Piper TTS. | `axiom.gui` |
-| 🌐 **P2P Mesh** | Zero-config LAN task offloading and 4-tier LLM routing with budget guards. | `axiom.swarm` |
-| 🔌 **IDE Federation** | Native Model Context Protocol (MCP) Server for Cursor, VS Code, and Neovim. | `axiom.server` |
-| 🔄 **OTA Updates** | Cryptographic SHA256 release verification with atomic systemd hot-reloading. | `axiom.security` |
-
----
-
-## 🛠️ Quick Installation
-
-### 🐧 Linux (Recommended)
-
-**Immutable Linux (Bazzite / Fedora Atomic):**
+### 1. Install via pip
 ```bash
-rpm-ostree install axiom.rpm
+# Clone the repository
+git clone https://github.com/Rutytoi220/Axiom.git
+cd Axiom
+
+# Install dependencies (or use pip install .)
+pip install -r requirements.txt
+pip install .
 ```
 
-**Debian / Ubuntu:**
+### 2. Start the Daemon
+AXIOM runs its heavy inference loops, memory routing, and agent swarms in a headless daemon to keep the UI buttery smooth.
 ```bash
-sudo dpkg -i axiom.deb
+axiomd &
 ```
 
-**Universal AppImage:**
+### 3. Launch the UI
 ```bash
-chmod +x AXIOM.AppImage && ./AXIOM.AppImage
+axiom
 ```
 
-### 🪟 Windows
-Download the `AXIOM_v5.3.0_Setup.exe` from the [Releases](https://github.com/rutytoi/axiom/releases) page and follow the wizard.
-
-### 🍎 macOS
-Download `AXIOM.dmg`, drag to Applications, and allow permissions for Terminal/Accessibility in System Settings.
+On your first launch, the Out-Of-Box Experience (OOBE) will guide you through selecting your UI accent color and setting up your Voice interaction preferences (Push-to-Talk vs Wake Word).
 
 ---
 
-## 📖 Documentation Index
-
-- [**Architecture Deep-Dive**](ARCHITECTURE.md): Technical mapping of the AXIOM Kernel and Swarm consensus.
-- [**Contributing Guide**](CONTRIBUTING.md): Setup your dev environment and join the evolution.
-- [**Quickstart Guide**](QUICKSTART.md): Get up and running in 5 minutes.
-- [**SDK Guide**](SDK_GUIDE.md): Build your own agents and tools on the AXIOM core.
-
----
-
-## ⚖️ License
-
-AXIOM is released under the **MIT License**. See [LICENSE](LICENSE) for details.
+*AXIOM v1.0.0 LTS — Developed by the Open-Source Community.*

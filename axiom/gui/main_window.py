@@ -95,10 +95,12 @@ class MainWindow(QMainWindow):
         self._build_toolbar()
         self._build_central_widget()
         self._build_expert_dock()
+        self._build_sidebar()
         self._build_bottom_bar()
         self._build_status_bar()
         self._connect_bridge()
         self._refresh_auth_ui()
+        self._init_audio()
         
         # Initial Welcome Message
         self._add_bubble("assistant", "⚡ AXIOM Desktop v6.0 LTS Online — Select a mode above or type a prompt below to begin.")
@@ -118,7 +120,37 @@ class MainWindow(QMainWindow):
             self._scheduler_service.stop()
         if hasattr(self, '_sys_watchdog'):
             self._sys_watchdog.stop()
+        if hasattr(self, '_wake_daemon') and self._wake_daemon:
+            self._wake_daemon.stop()
         super().closeEvent(event)
+
+    def _init_audio(self) -> None:
+        from axiom.gui.config_manager import get_ui_config_manager
+        self._voice_mode = get_ui_config_manager().load().voice_mode
+        self._tts = None
+        self._stt = None
+        self._recorder = None
+        self._wake_daemon = None
+        
+        # Initialize TTS
+        try:
+            from axiom.audio.tts import TextToSpeechEngine
+            self._tts = TextToSpeechEngine.instance()
+        except Exception as e:
+            logger.error(f"TTS init failed: {e}")
+            
+        # Initialize STT/WakeWord
+        try:
+            from axiom.audio.stt import WhisperTranscriber, AudioRecorder, WakeWordDaemon
+            self._stt = WhisperTranscriber.instance()
+            self._recorder = AudioRecorder()
+            
+            if self._voice_mode == "wake_word":
+                self._wake_daemon = WakeWordDaemon(self)
+                self._wake_daemon.wake_word_detected.connect(self._on_wake_word)
+                self._wake_daemon.start()
+        except Exception as e:
+            logger.error(f"STT init failed: {e}")
 
     # ------------------------------------------------------------------
     # UI construction
@@ -306,6 +338,15 @@ class MainWindow(QMainWindow):
         self._scroll.setWidget(self._chat_container)
         outer.addWidget(self._scroll)
 
+    def _build_sidebar(self) -> None:
+        from axiom.gui.widgets.sidebar import SessionSidebar
+        self._sidebar = SessionSidebar(self._bridge, self)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._sidebar)
+        
+        # Load sessions shortly after boot
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(1000, self._sidebar.load_sessions)
+
     def _build_expert_dock(self) -> None:
         """Hidden right dock panel for system telemetry & expert logs."""
         self._dock = QDockWidget("System Telemetry & Swarm Logs", self)
@@ -358,11 +399,34 @@ class MainWindow(QMainWindow):
 
     def _build_bottom_bar(self) -> None:
         """Bottom control bar: multiline input + send button."""
+        from axiom.gui.widgets.swarm_hud import SwarmHUD
+        
+        container = QWidget()
+        vlayout = QVBoxLayout(container)
+        vlayout.setContentsMargins(0,0,0,0)
+        vlayout.setSpacing(0)
+        
+        self._swarm_hud = SwarmHUD()
+        vlayout.addWidget(self._swarm_hud)
+        
         bar = QWidget()
         bar.setObjectName("bottomBar")
         bar_layout = QHBoxLayout(bar)
         bar_layout.setContentsMargins(16, 10, 16, 10)
         bar_layout.setSpacing(10)
+        
+        from axiom.gui.config_manager import get_ui_config_manager
+        voice_mode = get_ui_config_manager().load().voice_mode
+
+        self._mic_btn = None
+        if voice_mode == "push_to_talk":
+            self._mic_btn = QPushButton("🎤")
+            self._mic_btn.setFixedSize(48, 48)
+            self._mic_btn.setObjectName("micBtn")
+            self._mic_btn.setStyleSheet("background-color: #161B22; border: 1px solid #30363D; border-radius: 8px; font-size: 18px;")
+            self._mic_btn.setCheckable(True)
+            self._mic_btn.clicked.connect(self._on_mic_toggled)
+            bar_layout.addWidget(self._mic_btn, 0, Qt.AlignmentFlag.AlignBottom)
 
         self._input = ChatInputEdit()
         self._input.setObjectName("chatInput")
@@ -382,7 +446,7 @@ class MainWindow(QMainWindow):
 
         # Slot bar into the main layout below central widget
         main_layout = self.centralWidget().layout()
-        main_layout.addWidget(bar)
+        main_layout.addWidget(container)
         main_layout.setStretch(0, 9)
         main_layout.setStretch(1, 0)
 
@@ -618,6 +682,44 @@ class MainWindow(QMainWindow):
         self._streaming_bubble = self._add_bubble("assistant", "")
         self._active_swarm_pill = None
         self._bridge.submit_task(text)
+        
+    @Slot()
+    def _on_mic_toggled(self) -> None:
+        if not self._mic_btn or not self._recorder or not self._stt:
+            return
+            
+        if self._mic_btn.isChecked():
+            self._mic_btn.setStyleSheet("background-color: #ef4444; color: white; border: 1px solid #ef4444; border-radius: 8px; font-size: 18px;")
+            self._input.setPlaceholderText("Listening...")
+            self._recorder.start_recording()
+        else:
+            self._mic_btn.setStyleSheet("background-color: #161B22; border: 1px solid #30363D; border-radius: 8px; font-size: 18px;")
+            self._input.setPlaceholderText("Transcribing...")
+            audio_data = self._recorder.stop_recording()
+            
+            # Process in background to avoid blocking UI
+            import asyncio
+            async def _transcribe():
+                text = await self._stt.transcribe(audio_data)
+                # Ensure UI update happens on main thread
+                from PySide6.QtCore import QMetaObject, Q_ARG, Qt
+                QMetaObject.invokeMethod(self, "_on_transcription_complete", Qt.ConnectionType.QueuedConnection, Q_ARG(str, text))
+            
+            asyncio.run_coroutine_threadsafe(_transcribe(), self._bridge._loop)
+
+    @Slot(str)
+    def _on_transcription_complete(self, text: str) -> None:
+        self._input.setPlaceholderText("Ask AXIOM anything… (Enter to send, Shift+Enter for new line)")
+        if text:
+            current = self._input.toPlainText()
+            self._input.setPlainText((current + " " + text).strip())
+
+    @Slot()
+    def _on_wake_word(self) -> None:
+        self._add_bubble("user", "[Wake Word Detected] Listening...")
+        # A full implementation would trigger a timed recording or VAD here.
+        # For Phase 6.0, we just log detection for now.
+        pass
 
     @Slot(str)
     def _on_token(self, token: str) -> None:
@@ -636,23 +738,18 @@ class MainWindow(QMainWindow):
 
     @Slot(str, str)
     def _on_swarm_started(self, agent_name: str, task: str) -> None:
-        if not self._active_swarm_pill:
-            self._active_swarm_pill = SwarmPill()
-            self._chat_layout.insertWidget(self._chat_layout.count() - 1, self._active_swarm_pill)
-        self._active_swarm_pill.add_agent_task(agent_name, task)
-        self._scroll_to_bottom()
+        if hasattr(self, '_swarm_hud'):
+            self._swarm_hud.add_pill(agent_name, task)
         
     @Slot(str, str)
     def _on_swarm_token(self, agent_name: str, chunk: str) -> None:
-        if self._active_swarm_pill:
-            self._active_swarm_pill.update_agent_status(agent_name, chunk)
-            self._scroll_to_bottom()
+        if hasattr(self, '_swarm_hud'):
+            self._swarm_hud.update_pill(agent_name, chunk)
             
     @Slot(str, str)
     def _on_swarm_completed(self, agent_name: str, result: str) -> None:
-        if self._active_swarm_pill:
-            self._active_swarm_pill.complete_agent(agent_name, result)
-            self._scroll_to_bottom()
+        if hasattr(self, '_swarm_hud'):
+            self._swarm_hud.remove_pill(agent_name)
 
     @Slot(dict)
     def _on_telemetry(self, data: dict) -> None:
@@ -711,6 +808,10 @@ class MainWindow(QMainWindow):
         self._streaming_bubble = None
         self._streaming_text = ""
         self._scroll_to_bottom()
+        
+        if hasattr(self, '_tts') and self._tts:
+            import asyncio
+            asyncio.run_coroutine_threadsafe(self._tts.speak(text), self._bridge._loop)
 
     @Slot(str)
     def _on_error(self, message: str) -> None:

@@ -63,6 +63,10 @@ class AxiomBridge(QObject):
         self._client.on_connect = self._on_daemon_connect
         self._client.on_disconnect = self._on_daemon_disconnect
         self._lock = threading.Lock()
+        
+        self.session_id: str | None = None
+        from axiom.memory.sessions import SessionDatabase
+        self.session_db = SessionDatabase()
 
     def _on_daemon_connect(self):
         self.connection_status_changed.emit('connected')
@@ -76,6 +80,11 @@ class AxiomBridge(QObject):
     def set_event_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Register the qasync event loop so we can schedule coroutines."""
         self._loop = loop
+        asyncio.run_coroutine_threadsafe(self._init_session(), loop)
+
+    async def _init_session(self):
+        await self.session_db.initialize()
+        self.session_id = await self.session_db.create_session("AXIOM Desktop Session")
 
     def initialize_client(self) -> None:
         """Attempt to connect to the daemon, starting it if necessary."""
@@ -178,6 +187,11 @@ class AxiomBridge(QObject):
         if not self._client.is_connected:
             self.error_occurred.emit("Daemon offline — cannot submit task.")
             return
+            
+        if self.session_id:
+            msg = {"role": "user", "content": user_input}
+            asyncio.run_coroutine_threadsafe(self.session_db.append_message(self.session_id, msg), self._loop)
+            
         asyncio.run_coroutine_threadsafe(self._client.submit_task(user_input), self._loop)
 
     def request_tools(self) -> None:
@@ -219,7 +233,11 @@ class AxiomBridge(QObject):
         elif event_type == "telemetry.update":
             self.telemetry_updated.emit(payload)
         elif event_type == "orchestrator.finished":
-            self.response_finished.emit(payload.get("response", ""))
+            resp = payload.get("response", "")
+            if self.session_id and resp and self._loop:
+                msg = {"role": "assistant", "content": resp}
+                asyncio.run_coroutine_threadsafe(self.session_db.append_message(self.session_id, msg), self._loop)
+            self.response_finished.emit(resp)
         elif event_type.startswith("swarm."):
             self._on_swarm_event(event_type, payload)
 

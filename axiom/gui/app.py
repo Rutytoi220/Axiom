@@ -20,8 +20,10 @@ logger = logging.getLogger(__name__)
 def _load_stylesheet(app: "QApplication") -> None:  # type: ignore[name-defined]
     from axiom.config import get_config
     from PySide6.QtCore import Qt
+    from axiom.gui.config_manager import get_ui_config_manager
     config = get_config()
-    theme_mode = config.theme_mode.lower()
+    ui_config = get_ui_config_manager().load()
+    theme_mode = ui_config.theme.lower()
     
     is_dark = True
     if theme_mode == "light":
@@ -34,7 +36,9 @@ def _load_stylesheet(app: "QApplication") -> None:  # type: ignore[name-defined]
     qss_path = Path(__file__).parent / "styles" / theme_file
     
     if qss_path.exists():
-        app.setStyleSheet(qss_path.read_text(encoding="utf-8"))
+        qss_text = qss_path.read_text(encoding="utf-8")
+        qss_text = qss_text.replace("@ACCENT_COLOR@", ui_config.accent_color)
+        app.setStyleSheet(qss_text)
         logger.debug("Loaded QSS theme from %s", qss_path)
     else:
         logger.warning("Theme file not found: %s", qss_path)
@@ -193,10 +197,14 @@ def run_gui() -> None:
         tray = _build_tray(app, window)
         window.show()
 
-    # Check first launch
-    if getattr(config, "first_launch", True):
-        from axiom.gui.onboarding_window import OnboardingWindow
-        onboarding = OnboardingWindow(bridge, launch_main_hud)
+    # Check first launch via UI config
+    from axiom.gui.config_manager import get_ui_config_manager
+    ui_manager = get_ui_config_manager()
+    
+    if not ui_manager.exists():
+        from axiom.gui.windows.oobe_window import OOBEWindow
+        onboarding = OOBEWindow()
+        onboarding.initialization_complete.connect(launch_main_hud)
         # Keep reference to prevent GC
         app._onboarding = onboarding
         onboarding.show()
