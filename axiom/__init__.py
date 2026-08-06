@@ -28,7 +28,7 @@ from axiom.tool_registry import ToolRegistry, ToolRegistryError
 from axiom.plugins import BasePlugin, NXBTPlugin, AutomationPlugin
 from axiom.config import AxiomConfig, get_config, set_config
 
-__version__ = "1.0.0"
+__version__ = "8.2.0"
 __author__ = "AXIOM Team"
 __description__ = "Local-first AI orchestration framework"
 

@@ -12,7 +12,7 @@ argcomplete==3.6.3
 ast_serialize==0.6.0
 attrs==25.4.0
 av==18.0.0
--e git+ssh://git@github.com/Rutytoi220/Axiom.git@b9d63a0017c4d5d6ff0af160229dac92233b277a#egg=axiom_ai
+
 bcrypt==5.0.0
 beautifulsoup4==4.15.0
 boto3==1.43.50
@@ -24,7 +24,7 @@ cffi==2.0.0
 charset-normalizer==3.4.4
 chromadb==1.5.9
 click==8.4.2
-cockpit @ file:///builddir/build/BUILD/cockpit-364-build/cockpit-364/tmp/wheel/cockpit-364-py3-none-any.whl#sha256=82c79404b2528627fced2a7ebf481b040ddae5fe359114bcfa0b986e85b0ed79
+cockpit
 configobj==5.0.9
 coverage==7.14.0
 croniter==6.2.4
@@ -93,7 +93,7 @@ librt==0.13.0
 libvirt-python==12.0.0
 linkify-it-py==2.1.0
 litellm==1.93.0
--e git+ssh://git@github.com/Rutytoi220/Axiom.git@b9d63a0017c4d5d6ff0af160229dac92233b277a#egg=local_axiom_agent
+
 louis==3.33.0
 lutris==0.5.22
 lxml==6.1.1
@@ -217,12 +217,12 @@ s3transfer==0.19.1
 scikit-learn==1.9.0
 scipy==1.18.0
 SecretStorage==3.5.0
-selinux @ file:///builddir/build/BUILD/libselinux-3.10-build/libselinux-3.10/src
+selinux
 sentry-sdk==2.48.0
-sepolicy @ file:///builddir/build/BUILD/policycoreutils-3.10-build/selinux-3.10/python/sepolicy
+sepolicy
 setools==4.6.0
 setproctitle==1.3.7
-setroubleshoot @ file:///builddir/build/BUILD/setroubleshoot-3.3.36-build/setroubleshoot-3.3.36/src
+setroubleshoot
 setuptools==80.10.2
 shellingham==1.5.4
 shiboken6==6.11.1

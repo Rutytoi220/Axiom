@@ -68,6 +68,10 @@ Returns:
         self.memory_store = self.memory
         self.engine = Engine(memory=self.memory)
         self.tool_registry = ToolRegistry(self.engine.registry)
+        
+        # V8.4 Dynamic Plugin Loader
+        from axiom.tools.plugin_loader import load_plugins
+        load_plugins(self.tool_registry)
         self.mcp_hub = MCPClientManager(self.engine.registry)
         self.orchestrator = OrchestratorAgent(self.tool_registry, self.engine.event_bus, self.memory_store, llm=self.ollama)
         self._event_log = []

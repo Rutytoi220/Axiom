@@ -531,14 +531,17 @@ class MainWindow(QMainWindow):
 
     def _check_updates_async(self):
         import asyncio
-        from axiom.services.updater import AxiomUpdateManager
+        from axiom.updater.manager import UpdateManager
         
         async def _check():
-            mgr = AxiomUpdateManager()
+            mgr = UpdateManager()
             res = await mgr.check_for_updates()
             if res.get("update_available"):
                 self._status_updates.setText(f"[ Updates: {res['latest_version']} Available ]")
                 self._status_updates.setStyleSheet("font-weight: 600; color: #f38ba8; padding-right: 10px;")
+                # Prompt user on main thread
+                from PySide6.QtCore import QMetaObject, Q_ARG, Qt
+                QMetaObject.invokeMethod(self, "_prompt_update", Qt.ConnectionType.QueuedConnection, Q_ARG(str, res['latest_version']))
             else:
                 self._status_updates.setText("[ Updates: Up-to-Date ]")
                 self._status_updates.setStyleSheet("font-weight: 600; color: #a6e3a1; padding-right: 10px;")
@@ -548,6 +551,29 @@ class MainWindow(QMainWindow):
             asyncio.run_coroutine_threadsafe(_check(), loop)
         else:
             asyncio.run(_check())
+            
+    @Slot(str)
+    def _prompt_update(self, latest_version: str) -> None:
+        from PySide6.QtWidgets import QMessageBox
+        import subprocess
+        import sys
+        import os
+        
+        reply = QMessageBox.question(
+            self,
+            "Update Available",
+            f"Version {latest_version} is available. Update now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            # Launch update script detached
+            script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "scripts", "update.sh")
+            if os.path.exists(script_path):
+                subprocess.Popen(["bash", script_path], start_new_session=True)
+                sys.exit(0)
+            else:
+                QMessageBox.warning(self, "Error", f"Update script not found at {script_path}")
 
     def _update_memory_count(self) -> None:
         try:

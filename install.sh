@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════
-#  AXIOM Desktop v6.7 — Native Linux Installer
-#  Installs the systemd background daemon and GNOME/KDE launcher
+#  AXIOM Desktop v8.2 — Native Linux Installer
 # ═══════════════════════════════════════════════════════════════
 set -euo pipefail
 
@@ -22,89 +21,92 @@ error()   { echo -e "${RED}[FAIL]${NC}  $*"; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_DIR="${SCRIPT_DIR}/deploy"
 
-SYSTEMD_DIR="${HOME}/.config/systemd/user"
+CONFIG_DIR="${HOME}/.config/axiom"
+DATA_DIR="${HOME}/.local/share/axiom"
+VENV_DIR="${DATA_DIR}/venv"
 DESKTOP_DIR="${HOME}/.local/share/applications"
 ICON_DIR="${HOME}/.local/share/icons/hicolor/256x256/apps"
 
-SERVICE_SRC="${DEPLOY_DIR}/axiomd.service"
-DESKTOP_SRC="${DEPLOY_DIR}/Axiom.desktop"
 ICON_SRC="${SCRIPT_DIR}/axiom/gui/assets/logo.png"
 
 # ── Banner ──────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}${CYAN}"
 echo "  ╔═══════════════════════════════════════════════════════╗"
-echo "  ║          AXIOM Desktop v6.7 — Linux Installer         ║"
+echo "  ║          AXIOM Desktop v8.2 — Linux Installer         ║"
 echo "  ║       Local-First AI Orchestration for Linux          ║"
 echo "  ╚═══════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
-# ── Preflight Checks ───────────────────────────────────────────
 info "Running preflight checks..."
 
-if ! command -v systemctl &>/dev/null; then
-    error "systemctl not found. This installer requires systemd."
-    exit 1
-fi
-success "systemd detected."
-
-if ! command -v axiom &>/dev/null; then
-    warn "'axiom' command not found in PATH."
-    warn "Make sure the package is installed (pip install -e .) before enabling the service."
-fi
-
-if ! command -v axiom-gui &>/dev/null; then
-    warn "'axiom-gui' command not found in PATH."
-    warn "Install with: pip install -e '.[gui]'"
-fi
-
-# ── Step 1: Systemd User Service ───────────────────────────────
-echo ""
-info "Step 1/3: Installing systemd user service..."
-
-if [ ! -f "${SERVICE_SRC}" ]; then
-    error "Service file not found at ${SERVICE_SRC}"
+# Check Python version
+if ! command -v python3 &>/dev/null; then
+    error "python3 is not installed."
     exit 1
 fi
 
-mkdir -p "${SYSTEMD_DIR}"
-cp "${SERVICE_SRC}" "${SYSTEMD_DIR}/axiomd.service"
-success "Copied axiomd.service → ${SYSTEMD_DIR}/"
-
-systemctl --user daemon-reload
-success "systemd user daemon reloaded."
-
-systemctl --user enable axiomd.service 2>/dev/null || true
-success "axiomd.service enabled on login."
-
-systemctl --user start axiomd.service 2>/dev/null && \
-    success "axiomd.service started." || \
-    warn "Could not start axiomd.service now (will start on next login)."
-
-# ── Step 2: Desktop Entry ──────────────────────────────────────
-echo ""
-info "Step 2/3: Installing desktop entry..."
-
-if [ ! -f "${DESKTOP_SRC}" ]; then
-    error "Desktop file not found at ${DESKTOP_SRC}"
+if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'; then
+    error "Python 3.10 or higher is required."
     exit 1
 fi
+success "Python 3.10+ detected."
 
-mkdir -p "${DESKTOP_DIR}"
-cp "${DESKTOP_SRC}" "${DESKTOP_DIR}/Axiom.desktop"
-success "Copied Axiom.desktop → ${DESKTOP_DIR}/"
-
-# ── Step 3: Application Icon ──────────────────────────────────
+# ── Step 1: Directories & Virtual Environment ───────────────────
 echo ""
-info "Step 3/3: Installing application icon..."
+info "Step 1/3: Setting up virtual environment..."
 
+mkdir -p "${CONFIG_DIR}" "${DATA_DIR}"
+success "Created local directories."
+
+if [ ! -d "${VENV_DIR}" ]; then
+    python3 -m venv "${VENV_DIR}"
+    success "Created virtual environment at ${VENV_DIR}."
+else
+    info "Virtual environment already exists."
+fi
+
+info "Installing requirements..."
+"${VENV_DIR}/bin/pip" install --upgrade pip setuptools wheel
+"${VENV_DIR}/bin/pip" install -r "${SCRIPT_DIR}/requirements.txt"
+"${VENV_DIR}/bin/pip" install -e "${SCRIPT_DIR}"
+success "Dependencies installed."
+
+# ── Step 2: Application Icon ──────────────────────────────────
+echo ""
+info "Step 2/3: Installing application icon..."
+
+mkdir -p "${ICON_DIR}"
 if [ -f "${ICON_SRC}" ]; then
-    mkdir -p "${ICON_DIR}"
     cp "${ICON_SRC}" "${ICON_DIR}/axiom.png"
     success "Installed icon → ${ICON_DIR}/axiom.png"
+    ICON_DEST="${ICON_DIR}/axiom.png"
 else
-    warn "Icon not found at ${ICON_SRC}. The launcher will use a generic icon."
+    warn "Icon not found at ${ICON_SRC}. Will use generic icon."
+    ICON_DEST="utilities-terminal"
 fi
+
+# ── Step 3: Desktop Entry ──────────────────────────────────────
+echo ""
+info "Step 3/3: Installing desktop entry..."
+
+mkdir -p "${DESKTOP_DIR}"
+DESKTOP_SRC="${DEPLOY_DIR}/axiom.desktop.template"
+DESKTOP_DEST="${DESKTOP_DIR}/axiom.desktop"
+
+if [ ! -f "${DESKTOP_SRC}" ]; then
+    error "Desktop template not found at ${DESKTOP_SRC}"
+    exit 1
+fi
+
+EXEC_CMD="${VENV_DIR}/bin/python ${SCRIPT_DIR}/main.py --gui"
+
+sed -e "s|{{EXEC_PATH}}|${EXEC_CMD}|g" \
+    -e "s|{{ICON_PATH}}|${ICON_DEST}|g" \
+    "${DESKTOP_SRC}" > "${DESKTOP_DEST}"
+
+chmod +x "${DESKTOP_DEST}"
+success "Created Axiom.desktop → ${DESKTOP_DEST}"
 
 # ── Update Desktop Database ───────────────────────────────────
 if command -v update-desktop-database &>/dev/null; then
@@ -123,8 +125,7 @@ echo -e "${BOLD}${GREEN}"
 echo "  ╔═══════════════════════════════════════════════════════╗"
 echo "  ║            Installation Complete!                     ║"
 echo "  ╠═══════════════════════════════════════════════════════╣"
-echo "  ║  Daemon:   systemctl --user status axiomd            ║"
-echo "  ║  Logs:     journalctl --user -u axiomd -f            ║"
 echo "  ║  GUI:      Search 'AXIOM' in your app launcher       ║"
+echo "  ║  Binary:   ${VENV_DIR}/bin/python ${SCRIPT_DIR}/main.py"
 echo "  ╚═══════════════════════════════════════════════════════╝"
 echo -e "${NC}"

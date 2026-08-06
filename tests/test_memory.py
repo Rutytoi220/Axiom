@@ -6,6 +6,7 @@ import pytest
 import tempfile
 from pathlib import Path
 from datetime import datetime, timedelta
+from unittest.mock import patch, MagicMock, AsyncMock
 
 from axiom.memory import MemoryStore
 
@@ -744,3 +745,74 @@ class TestProtocolCompliance:
         from axiom.memory.protocol import MemoryBackend
 
         assert issubclass(MemoryStore, MemoryBackend)
+
+class TestLongTermMemory:
+    """Test ChromaDB Hippocampus integration."""
+
+    @pytest.mark.asyncio
+    @patch("chromadb.PersistentClient")
+    @patch("aiohttp.ClientSession.post")
+    async def test_hippocampus_store_memory(self, mock_post, mock_chromadb):
+        """Test storing memory uses the embedding correctly and calls ChromaDB upsert."""
+        from axiom.memory.vector_store import LongTermMemory
+        
+        # Mock ChromaDB client and collection
+        mock_client = MagicMock()
+        mock_collection = MagicMock()
+        mock_chromadb.return_value = mock_client
+        mock_client.get_or_create_collection.return_value = mock_collection
+        
+        # Mock aiohttp for Ollama embedding
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json.return_value = {"embedding": [0.1, 0.2, 0.3]}
+        mock_post.return_value.__aenter__.return_value = mock_response
+        
+        ltm = LongTermMemory(location="/tmp/mock_chroma")
+        
+        await ltm.store_memory("What is the meaning of life?", "42")
+        
+        # Verify collection.upsert was called
+        mock_collection.upsert.assert_called_once()
+        call_kwargs = mock_collection.upsert.call_args.kwargs
+        
+        assert "embeddings" in call_kwargs
+        assert call_kwargs["embeddings"] == [[0.1, 0.2, 0.3]]
+        
+        assert "metadatas" in call_kwargs
+        assert call_kwargs["metadatas"][0]["user_prompt"] == "What is the meaning of life?"
+        assert call_kwargs["metadatas"][0]["ai_response"] == "42"
+
+    @pytest.mark.asyncio
+    @patch("chromadb.PersistentClient")
+    @patch("aiohttp.ClientSession.post")
+    async def test_hippocampus_recall_memory(self, mock_post, mock_chromadb):
+        """Test recall memory formatting."""
+        from axiom.memory.vector_store import LongTermMemory
+        
+        # Mock ChromaDB client and collection
+        mock_client = MagicMock()
+        mock_collection = MagicMock()
+        mock_chromadb.return_value = mock_client
+        mock_client.get_or_create_collection.return_value = mock_collection
+        
+        # Set up a fake result from Chroma query
+        mock_collection.query.return_value = {
+            "ids": [["id1"]],
+            "metadatas": [[{"user_prompt": "What's up?", "ai_response": "Not much."}]],
+            "distances": [[0.1]]  # Very close distance
+        }
+        
+        # Mock embedding
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json.return_value = {"embedding": [0.1, 0.2, 0.3]}
+        mock_post.return_value.__aenter__.return_value = mock_response
+        
+        ltm = LongTermMemory(location="/tmp/mock_chroma")
+        
+        recalled = await ltm.recall_memory("What's up?")
+        
+        assert len(recalled) == 1
+        assert "- [Past Prompt]: What's up?" in recalled[0]
+        assert "[Past Response]: Not much." in recalled[0]
