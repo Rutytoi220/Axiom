@@ -38,8 +38,8 @@ from axiom.config import get_config, AuthMode
 from axiom.gui.widgets.chat_bubble import MessageBubble, ToolPill
 from axiom.gui.widgets.swarm_pill import SwarmPill
 from axiom.gui.widgets.settings_dialog import SettingsDialog
-from axiom.gui.widgets.scheduler_dialog import SchedulerDialog
-from axiom.services.scheduler_service import BackgroundSchedulerService
+from axiom.gui.widgets.scheduler_ui import TemporalSchedulerDialog
+from axiom.services.scheduler import TemporalService
 from axiom.services.sys_watchdog import SystemHealthWatchdog
 
 if TYPE_CHECKING:
@@ -87,6 +87,7 @@ class MainWindow(QMainWindow):
         self._active_swarm_pill: SwarmPill | None = None
         
         # Background services now run in the headless daemon
+        self._temporal_service = TemporalService(event_bus=self._bridge._event_bus if hasattr(self._bridge, '_event_bus') else None)
 
         self.setWindowTitle("AXIOM Desktop v6.0 LTS")
         self.setMinimumSize(400, 640)
@@ -109,15 +110,15 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        if hasattr(self, '_scheduler_service'):
-            self._scheduler_service.start()
+        if hasattr(self, '_temporal_service'):
+            self._temporal_service.start()
         if hasattr(self, '_sys_watchdog'):
             self._sys_watchdog.start()
 
     def closeEvent(self, event) -> None:
         """Handle window close."""
-        if hasattr(self, '_scheduler_service'):
-            self._scheduler_service.stop()
+        if hasattr(self, '_temporal_service'):
+            self._temporal_service.stop()
         if hasattr(self, '_sys_watchdog'):
             self._sys_watchdog.stop()
         if hasattr(self, '_wake_daemon') and self._wake_daemon:
@@ -280,6 +281,20 @@ class MainWindow(QMainWindow):
         """)
         self._plugin_btn.clicked.connect(self._open_plugin_dialog)
         h_layout.addWidget(self._plugin_btn)
+
+        # ---- Temporal Engine Button ----
+        self._temporal_btn = QPushButton("📅 Temporal Engine")
+        self._temporal_btn.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Fixed)
+        self._temporal_btn.setObjectName("temporalBtn")
+        self._temporal_btn.setStyleSheet("""
+            background-color: #fab387;
+            color: #11111b;
+            font-weight: bold;
+            border-radius: 4px;
+            padding: 5px 15px;
+        """)
+        self._temporal_btn.clicked.connect(self._open_temporal_dialog)
+        h_layout.addWidget(self._temporal_btn)
 
         _add_sep()
 
@@ -1051,6 +1066,11 @@ class MainWindow(QMainWindow):
             from axiom.core.events import EventBus
             self._scheduler_service = BackgroundSchedulerService(event_bus=EventBus())
         dlg = SchedulerDialog(self._scheduler_service, self)
+        dlg.exec()
+
+    def _open_temporal_dialog(self) -> None:
+        from axiom.gui.widgets.scheduler_ui import TemporalSchedulerDialog
+        dlg = TemporalSchedulerDialog(self)
         dlg.exec()
 
     def _open_iot_dialog(self) -> None:
