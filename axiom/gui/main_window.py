@@ -198,6 +198,7 @@ class MainWindow(QMainWindow):
             from axiom.services.hotkey_service import GlobalHotkeyService
             self._hotkey_service = GlobalHotkeyService()
             self._hotkey_service.signaler.toggle_requested.connect(self._toggle_visibility)
+            self._hotkey_service.signaler.context_summoned.connect(self._on_context_summoned)
             self._hotkey_service.start()
         except ImportError:
             logger.error("pynput not found. Global hotkey disabled.")
@@ -211,8 +212,29 @@ class MainWindow(QMainWindow):
             self.activateWindow()
             self.raise_()
             # Try to focus chat input
-            if hasattr(self, '_input_edit'):
-                self._input_edit.setFocus()
+            if hasattr(self, '_input'):
+                self._input.setFocus()
+                
+    @Slot()
+    def _on_context_summoned(self) -> None:
+        """Fetch clipboard, inject into prompt, and summon."""
+        from axiom.services.clipboard_service import ClipboardService
+        clipboard_text = ClipboardService.get_text()
+        
+        if clipboard_text:
+            injection = f"\n```\n{clipboard_text}\n```\n"
+            self._input.setText(injection)
+            
+            # Move cursor to the beginning
+            cursor = self._input.textCursor()
+            cursor.setPosition(0)
+            self._input.setTextCursor(cursor)
+            
+        self.show()
+        self.activateWindow()
+        self.raise_()
+        if hasattr(self, '_input'):
+            self._input.setFocus()
 
     # ------------------------------------------------------------------
     # UI construction
