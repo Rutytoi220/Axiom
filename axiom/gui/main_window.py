@@ -99,6 +99,7 @@ class MainWindow(QMainWindow):
         self._build_toolbar()
         self._build_central_widget()
         self._build_expert_dock()
+        self._build_synapse_dock()
         self._build_sidebar()
         self._build_bottom_bar()
         self._build_status_bar()
@@ -467,6 +468,17 @@ class MainWindow(QMainWindow):
         from PySide6.QtCore import QTimer
         QTimer.singleShot(1000, self._sidebar.load_sessions)
 
+    def _build_synapse_dock(self) -> None:
+        """Dock for Synapse Visualizer."""
+        self._synapse_dock = QDockWidget("Synapse Visualizer", self)
+        self._synapse_dock.setObjectName("synapseDock")
+        self._synapse_dock.setAllowedAreas(Qt.DockWidgetArea.RightDockWidgetArea)
+        self._synapse_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable | QDockWidget.DockWidgetFeature.DockWidgetMovable)
+        self._synapse_dock.setMinimumWidth(320)
+        self._synapse_graph = SynapseGraph(self._synapse_dock)
+        self._synapse_dock.setWidget(self._synapse_graph)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._synapse_dock)
+
     def _build_expert_dock(self) -> None:
         """Hidden right dock panel for system telemetry & expert logs."""
         self._dock = QDockWidget("System Telemetry & Swarm Logs", self)
@@ -758,6 +770,7 @@ class MainWindow(QMainWindow):
         self._bridge.swarm_agent_started.connect(self._on_swarm_started)
         self._bridge.swarm_agent_token.connect(self._on_swarm_token)
         self._bridge.swarm_agent_completed.connect(self._on_swarm_completed)
+        self._bridge.synapse_event.connect(self._synapse_graph.handle_telemetry)
 
         # Daemon Connection
         self._bridge.connection_status_changed.connect(self._on_daemon_connection_changed)

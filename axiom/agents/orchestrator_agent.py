@@ -119,7 +119,18 @@ Args:
 Returns:
     Return value.
 """
-        self._agents[agent.name] = agent
+        if agent.name not in self._agents:
+            self._agents[agent.name] = agent
+
+    def _emit_synapse_event(self, event_type: str, data: dict):
+        """Helper to emit synapse telemetry over the EventBus."""
+        bus = getattr(self, '_bus', None) or getattr(self, 'bus', None)
+        if bus:
+            from axiom.core.events import Event
+            try:
+                bus.publish(Event(event_type=f'synapse.{event_type}', source='OrchestratorAgent', data=data))
+            except Exception:
+                pass
         if self.registry is not None and hasattr(self.registry, 'register_agent'):
             self.registry.register_agent(f'agent.{agent.name}', agent)
 
@@ -492,6 +503,7 @@ Returns:
                     if content_str:
                         accumulated_response += content_str + '\n\n'
                 if tool_calls and use_tools:
+                    self._emit_synapse_event('agent_thought', {'thought': str(content) if content else "Evaluating tool call..."})
                     self._persist_step(session_id, 'reasoning', response_msg)
                     state = AgentState.ACT
                     pending_calls = tool_calls
@@ -512,6 +524,7 @@ Returns:
                         if retry_message is not None:
                             self._persist_step(session_id, 'reasoning', retry_message)
                     else:
+                        self._emit_synapse_event('agent_thought', {'thought': final_response})
                         self._persist_step(session_id, 'reasoning', response_msg)
                     state = AgentState.EXIT
             elif state == AgentState.ACT:
@@ -579,7 +592,9 @@ Returns:
                     else:
                         executed_tool_ids_this_round.add(sig)
                         executed_signatures.add(dedup_sig)
+                        self._emit_synapse_event('tool_call_started', {'tool': tool_name, 'args': arguments})
                         result = self._execute_tool(tool_name, arguments)
+                        self._emit_synapse_event('tool_call_completed', {'tool': tool_name, 'success': result.get('success')})
                     observations.append(result)
                     self._persist_step(session_id, 'tool_result', result)
                     self._log(f"ACT {tool_name}: success={result.get('success')}", steps)
