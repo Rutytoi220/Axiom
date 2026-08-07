@@ -54,7 +54,7 @@ success "Python 3.10+ detected."
 
 # ── Step 1: Directories & Virtual Environment ───────────────────
 echo ""
-info "Step 1/3: Setting up virtual environment..."
+info "${BOLD}Step 1/3: Setting up virtual environment...${NC}"
 
 mkdir -p "${CONFIG_DIR}" "${DATA_DIR}"
 success "Created local directories."
@@ -74,7 +74,7 @@ success "Dependencies installed."
 
 # ── Step 2: Application Icon ──────────────────────────────────
 echo ""
-info "Step 2/3: Installing application icon..."
+info "${BOLD}Step 2/3: Installing application icon...${NC}"
 
 mkdir -p "${ICON_DIR}"
 if [ -f "${ICON_SRC}" ]; then
@@ -88,7 +88,7 @@ fi
 
 # ── Step 3: Desktop Entry ──────────────────────────────────────
 echo ""
-info "Step 3/3: Installing desktop entry..."
+info "${BOLD}Step 3/3: Installing desktop entry...${NC}"
 
 mkdir -p "${DESKTOP_DIR}"
 DESKTOP_SRC="${DEPLOY_DIR}/axiom.desktop.template"
@@ -99,7 +99,7 @@ if [ ! -f "${DESKTOP_SRC}" ]; then
     exit 1
 fi
 
-EXEC_CMD="${VENV_DIR}/bin/python ${SCRIPT_DIR}/main.py --gui"
+EXEC_CMD="${SCRIPT_DIR}/scripts/launch.sh --gui"
 
 sed -e "s|{{EXEC_PATH}}|${EXEC_CMD}|g" \
     -e "s|{{ICON_PATH}}|${ICON_DEST}|g" \
@@ -126,6 +126,6 @@ echo "  ╔═══════════════════════
 echo "  ║            Installation Complete!                     ║"
 echo "  ╠═══════════════════════════════════════════════════════╣"
 echo "  ║  GUI:      Search 'AXIOM' in your app launcher       ║"
-echo "  ║  Binary:   ${VENV_DIR}/bin/python ${SCRIPT_DIR}/main.py"
+echo "  ║  Binary:   ${SCRIPT_DIR}/scripts/launch.sh"
 echo "  ╚═══════════════════════════════════════════════════════╝"
 echo -e "${NC}"
