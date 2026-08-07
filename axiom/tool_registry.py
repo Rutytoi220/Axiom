@@ -199,6 +199,11 @@ Returns:
         try:
             return tool(**arguments)
         except Exception as exc:
+            import traceback
+            import logging
+            tb = traceback.format_exc()
+            if "axiom/dynamic_plugins" in tb or ".config/axiom/plugins" in tb:
+                logging.getLogger("axiom.plugin_crash").error(tb)
             return ToolResult(success=False, error=str(exc))
 
     async def execute_async(self, tool_id: str, **arguments: Any) -> ToolResult:
@@ -230,4 +235,9 @@ Returns:
                 return await result
             return result
         except Exception as exc:
+            import traceback
+            import logging
+            tb = traceback.format_exc()
+            if "axiom/dynamic_plugins" in tb or ".config/axiom/plugins" in tb:
+                logging.getLogger("axiom.plugin_crash").error(tb)
             return ToolResult(success=False, error=str(exc))
