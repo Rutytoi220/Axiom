@@ -779,6 +779,7 @@ class MainWindow(QMainWindow):
         self._bridge.synapse_event.connect(self._synapse_graph.handle_telemetry)
         self._bridge.axiomfs_status.connect(self._on_axiomfs_status)
         self._bridge.governor_approval_requested.connect(self._on_approval_requested)
+        self._bridge.ui_widget_generated.connect(self._on_widget_generated)
 
         # Daemon Connection
         self._bridge.connection_status_changed.connect(self._on_daemon_connection_changed)
@@ -1126,6 +1127,19 @@ class MainWindow(QMainWindow):
         self._bridge.set_strict_mode(is_strict)
 
     @Slot(str, dict)
+    @Slot(dict)
+    def _on_widget_generated(self, payload: dict) -> None:
+        widget_type = payload.get('widget_type', 'unknown')
+        spec = payload.get('spec', {})
+        try:
+            from axiom.gui.widgets.sandbox_container import SandboxContainer
+            sandbox = SandboxContainer(widget_type, spec, self)
+            count = self._chat_layout.count()
+            self._chat_layout.insertWidget(count - 1, sandbox)
+            self._scroll_to_bottom()
+        except Exception as e:
+            print(f'Failed to render widget: {e}')
+
     def _on_approval_requested(self, tool_name: str, arguments: dict) -> None:
         from axiom.gui.widgets.governor_dialog import ExecutionGateDialog
         dlg = ExecutionGateDialog(tool_name, arguments, self)

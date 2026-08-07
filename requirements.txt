@@ -268,3 +268,4 @@ yubikey-manager==5.9.2
 zipp==4.1.0
 pynput>=1.7.6
 watchdog>=4.0.0
+PySide6-WebEngine>=6.6.0

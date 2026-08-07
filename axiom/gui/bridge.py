@@ -57,6 +57,7 @@ class AxiomBridge(QObject):
     synapse_event: Signal = Signal(object)
     axiomfs_status: Signal = Signal(str)
     governor_approval_requested: Signal = Signal(str, dict)
+    ui_widget_generated: Signal = Signal(dict)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -261,6 +262,8 @@ class AxiomBridge(QObject):
                     self.event_type = t
                     self.data = d
             self.synapse_event.emit(_Evt(event_type, payload))
+        elif event_type == "ui.widget_generated":
+            self.ui_widget_generated.emit(payload)
         elif event_type == "governor.approval_requested":
             self.governor_approval_requested.emit(payload.get("tool_name", ""), payload.get("arguments", {}))
         elif event_type == "axiomfs.status":
