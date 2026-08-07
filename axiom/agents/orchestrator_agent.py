@@ -583,6 +583,19 @@ Returns:
                     observations.append(result)
                     self._persist_step(session_id, 'tool_result', result)
                     self._log(f"ACT {tool_name}: success={result.get('success')}", steps)
+                    
+                # [NEW] Active Perception Context Scrubber
+                # Strip raw base64 screenshots from OLD observations to prevent token overflow
+                if len(observations) > 1:
+                    import re
+                    for obs in observations[:-1]:
+                        if isinstance(obs, dict):
+                            out = obs.get('output')
+                            if isinstance(out, str):
+                                obs['output'] = re.sub(r'!\[.*?\]\(data:image/[a-zA-Z]+;base64,[a-zA-Z0-9+/=]+\)', '[SCREENSHOT OMITTED FOR CONTEXT SAFETY]', out)
+                            elif isinstance(out, dict) and 'content' in out and isinstance(out['content'], str):
+                                out['content'] = re.sub(r'!\[.*?\]\(data:image/[a-zA-Z]+;base64,[a-zA-Z0-9+/=]+\)', '[SCREENSHOT OMITTED FOR CONTEXT SAFETY]', out['content'])
+                                
                 state = AgentState.OBSERVE
             elif state == AgentState.OBSERVE:
                 self._log('OBSERVE: incorporated latest tool results', steps)
@@ -730,7 +743,7 @@ Returns:
         if intent == 'chat':
             base_prompt = system_persona + ' Be concise, helpful, and conversational. Do not list your tools unless explicitly asked.'
         else:
-            base_prompt = (DIRECT_ACTION_MODE_GUARD + '\n\n' if tools_loaded else '') + system_persona + "\n1. Your sole purpose is to execute requested tasks using the provided tools.\n2. NEVER output your internal reasoning, thought process, or status logs in the Final Answer.\n3. If a tool call is required, invoke it natively and silently. DO NOT output raw JSON blocks in your text response.\n4. If no tool is required, provide ONLY the direct response to the user.\n5. If you must plan, keep it in an internal-only scratchpad (if implemented), but do not send it to the user interface.\n6. You MUST invoke tools using the native structured tool-call API whenever possible. If outputting text tool calls, strictly use registered tool names.\n7. CRITICAL RULE: You are strictly FORBIDDEN from claiming to have performed an action (opening a file, reading a document, executing a script) unless you have actually emitted a tool call and received the verified [System Observation]. DO NOT roleplay, simulate, or hallucinate tool execution in conversational prose. If a tool is not available, state explicitly that you cannot perform the action.\n8. CRITICAL Temporal Rule: You must respond ONLY to the user's latest (most recent) message at the very bottom of the prompt. Use older conversation history solely for context and reference. NEVER ignore the latest prompt to answer old, ignored, or previously addressed questions from earlier turns.\nCONSTRAINTS:\n- NO verbose planning logs.\n- STRIKE the 'Final Answer:' header from your output; just provide the content.\n9. [MULTIMODAL PERCEPTION] If the user refers to 'this window', 'my screen', 'look at this', or asks to diagnose a visual issue, you MUST use the 'screen_capture' tool."
+            base_prompt = (DIRECT_ACTION_MODE_GUARD + '\n\n' if tools_loaded else '') + system_persona + "\n1. Your sole purpose is to execute requested tasks using the provided tools.\n2. NEVER output your internal reasoning, thought process, or status logs in the Final Answer.\n3. If a tool call is required, invoke it natively and silently. DO NOT output raw JSON blocks in your text response.\n4. If no tool is required, provide ONLY the direct response to the user.\n5. If you must plan, keep it in an internal-only scratchpad (if implemented), but do not send it to the user interface.\n6. You MUST invoke tools using the native structured tool-call API whenever possible. If outputting text tool calls, strictly use registered tool names.\n7. CRITICAL RULE: You are strictly FORBIDDEN from claiming to have performed an action (opening a file, reading a document, executing a script) unless you have actually emitted a tool call and received the verified [System Observation]. DO NOT roleplay, simulate, or hallucinate tool execution in conversational prose. If a tool is not available, state explicitly that you cannot perform the action.\n8. CRITICAL Temporal Rule: You must respond ONLY to the user's latest (most recent) message at the very bottom of the prompt. Use older conversation history solely for context and reference. NEVER ignore the latest prompt to answer old, ignored, or previously addressed questions from earlier turns.\nCONSTRAINTS:\n- NO verbose planning logs.\n- STRIKE the 'Final Answer:' header from your output; just provide the content.\n9. [MULTIMODAL PERCEPTION] If the user refers to 'this window', 'my screen', 'look at this', or asks to diagnose a visual issue, you MUST use the 'screen_capture' tool.\n10. [MOTOR CORTEX AUTOMATION] If the user asks you to interact with the desktop, click a button, read an error, or answer a question about their current screen, you MUST first use the 'capture_screen' tool to look at the screen. Only after you have observed the screen may you use motor tools like 'mouse_click' or 'keyboard_type'."
             base_prompt += (
                 "\n\nCRITICAL OPERATIONAL RULE: You are an autonomous AI Operating System, NOT a conversational chatbot or a tutorial assistant. "
                 "When a task requires finding a file, executing a script, checking system status, or modifying code, YOU MUST EXECUTE THE TOOL CALLS DIRECTLY via the JSON tool schema.\n"

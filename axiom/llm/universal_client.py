@@ -44,7 +44,22 @@ Returns:
 
     def _execute_completion(self, model: str, messages: List[Dict[str, Any]], **kwargs) -> Any:
         """Auto-generated docstring."""
+        import re
         images = kwargs.pop('images', None)
+        
+        # [NEW] Extract inline markdown base64 images from user prompt
+        for msg in reversed(messages):
+            if msg.get('role') == 'user' and isinstance(msg.get('content'), str):
+                content = msg['content']
+                # Search for ![...](data:image/...;base64,...)
+                matches = re.findall(r'!\[.*?\]\((data:image/[a-zA-Z]+;base64,[a-zA-Z0-9+/=]+)\)', content)
+                if matches:
+                    if images is None:
+                        images = []
+                    images.extend(matches)
+                    msg['content'] = re.sub(r'!\[.*?\]\((data:image/[a-zA-Z]+;base64,[a-zA-Z0-9+/=]+)\)', '', content).strip()
+                break
+                
         if images:
             for msg in reversed(messages):
                 if msg.get('role') == 'user':

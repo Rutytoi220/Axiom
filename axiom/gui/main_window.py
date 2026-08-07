@@ -199,6 +199,7 @@ class MainWindow(QMainWindow):
             self._hotkey_service = GlobalHotkeyService()
             self._hotkey_service.signaler.toggle_requested.connect(self._toggle_visibility)
             self._hotkey_service.signaler.context_summoned.connect(self._on_context_summoned)
+            self._hotkey_service.signaler.vision_summoned.connect(self._on_vision_summoned)
             self._hotkey_service.start()
         except ImportError:
             logger.error("pynput not found. Global hotkey disabled.")
@@ -229,6 +230,27 @@ class MainWindow(QMainWindow):
             cursor = self._input.textCursor()
             cursor.setPosition(0)
             self._input.setTextCursor(cursor)
+            
+        self.show()
+        self.activateWindow()
+        self.raise_()
+        if hasattr(self, '_input'):
+            self._input.setFocus()
+            
+    @Slot()
+    def _on_vision_summoned(self) -> None:
+        """Capture screen, preview it, and summon."""
+        from axiom.services.vision_service import VisionService
+        import os
+        from PySide6.QtGui import QPixmap
+        
+        path = VisionService.capture_screen()
+        if path and os.path.exists(path):
+            self._current_attachment = path
+            pixmap = QPixmap(path)
+            scaled = pixmap.scaledToHeight(100, Qt.TransformationMode.SmoothTransformation)
+            self._attachment_preview.setPixmap(scaled)
+            self._attachment_preview.show()
             
         self.show()
         self.activateWindow()
@@ -526,12 +548,23 @@ class MainWindow(QMainWindow):
             self._mic_btn.clicked.connect(self._on_mic_toggled)
             bar_layout.addWidget(self._mic_btn, 0, Qt.AlignmentFlag.AlignBottom)
 
+        self._input_container = QWidget()
+        self._input_layout = QVBoxLayout(self._input_container)
+        self._input_layout.setContentsMargins(0, 0, 0, 0)
+        self._input_layout.setSpacing(5)
+
+        self._attachment_preview = QLabel()
+        self._attachment_preview.hide()
+        self._input_layout.addWidget(self._attachment_preview)
+
         self._input = ChatInputEdit()
         self._input.setObjectName("chatInput")
         self._input.setPlaceholderText("Ask AXIOM anything… (Enter to send, Shift+Enter for new line)")
         self._input.setMaximumHeight(130)
         self._input.setMinimumHeight(60)
-        bar_layout.addWidget(self._input)
+        self._input_layout.addWidget(self._input)
+        
+        bar_layout.addWidget(self._input_container)
 
         send_btn = QPushButton("Send ↑")
         send_btn.setObjectName("sendBtn")
@@ -797,10 +830,28 @@ class MainWindow(QMainWindow):
     @Slot()
     def _on_send(self) -> None:
         text = self._input.toPlainText().strip()
-        if not text:
+        display_text = text
+        has_attachment = hasattr(self, '_current_attachment') and self._current_attachment
+        
+        if not text and not has_attachment:
             return
+            
+        if has_attachment:
+            import base64
+            try:
+                with open(self._current_attachment, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
+                text += f"\n\n![screenshot](data:image/png;base64,{b64})"
+                display_text = f"{display_text}\n\n*[Attached Screen Capture]*" if display_text else "*[Attached Screen Capture]*"
+            except Exception as e:
+                logger.error(f"Failed to read attachment: {e}")
+            
+            self._attachment_preview.hide()
+            self._current_attachment = None
+            
         self._input.clear()
-        self._add_bubble("user", text)
+        self._add_bubble("user", display_text.strip())
+        
         # Start a new streaming assistant bubble
         self._streaming_text = ""
         self._streaming_bubble = self._add_bubble("assistant", "")

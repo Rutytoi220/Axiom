@@ -9,13 +9,15 @@ class HotkeySignaler(QObject):
     """QObject to bridge pynput events to the main Qt thread safely."""
     toggle_requested = Signal()
     context_summoned = Signal()
+    vision_summoned = Signal()
 
 class GlobalHotkeyService:
     """Listens for a global hotkey and emits a Qt Signal."""
 
-    def __init__(self, hotkey: str = '<ctrl>+<alt>+<space>', context_hotkey: str = '<ctrl>+<alt>+c'):
+    def __init__(self, hotkey: str = '<ctrl>+<alt>+<space>', context_hotkey: str = '<ctrl>+<alt>+c', vision_hotkey: str = '<ctrl>+<alt>+v'):
         self.hotkey = hotkey
         self.context_hotkey = context_hotkey
+        self.vision_hotkey = vision_hotkey
         self.signaler = HotkeySignaler()
         self._listener = None
         self._running = False
@@ -35,13 +37,18 @@ class GlobalHotkeyService:
         def on_context_activate():
             logger.info("Context hotkey activated.")
             self.signaler.context_summoned.emit()
+            
+        def on_vision_activate():
+            logger.info("Vision hotkey activated.")
+            self.signaler.vision_summoned.emit()
 
         def _run_listener():
             logger.info(f"Starting global hotkey listener for: {self.hotkey}")
             try:
                 self._listener = keyboard.GlobalHotKeys({
                     self.hotkey: on_activate,
-                    self.context_hotkey: on_context_activate
+                    self.context_hotkey: on_context_activate,
+                    self.vision_hotkey: on_vision_activate
                 })
                 self._listener.start()
                 self._listener.join()
