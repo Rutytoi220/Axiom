@@ -32,6 +32,9 @@ from PySide6.QtWidgets import (
     QToolButton,
     QVBoxLayout,
     QWidget,
+    QSystemTrayIcon,
+    QMenu,
+    QApplication,
 )
 
 from axiom.config import get_config, AuthMode
@@ -106,7 +109,8 @@ class MainWindow(QMainWindow):
         # Initial Welcome Message
         self._add_bubble("assistant", "⚡ AXIOM Desktop v6.0 LTS Online — Select a mode above or type a prompt below to begin.")
         
-        # Defer the first update slightly to avoid import loops if any
+        self._init_tray()
+        self._init_hotkey()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -117,13 +121,26 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         """Handle window close."""
+        if event.spontaneous():
+            event.ignore()
+            self.hide()
+            logger.info("Window hidden to system tray.")
+        else:
+            super().closeEvent(event)
+            
+    def force_quit(self) -> None:
+        """Actually shut down the application."""
         if hasattr(self, '_temporal_service'):
             self._temporal_service.stop()
         if hasattr(self, '_sys_watchdog'):
             self._sys_watchdog.stop()
         if hasattr(self, '_wake_daemon') and self._wake_daemon:
             self._wake_daemon.stop()
-        super().closeEvent(event)
+        if hasattr(self, '_hotkey_service'):
+            self._hotkey_service.stop()
+            
+        logger.info("AXIOM shutting down gracefully.")
+        QApplication.quit()
 
     def _init_audio(self) -> None:
         from axiom.gui.config_manager import get_ui_config_manager
@@ -152,6 +169,50 @@ class MainWindow(QMainWindow):
                 self._wake_daemon.start()
         except Exception as e:
             logger.error(f"STT init failed: {e}")
+
+    def _init_tray(self) -> None:
+        self.tray_icon = QSystemTrayIcon(self)
+        # Using a default Qt icon for the tray
+        icon = self.style().standardIcon(self.style().StandardPixmap.SP_ComputerIcon)
+        self.tray_icon.setIcon(icon)
+        
+        tray_menu = QMenu()
+        
+        toggle_action = QAction("Show/Hide AXIOM", self)
+        toggle_action.triggered.connect(self._toggle_visibility)
+        tray_menu.addAction(toggle_action)
+        
+        settings_action = QAction("Settings", self)
+        settings_action.triggered.connect(self._open_settings)
+        tray_menu.addAction(settings_action)
+        
+        quit_action = QAction("Quit AXIOM", self)
+        quit_action.triggered.connect(self.force_quit)
+        tray_menu.addAction(quit_action)
+        
+        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.show()
+        
+    def _init_hotkey(self) -> None:
+        try:
+            from axiom.services.hotkey_service import GlobalHotkeyService
+            self._hotkey_service = GlobalHotkeyService()
+            self._hotkey_service.signaler.toggle_requested.connect(self._toggle_visibility)
+            self._hotkey_service.start()
+        except ImportError:
+            logger.error("pynput not found. Global hotkey disabled.")
+            
+    @Slot()
+    def _toggle_visibility(self) -> None:
+        if self.isVisible() and self.isActiveWindow():
+            self.hide()
+        else:
+            self.show()
+            self.activateWindow()
+            self.raise_()
+            # Try to focus chat input
+            if hasattr(self, '_input_edit'):
+                self._input_edit.setFocus()
 
     # ------------------------------------------------------------------
     # UI construction
