@@ -10,7 +10,7 @@ from axiom.memory import SyncMemoryStore
 from axiom.llm.universal_client import UniversalLLMClient
 from axiom.agents.orchestrator_agent import OrchestratorAgent
 from axiom.tool_registry import ToolRegistry
-from axiom.engine.mcp_client import MCPClientManager
+from axiom.mcp.bridge import MCPBridgeManager
 from axiom.tools import EchoTool, ShellTool, FileReadTool, FileWriteTool, SystemInfoTool
 from axiom.legacy_wrapper import create_legacy_tools
 from axiom.plugins import NXBTPlugin, AutomationPlugin
@@ -72,7 +72,8 @@ Returns:
         # V8.4 Dynamic Plugin Loader
         from axiom.tools.plugin_loader import load_plugins
         load_plugins(self.tool_registry)
-        self.mcp_hub = MCPClientManager(self.engine.registry)
+        self.mcp_hub = MCPBridgeManager(self.engine.registry)
+        self.mcp_hub.start()
         self.orchestrator = OrchestratorAgent(self.tool_registry, self.engine.event_bus, self.memory_store, llm=self.ollama)
         self._event_log = []
         self._closed = False
