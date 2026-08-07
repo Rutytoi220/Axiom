@@ -598,6 +598,8 @@ class MainWindow(QMainWindow):
         self.setStatusBar(sb)
         self._status_mode = QLabel()
         self._status_memory = QLabel("🧠 Memory: Active (0 Chunks)")
+        self._status_axiomfs = QLabel("AxiomFS: Offline")
+        self._status_axiomfs.setStyleSheet("color: #a6e3a1; font-weight: bold;")
         self._status_model = QLabel()
         
         self.governor_btn = QPushButton("⚡ Governor: Active (60 FPS)")
@@ -771,11 +773,16 @@ class MainWindow(QMainWindow):
         self._bridge.swarm_agent_token.connect(self._on_swarm_token)
         self._bridge.swarm_agent_completed.connect(self._on_swarm_completed)
         self._bridge.synapse_event.connect(self._synapse_graph.handle_telemetry)
+        self._bridge.axiomfs_status.connect(self._on_axiomfs_status)
 
         # Daemon Connection
         self._bridge.connection_status_changed.connect(self._on_daemon_connection_changed)
 
     @Slot(str)
+    @Slot(str)
+    def _on_axiomfs_status(self, status: str) -> None:
+        self._status_axiomfs.setText(f"AxiomFS: {status}")
+
     def _on_daemon_connection_changed(self, state: str) -> None:
         if state == 'connected':
             self._status_daemon.setText("⚡ Daemon: Connected")

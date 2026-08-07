@@ -55,6 +55,7 @@ class AxiomBridge(QObject):
     connection_status_changed: Signal = Signal(str)
     tools_received: Signal = Signal(list)
     synapse_event: Signal = Signal(object)
+    axiomfs_status: Signal = Signal(str)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -245,6 +246,8 @@ class AxiomBridge(QObject):
                     self.event_type = t
                     self.data = d
             self.synapse_event.emit(_Evt(event_type, payload))
+        elif event_type == "axiomfs.status":
+            self.axiomfs_status.emit(payload.get("status", "Unknown"))
         elif event_type.startswith("swarm."):
             self._on_swarm_event(event_type, payload)
 
