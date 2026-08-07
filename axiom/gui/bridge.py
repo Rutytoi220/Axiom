@@ -56,6 +56,7 @@ class AxiomBridge(QObject):
     tools_received: Signal = Signal(list)
     synapse_event: Signal = Signal(object)
     axiomfs_status: Signal = Signal(str)
+    governor_approval_requested: Signal = Signal(str, dict)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -207,6 +208,20 @@ class AxiomBridge(QObject):
         asyncio.run_coroutine_threadsafe(self._client.toggle_tool(tool_id, enabled), self._loop)
 
     # ------------------------------------------------------------------
+    def send_approval_response(self, tool_name: str, approved: bool) -> None:
+        if self._loop is None or not self._client.is_connected:
+            return
+        event = {"type": "publish", "event": {"event_type": "governor.approval_response", "source": "gui", "data": {"tool_name": tool_name, "approved": approved}}}
+        import json, asyncio
+        asyncio.run_coroutine_threadsafe(self._client.websocket.send(json.dumps(event)), self._loop)
+
+    def set_strict_mode(self, enabled: bool) -> None:
+        if self._loop is None or not self._client.is_connected:
+            return
+        event = {"type": "publish", "event": {"event_type": "governor.set_strict_mode", "source": "gui", "data": {"enabled": enabled}}}
+        import json, asyncio
+        asyncio.run_coroutine_threadsafe(self._client.websocket.send(json.dumps(event)), self._loop)
+
     # Internal async task runner
     # ------------------------------------------------------------------
 
@@ -246,6 +261,8 @@ class AxiomBridge(QObject):
                     self.event_type = t
                     self.data = d
             self.synapse_event.emit(_Evt(event_type, payload))
+        elif event_type == "governor.approval_requested":
+            self.governor_approval_requested.emit(payload.get("tool_name", ""), payload.get("arguments", {}))
         elif event_type == "axiomfs.status":
             self.axiomfs_status.emit(payload.get("status", "Unknown"))
         elif event_type.startswith("swarm."):

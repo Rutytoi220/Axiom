@@ -604,7 +604,11 @@ class MainWindow(QMainWindow):
         
         self.governor_btn = QPushButton("⚡ Governor: Active (60 FPS)")
         self.governor_btn.setStyleSheet("border: none; color: #f9e2af; font-weight: bold;")
-        self.governor_btn.clicked.connect(self._open_governor_dialog)
+        self.governor_btn.setCheckable(True)
+        self.governor_btn.setChecked(False)
+        self.governor_btn.setText("⚡ Governor: Inactive")
+        self.governor_btn.setStyleSheet("border: none; color: #a6adc8; font-weight: bold;")
+        self.governor_btn.clicked.connect(self._toggle_strict_mode)
 
         self._thermal_label = QLabel("🌡️ Thermal: Normal (64°C)")
         self._thermal_label.setStyleSheet("color: #a6e3a1; font-weight: bold;")
@@ -774,6 +778,7 @@ class MainWindow(QMainWindow):
         self._bridge.swarm_agent_completed.connect(self._on_swarm_completed)
         self._bridge.synapse_event.connect(self._synapse_graph.handle_telemetry)
         self._bridge.axiomfs_status.connect(self._on_axiomfs_status)
+        self._bridge.governor_approval_requested.connect(self._on_approval_requested)
 
         # Daemon Connection
         self._bridge.connection_status_changed.connect(self._on_daemon_connection_changed)
@@ -1110,9 +1115,24 @@ class MainWindow(QMainWindow):
         dlg = SecurityDashboardDialog(self)
         dlg.exec()
         
+    def _toggle_strict_mode(self) -> None:
+        is_strict = self.governor_btn.isChecked()
+        if is_strict:
+            self.governor_btn.setText("⚡ Governor: Active")
+            self.governor_btn.setStyleSheet("border: none; color: #f9e2af; font-weight: bold;")
+        else:
+            self.governor_btn.setText("⚡ Governor: Inactive")
+            self.governor_btn.setStyleSheet("border: none; color: #a6adc8; font-weight: bold;")
+        self._bridge.set_strict_mode(is_strict)
+
+    @Slot(str, dict)
+    def _on_approval_requested(self, tool_name: str, arguments: dict) -> None:
+        from axiom.gui.widgets.governor_dialog import ExecutionGateDialog
+        dlg = ExecutionGateDialog(tool_name, arguments, self)
+        approved = dlg.exec_() == QDialog.Accepted
+        self._bridge.send_approval_response(tool_name, approved)
+
     def _open_governor_dialog(self) -> None:
-        from axiom.gui.widgets.governor_dialog import GovernorDialog
-        dlg = GovernorDialog(self)
         dlg.exec()
         
     def _open_kernel_dialog(self) -> None:

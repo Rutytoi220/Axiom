@@ -192,6 +192,14 @@ Returns:
         if tool is None:
             return ToolResult(success=False, error=f'Tool not found: {tool_id}')
         
+        if getattr(tool, 'requires_approval', False):
+            try:
+                from axiom.services.governor import GovernorService
+                governor = GovernorService.instance()
+                if governor and governor.is_strict_mode():
+                    return ToolResult(success=False, error="This tool requires approval, but was invoked synchronously. Governor gates are only supported in async mode.")
+            except Exception:
+                pass
         val_error = self._pre_validate_path(tool.tool_id, arguments)
         if val_error:
             return val_error
@@ -219,6 +227,16 @@ Returns:
         if tool is None:
             return ToolResult(success=False, error=f'Tool not found: {tool_id}')
             
+        if getattr(tool, 'requires_approval', False):
+            try:
+                from axiom.services.governor import GovernorService
+                governor = GovernorService.instance()
+                if governor and governor.is_strict_mode():
+                    approved = await governor.request_approval(tool.name, arguments)
+                    if not approved:
+                        return ToolResult(success=False, error="User denied execution via The Governor.")
+            except Exception as e:
+                return ToolResult(success=False, error=f"Governor failed: {e}")
         val_error = self._pre_validate_path(tool.tool_id, arguments)
         if val_error:
             return val_error

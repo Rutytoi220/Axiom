@@ -78,7 +78,8 @@ def _load_module_and_register(filepath: Path, registry) -> None:
                         func=obj,
                         name=obj.__tool_name__,
                         description=obj.__tool_description__,
-                        parameters=obj.__tool_parameters__
+                        parameters=obj.__tool_parameters__,
+                        requires_approval=getattr(obj, '__tool_requires_approval__', False)
                     )
                     registry.register(tool)
                     count += 1

@@ -76,3 +76,47 @@ class GovernorDialog(QDialog):
             if proc.info['nice'] and proc.info['nice'] > 0:
                 if 'ollama' in proc.info['name'].lower() or 'python' in proc.info['name'].lower():
                     self.proc_list.addItem(f"PID: {proc.info['pid']} | {proc.info['name']} (Nice: {proc.info['nice']})")
+
+import json
+from PySide6.QtWidgets import QTextEdit
+
+class ExecutionGateDialog(QDialog):
+    def __init__(self, tool_name: str, arguments: dict, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("AXIOM Governor - Execution Gate")
+        self.setModal(True)
+        self.setMinimumWidth(400)
+        self.setStyleSheet("background-color: #1e1e2e; color: #cdd6f4;")
+        
+        layout = QVBoxLayout(self)
+        
+        warning = QLabel(f"⚠️ AXIOM is attempting to run a high-risk tool:")
+        warning.setStyleSheet("color: #f38ba8; font-weight: bold; font-size: 14px;")
+        layout.addWidget(warning)
+        
+        tname = QLabel(f"Tool: {tool_name}")
+        tname.setStyleSheet("font-weight: bold; font-size: 16px; margin-top: 10px;")
+        layout.addWidget(tname)
+        
+        layout.addWidget(QLabel("Arguments:"))
+        
+        args_text = QTextEdit()
+        args_text.setReadOnly(True)
+        # avoid font import issues
+        args_text.setStyleSheet("background-color: #11111b; border: 1px solid #313244; padding: 5px; font-family: monospace;")
+        args_text.setText(json.dumps(arguments, indent=2))
+        layout.addWidget(args_text)
+        
+        btn_layout = QHBoxLayout()
+        
+        self.deny_btn = QPushButton("Deny (Esc)")
+        self.deny_btn.setStyleSheet("background-color: #f38ba8; color: #11111b; font-weight: bold; padding: 8px;")
+        self.deny_btn.clicked.connect(self.reject)
+        
+        self.approve_btn = QPushButton("Approve (Enter)")
+        self.approve_btn.setStyleSheet("background-color: #a6e3a1; color: #11111b; font-weight: bold; padding: 8px;")
+        self.approve_btn.clicked.connect(self.accept)
+        
+        btn_layout.addWidget(self.deny_btn)
+        btn_layout.addWidget(self.approve_btn)
+        layout.addLayout(btn_layout)

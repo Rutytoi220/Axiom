@@ -10,6 +10,7 @@ from axiom.api.cli import CLI
 from axiom.services.watchdog_service import DirectoryWatchdog
 from axiom.services.scheduler_service import BackgroundSchedulerService
 from axiom.services.sys_watchdog import SystemHealthWatchdog
+from axiom.services.governor import GovernorService
 from axiom.memory.indexer import IndexerService
 from axiom.core.events import Event
 
@@ -33,6 +34,8 @@ class AxiomDaemonServer:
         self.swarm_router = SwarmRouter.instance(event_bus=self.event_bus)
         
         self.sys_watchdog = SystemHealthWatchdog(submit_task_callback=self._submit_task)
+        
+        self.governor_service = GovernorService.instance(event_bus=self.event_bus)
         
         self.indexer_service = IndexerService(event_bus=self.event_bus)
         self.indexer_service.start()
