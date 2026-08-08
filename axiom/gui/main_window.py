@@ -44,6 +44,7 @@ from axiom.gui.widgets.settings_dialog import SettingsDialog
 from axiom.gui.widgets.scheduler_ui import TemporalSchedulerDialog
 from axiom.services.scheduler import TemporalService
 from axiom.services.sys_watchdog import SystemHealthWatchdog
+from axiom.gui.widgets.synapse_graph import SynapseGraph
 
 if TYPE_CHECKING:
     from axiom.gui.bridge import AxiomBridge
@@ -193,6 +194,11 @@ class MainWindow(QMainWindow):
         
         self.tray_icon.setContextMenu(tray_menu)
         self.tray_icon.show()
+        
+    @Slot()
+    def _open_settings(self) -> None:
+        print("Settings panel coming soon!")
+
         
     def _init_hotkey(self) -> None:
         try:

@@ -1,4 +1,7 @@
-"""Top-level entrypoint preserved for backward compatibility.
+import sys
+
+with open("main.py", "w") as f:
+    f.write('''"""Top-level entrypoint preserved for backward compatibility.
 
 Supports both CLI and GUI modes.
 """
@@ -61,11 +64,12 @@ if __name__ == "__main__":
         crash_log.parent.mkdir(parents=True, exist_ok=True)
         
         trace = traceback.format_exc()
-        print(f"\n[AXIOM FATAL CRASH]\n{trace}", file=sys.stderr)
+        print(f"\\n[AXIOM FATAL CRASH]\\n{trace}", file=sys.stderr)
         
         with open(crash_log, "w") as log_file:
-            log_file.write(f"AXIOM CRASH REPORT\n")
-            log_file.write(f"==================\n")
+            log_file.write(f"AXIOM CRASH REPORT\\n")
+            log_file.write(f"==================\\n")
             log_file.write(trace)
             
         sys.exit(1)
+''')

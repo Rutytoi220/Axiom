@@ -276,8 +276,23 @@ class VectorMemoryEngine:
             from axiom.config import get_config
             self.llm = UniversalLLMClient(get_config())
             
-        self.embedding_model = 'ollama/nomic-embed-text'
-        self._ensure_embedding_model()
+        self.embedding_model = self._find_embedding_model()
+        
+    def _find_embedding_model(self) -> str:
+        import httpx
+        try:
+            r = httpx.get('http://127.0.0.1:11434/api/tags', timeout=2.0)
+            if r.status_code == 200:
+                models = [m['name'] for m in r.json().get('models', [])]
+                for m in models:
+                    if 'embed' in m.lower():
+                        return f'ollama/{m}'
+                if models:
+                    return f'ollama/{models[0]}'
+        except Exception:
+            pass
+        return 'ollama/nomic-embed-text'
+
         
     def _ensure_embedding_model(self):
         """Check if embedding model exists; if not, pull it via API."""
@@ -404,8 +419,23 @@ class LongTermMemory:
             name="axiom_hippocampus",
             metadata={"hnsw:space": "cosine"}
         )
-        self.embedding_url = "http://localhost:11434/api/embeddings"
-        self.embedding_model = "nomic-embed-text:latest"
+        self.embedding_url = "http://127.0.0.1:11434/api/embeddings"
+        self.embedding_model = self._find_embedding_model()
+
+    def _find_embedding_model(self) -> str:
+        import httpx
+        try:
+            r = httpx.get('http://127.0.0.1:11434/api/tags', timeout=2.0)
+            if r.status_code == 200:
+                models = [m['name'] for m in r.json().get('models', [])]
+                for m in models:
+                    if 'embed' in m.lower():
+                        return m
+                if models:
+                    return models[0]
+        except Exception:
+            pass
+        return "nomic-embed-text:latest"
 
     async def _get_embedding(self, text: str) -> List[float]:
         """Asynchronously call Ollama to get embeddings."""

@@ -7,7 +7,7 @@ from axiom.gui.config_manager import get_ui_config_manager, UIConfig
 
 _OOBE_QSS = """
     QDialog {
-        background-color: #18181B;
+        background-color: #1e1e2e;
         color: #E4E4E7;
     }
     QLabel {
@@ -29,15 +29,15 @@ _OOBE_QSS = """
         min-height: 40px;
         max-width: 40px;
         max-height: 40px;
-        border: 2px solid #3F3F46;
+        border: 2px solid #313244;
     }
     QPushButton.colorBtn:checked {
         border: 3px solid #FFFFFF;
     }
     QLineEdit {
-        background-color: #27272A;
+        background-color: #11111b;
         color: #E4E4E7;
-        border: 1px solid #3F3F46;
+        border: 1px solid #313244;
         border-radius: 6px;
         padding: 8px;
     }
@@ -54,7 +54,7 @@ _OOBE_QSS = """
         background-color: #27AE60;
     }
     QPushButton#initBtn:disabled {
-        background-color: #3F3F46;
+        background-color: #313244;
         color: #71717A;
     }
     QRadioButton {
@@ -67,12 +67,12 @@ _OOBE_QSS = """
         width: 14px;
         height: 14px;
         border-radius: 7px;
-        border: 2px solid #3F3F46;
-        background-color: #18181B;
+        border: 2px solid #313244;
+        background-color: #1e1e2e;
     }
     QRadioButton::indicator:checked {
         border: 4px solid #2ECC71;
-        background-color: #18181B;
+        background-color: #1e1e2e;
     }
 """
 
@@ -93,7 +93,7 @@ class OOBEWindow(QDialog):
         super().__init__(parent)
         self.setWindowTitle("AXIOM Setup")
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
-        self.setFixedSize(500, 350)
+        self.setFixedSize(600, 420)
         self.setStyleSheet(_OOBE_QSS)
         
         self.selected_color = "#2ECC71"  # Default Green
@@ -103,8 +103,8 @@ class OOBEWindow(QDialog):
         
     def _build_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(40, 40, 40, 40)
-        layout.setSpacing(20)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
         
         # Header
         title = QLabel("Welcome to AXIOM")
@@ -140,10 +140,12 @@ class OOBEWindow(QDialog):
         # Custom Hex Input
         hex_layout = QHBoxLayout()
         hex_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hex_layout.setSpacing(16)
         hex_label = QLabel("Custom Hex:")
         self.hex_input = QLineEdit()
+        self.hex_input.setMinimumHeight(32)
         self.hex_input.setPlaceholderText("#FFFFFF")
-        self.hex_input.setMaximumWidth(100)
+        self.hex_input.setFixedWidth(120)
         self.hex_input.textChanged.connect(self._on_hex_changed)
         
         hex_layout.addWidget(hex_label)
@@ -160,7 +162,7 @@ class OOBEWindow(QDialog):
         
         voice_layout = QHBoxLayout()
         voice_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        voice_layout.setSpacing(20)
+        voice_layout.setSpacing(32)
         
         self.voice_group = QButtonGroup(self)
         
@@ -168,7 +170,7 @@ class OOBEWindow(QDialog):
         self.btn_ptt.setChecked(True)
         self.btn_ptt.setToolTip("Privacy First. AXIOM only listens when you click the microphone.")
         
-        self.btn_wake = QRadioButton("🗣️ Wake Word (Hey AXIOM)")
+        self.btn_wake = QRadioButton("🗣️ Wake Word (Hey AXIOM...)")
         self.btn_wake.setToolTip("Always Listening. AXIOM waits for the wake word in the background.")
         
         self.voice_group.addButton(self.btn_ptt)
@@ -185,6 +187,7 @@ class OOBEWindow(QDialog):
         # Init Button
         self.init_btn = QPushButton("Initialize AXIOM")
         self.init_btn.setObjectName("initBtn")
+        self.init_btn.setMinimumHeight(40)
         self.init_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.init_btn.clicked.connect(self._on_initialize)
         layout.addWidget(self.init_btn, alignment=Qt.AlignmentFlag.AlignCenter)
