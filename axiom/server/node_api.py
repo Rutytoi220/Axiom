@@ -16,6 +16,7 @@ from axiom.tool_registry import ToolRegistry
 from axiom.tools.plugin_loader import load_plugins
 from axiom.core.config_service import initialize_model_config
 from axiom.tools import EchoTool, ShellTool, FileReadTool, FileWriteTool, SystemInfoTool
+from axiom.tools.system_admin import SystemAdminTool
 from axiom.legacy_wrapper import create_legacy_tools
 
 logger = logging.getLogger("axiom.node")
@@ -76,7 +77,8 @@ async def startup_event():
     
     # Load default tools
     tools = [
-        EchoTool(), ShellTool(), FileReadTool('.'), FileWriteTool('.'), SystemInfoTool()
+        EchoTool(), ShellTool(), FileReadTool('.'), FileWriteTool('.'), SystemInfoTool(),
+        SystemAdminTool()
     ]
     tools.extend(create_legacy_tools())
     for tool in tools:
