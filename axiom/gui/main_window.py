@@ -45,61 +45,174 @@ class ChatInputEdit(QTextEdit):
 
 from PySide6.QtCore import QPropertyAnimation, QEasingCurve
 from PySide6.QtWidgets import QComboBox, QLineEdit
+import subprocess
 
 class SettingsDrawer(QFrame):
-    """Sleek dark-mode settings sidebar."""
+    """Sleek dark-mode settings/swarm sidebar."""
+
+    model_changed = Signal(str)
+    connect_requested = Signal(str)   # emits the host string
+    disconnect_requested = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMaximumWidth(0)
+        self.setMinimumWidth(0)
         self.setStyleSheet("SettingsDrawer { background-color: #1A1A1A; border-left: 1px solid #333333; }")
-        
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)
-        
-        # Title
+
+        # ── Title ──────────────────────────────────────────────────────── #
         title = QLabel("Settings")
         title.setStyleSheet("color: #FFFFFF; font-size: 18px; font-weight: bold; margin-bottom: 10px;")
         layout.addWidget(title)
-        
-        # Model Settings
-        model_label = QLabel("🧠 Model Settings")
-        model_label.setStyleSheet("color: #a0a0a0; font-size: 14px;")
+
+        # ── Model Settings ─────────────────────────────────────────────── #
+        model_label = QLabel("\U0001f9e0 Model Settings")
+        model_label.setStyleSheet("color: #a0a0a0; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;")
         layout.addWidget(model_label)
-        
+
         self.model_combo = QComboBox()
-        self.model_combo.addItems(["Auto-Select", "Qwen 3 (8B)", "Llama 3 (8B)"])
-        self.model_combo.setStyleSheet("QComboBox { background-color: #2A2A2A; color: #FFFFFF; border: 1px solid #333333; border-radius: 4px; padding: 5px; }")
+        self.model_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #2A2A2A;
+                color: #FFFFFF;
+                border: 1px solid #333333;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 13px;
+            }
+            QComboBox::drop-down { border: none; }
+            QComboBox QAbstractItemView {
+                background-color: #2A2A2A;
+                color: #FFFFFF;
+                selection-background-color: #3A3A3A;
+                border: 1px solid #333333;
+            }
+        """)
         layout.addWidget(self.model_combo)
-        
-        # Swarm Nodes
-        node_label = QLabel("🌐 Swarm Nodes")
-        node_label.setStyleSheet("color: #a0a0a0; font-size: 14px; margin-top: 15px;")
+        self._populate_models()
+        self.model_combo.currentTextChanged.connect(self.model_changed)
+
+        # ── Swarm Nodes ────────────────────────────────────────────────── #
+        node_label = QLabel("\U0001f310 Swarm Nodes")
+        node_label.setStyleSheet("color: #a0a0a0; font-size: 13px; font-weight: 600; letter-spacing: 0.5px; margin-top: 10px;")
         layout.addWidget(node_label)
-        
+
+        # Status indicator
+        self._status_label = QLabel("● Disconnected")
+        self._status_label.setStyleSheet("color: #ef4444; font-size: 12px;")
+        layout.addWidget(self._status_label)
+
         node_layout = QHBoxLayout()
-        node_layout.setSpacing(5)
+        node_layout.setSpacing(6)
         self.node_input = QLineEdit()
-        self.node_input.setPlaceholderText("IP or Tailscale PIN")
-        self.node_input.setStyleSheet("QLineEdit { background-color: #2A2A2A; color: #FFFFFF; border: 1px solid #333333; border-radius: 4px; padding: 5px; }")
-        
+        self.node_input.setPlaceholderText("192.168.x.x:8000")
+        self.node_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #2A2A2A;
+                color: #FFFFFF;
+                border: 1px solid #333333;
+                border-radius: 6px;
+                padding: 6px;
+                font-size: 13px;
+            }
+            QLineEdit:focus { border: 1px solid #10b981; }
+        """)
+
         self.connect_btn = QPushButton("Connect")
         self.connect_btn.setCursor(Qt.PointingHandCursor)
-        self.connect_btn.setStyleSheet("QPushButton { background-color: #10b981; color: #FFFFFF; border: none; border-radius: 4px; padding: 5px 10px; font-weight: bold; } QPushButton:hover { background-color: #059669; }")
-        self.connect_btn.clicked.connect(lambda: print(f"[UI] Connecting to Swarm Node: {self.node_input.text()}"))
-        
-        node_layout.addWidget(self.node_input)
+        self._btn_idle_style = "QPushButton { background-color: #10b981; color: #FFFFFF; border: none; border-radius: 6px; padding: 6px 12px; font-weight: bold; font-size: 12px; } QPushButton:hover { background-color: #059669; }"
+        self._btn_connecting_style = "QPushButton { background-color: #f59e0b; color: #FFFFFF; border: none; border-radius: 6px; padding: 6px 12px; font-weight: bold; font-size: 12px; }"
+        self._btn_connected_style = "QPushButton { background-color: #3b82f6; color: #FFFFFF; border: none; border-radius: 6px; padding: 6px 12px; font-weight: bold; font-size: 12px; } QPushButton:hover { background-color: #2563eb; }"
+        self.connect_btn.setStyleSheet(self._btn_idle_style)
+        self.connect_btn.clicked.connect(self._on_connect_clicked)
+
+        node_layout.addWidget(self.node_input, 1)
         node_layout.addWidget(self.connect_btn)
         layout.addLayout(node_layout)
-        
+
+        # Node list — shows connected node
+        self._node_list_label = QLabel("")
+        self._node_list_label.setStyleSheet("color: #6b7280; font-size: 11px; font-style: italic;")
+        self._node_list_label.setWordWrap(True)
+        layout.addWidget(self._node_list_label)
+
         layout.addStretch()
-        
+
+        # ── Animation ─────────────────────────────────────────────────── #
         self.anim = QPropertyAnimation(self, b"maximumWidth")
         self.anim.setDuration(300)
         self.anim.setEasingCurve(QEasingCurve.Type.InOutQuart)
-        
+
+        self._connected = False
+
+    # ── Private helpers ────────────────────────────────────────────────── #
+    def _populate_models(self):
+        """Fetch installed Ollama models and populate the dropdown."""
+        self.model_combo.clear()
+        self.model_combo.addItem("Auto-Select")
+        try:
+            result = subprocess.run(
+                ['ollama', 'list'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                lines = result.stdout.strip().splitlines()
+                for line in lines[1:]:  # skip header row
+                    parts = line.split()
+                    if parts:
+                        self.model_combo.addItem(parts[0])
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass  # Ollama not installed / timed out — silently skip
+        except Exception as e:
+            logger.warning(f"SettingsDrawer: could not fetch ollama models: {e}")
+
+    def _on_connect_clicked(self):
+        if self._connected:
+            self.disconnect_requested.emit()
+        else:
+            host = self.node_input.text().strip()
+            if host:
+                self.connect_btn.setText("Connecting…")
+                self.connect_btn.setEnabled(False)
+                self.connect_btn.setStyleSheet(self._btn_connecting_style)
+                self.connect_requested.emit(host)
+
+    # ── Public slots called by MainWindow ─────────────────────────────── #
+    def on_swarm_connected(self):
+        self._connected = True
+        self._status_label.setText("● Connected")
+        self._status_label.setStyleSheet("color: #10b981; font-size: 12px;")
+        host = self.node_input.text().strip()
+        self._node_list_label.setText(f"Node: {host}")
+        self.connect_btn.setText("Disconnect")
+        self.connect_btn.setEnabled(True)
+        self.connect_btn.setStyleSheet(self._btn_connected_style)
+
+    def on_swarm_disconnected(self):
+        self._connected = False
+        self._status_label.setText("● Disconnected")
+        self._status_label.setStyleSheet("color: #ef4444; font-size: 12px;")
+        self._node_list_label.setText("")
+        self.connect_btn.setText("Connect")
+        self.connect_btn.setEnabled(True)
+        self.connect_btn.setStyleSheet(self._btn_idle_style)
+
+    def on_swarm_error(self, msg: str):
+        self._connected = False
+        self._status_label.setText(f"● Error: {msg[:40]}")
+        self._status_label.setStyleSheet("color: #f59e0b; font-size: 12px;")
+        self.connect_btn.setText("Retry")
+        self.connect_btn.setEnabled(True)
+        self.connect_btn.setStyleSheet(self._btn_idle_style)
+
+    # ── Toggle animation ──────────────────────────────────────────────── #
     def toggle(self):
         if self.maximumWidth() == 0:
+            self._populate_models()   # refresh models each open
             self.anim.setStartValue(0)
             self.anim.setEndValue(300)
             self.anim.start()
@@ -147,7 +260,23 @@ class MainWindow(QMainWindow):
         self.settings_drawer = SettingsDrawer(self)
         main_layout.addWidget(self.settings_drawer)
         self._chat_display.settings_btn.clicked.connect(self.settings_drawer.toggle)
-        
+
+        # ── Swarm Client ──────────────────────────────────────────────── #
+        from axiom.gui.swarm_client import SwarmClient
+        self._swarm = SwarmClient(self)
+        self._swarm.connected.connect(self.settings_drawer.on_swarm_connected)
+        self._swarm.connected.connect(lambda: self._chat_display.add_bubble('assistant', '🌐 Swarm Node connected — prompts will be routed remotely.'))
+        self._swarm.disconnected.connect(self.settings_drawer.on_swarm_disconnected)
+        self._swarm.disconnected.connect(lambda: self._chat_display.add_bubble('assistant', '🔌 Swarm Node disconnected — falling back to local engine.'))
+        self._swarm.connection_error.connect(self.settings_drawer.on_swarm_error)
+        self._swarm.connection_error.connect(lambda msg: self._chat_display.add_bubble('tool', f'⚠️ Swarm connection error: {msg}'))
+        self._swarm.response_complete.connect(self._on_swarm_response)
+        self.settings_drawer.connect_requested.connect(self._swarm.connect_to_node)
+        self.settings_drawer.disconnect_requested.connect(self._swarm.disconnect_from_node)
+
+        # ── Model selection ────────────────────────────────────────────── #
+        self.settings_drawer.model_changed.connect(self._on_model_changed)
+
         self._refresh_sidebar()
 
         self.setCentralWidget(central_widget)
@@ -232,6 +361,8 @@ class MainWindow(QMainWindow):
 
     def force_quit(self) -> None:
         """Actually shut down the application."""
+        if hasattr(self, '_swarm'):
+            self._swarm.shutdown()
         if hasattr(self, '_temporal_service'):
             self._temporal_service.stop()
         if hasattr(self, '_sys_watchdog'):
@@ -436,9 +567,54 @@ class MainWindow(QMainWindow):
         self._input.clear()
         self._chat_display.add_bubble('user', display_text.strip())
         self._streaming_text = ''
-        self._streaming_bubble = self._chat_display.add_bubble('assistant', '')
+        self._streaming_bubble = self._chat_display.add_bubble('assistant', '⏳ Routing to Swarm Node…' if self._swarm.is_connected else '')
         self._active_swarm_pill = None
-        self._bridge.submit_task(text)
+
+        # Route: swarm node first, local engine as fallback
+        if self._swarm.is_connected:
+            sent = self._swarm.send_prompt(text)
+            if not sent:
+                # Connection dropped between check and send — fall through
+                self._streaming_bubble.set_text('')
+                self._bridge.submit_task(text)
+        else:
+            self._bridge.submit_task(text)
+
+    @Slot(str)
+    def _on_swarm_response(self, response: str) -> None:
+        """Handle the final response from a remote AXIOM Swarm Node."""
+        if self._streaming_bubble:
+            self._streaming_bubble.set_text(response)
+            self._streaming_bubble = None
+        self._streaming_text = ''
+        self._chat_display._scroll_to_bottom()
+        # Persist to local JSON history
+        if hasattr(self, '_project_manager') and self._current_chat_id:
+            self._project_manager.append_message(self._current_project_id, self._current_chat_id, {
+                'role': 'assistant',
+                'content': response
+            })
+        if hasattr(self, '_tts') and self._tts:
+            import asyncio
+            asyncio.run_coroutine_threadsafe(self._tts.speak(response), self._bridge._loop)
+
+    @Slot(str)
+    def _on_model_changed(self, model: str) -> None:
+        """Apply model selection from the Settings Drawer dropdown."""
+        if model == 'Auto-Select':
+            return
+        try:
+            from axiom.config import get_config
+            cfg = get_config()
+            cfg.ollama_model = model
+            if self._bridge and hasattr(self._bridge, '_engine'):
+                llm = getattr(self._bridge._engine, 'ollama', None)
+                if llm and hasattr(llm, 'config'):
+                    llm.config.model = model
+            logger.info(f'Model switched to: {model}')
+            self._chat_display.add_bubble('assistant', f'🔄 Model switched to **{model}**')
+        except Exception as e:
+            logger.warning(f'Could not apply model change: {e}')
 
     @Slot()
     def _on_mic_toggled(self) -> None:
