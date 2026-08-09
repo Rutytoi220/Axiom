@@ -1,8 +1,11 @@
 import logging
 import json
 import asyncio
+import time
 from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from axiom.config import get_config
 from axiom.core import Engine
@@ -20,6 +23,17 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 
 app = FastAPI(title="AXIOM Node API", description="Headless Distributed Swarm Node")
 
+# ── CORS — allow Tailscale / LAN PySide6 clients to connect cleanly ──── #
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+_boot_time = time.time()
+
 class NodeState:
     def __init__(self):
         self.engine = None
@@ -28,6 +42,17 @@ class NodeState:
         self.orchestrator = None
 
 state = NodeState()
+
+
+@app.get("/health")
+async def health_check():
+    """Lightweight liveness probe for Swarm discovery and monitoring."""
+    return JSONResponse({
+        "status": "online",
+        "node": "axiom-swarm-worker",
+        "uptime_seconds": round(time.time() - _boot_time, 1),
+        "engine_ready": state.engine is not None,
+    })
 
 @app.on_event("startup")
 async def startup_event():
