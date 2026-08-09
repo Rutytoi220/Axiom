@@ -212,18 +212,23 @@ class ModernSidebar(QFrame):
             proj = item_data['project']
             chats = item_data['chats']
             
-            # Create Project Node
-            proj_item = QTreeWidgetItem(self.tree)
-            proj_item.setText(0, f"📁 {proj['title']}")
-            proj_item.setData(0, Qt.ItemDataRole.UserRole, {"type": "project", "id": proj["id"]})
+            if proj["id"] == "general":
+                parent_node = self.tree
+            else:
+                # Create Project Node
+                proj_item = QTreeWidgetItem(self.tree)
+                proj_item.setText(0, f"📁 {proj['title']}")
+                proj_item.setData(0, Qt.ItemDataRole.UserRole, {"type": "project", "id": proj["id"]})
+                parent_node = proj_item
             
             # Create Chat Nodes
             for chat in chats:
-                chat_item = QTreeWidgetItem(proj_item)
+                chat_item = QTreeWidgetItem(parent_node)
                 chat_item.setText(0, f"💬 {chat['title']}")
                 chat_item.setData(0, Qt.ItemDataRole.UserRole, {"type": "chat", "project_id": proj["id"], "id": chat["id"]})
                 
-            self.tree.expandItem(proj_item)
+            if proj["id"] != "general":
+                self.tree.expandItem(proj_item)
 
     def _on_item_selected(self):
         selected = self.tree.selectedItems()

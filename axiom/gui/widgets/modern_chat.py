@@ -152,9 +152,11 @@ class ModernInputBar(QFrame):
 class ModernChatBubble(QWidget):
     """Sleek, minimalist dark mode chat bubble."""
     
-    _USER_STYLE = "QFrame#bubbleFrame { background-color: #2F2F2F; color: #FFFFFF; border-radius: 16px; }"
-    _ASST_STYLE = "QFrame#bubbleFrame { background-color: transparent; color: #E0E0E0; border-radius: 16px; }"
-    _ERR_STYLE = "QFrame#bubbleFrame { background-color: #2a1010; color: #ef4444; border-radius: 16px; border-left: 3px solid #ef4444; }"
+    edit_requested = Signal(str)
+    
+    _USER_STYLE = "QFrame#bubbleFrame { background-color: #2F2F2F; border-radius: 16px; }"
+    _ASST_STYLE = "QFrame#bubbleFrame { background-color: transparent; border-radius: 16px; }"
+    _ERR_STYLE = "QFrame#bubbleFrame { background-color: #2a1010; border-radius: 16px; border-left: 3px solid #ef4444; }"
     
     def __init__(self, role: str, text: str, parent=None):
         super().__init__(parent)
@@ -170,6 +172,7 @@ class ModernChatBubble(QWidget):
         
         if role == "user":
             self.bubble_frame.setStyleSheet(self._USER_STYLE)
+            self.bubble_frame.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
             outer_layout.addStretch()
             outer_layout.addWidget(self.bubble_frame)
         elif role == "assistant":
@@ -184,14 +187,23 @@ class ModernChatBubble(QWidget):
         layout = QVBoxLayout(self.bubble_frame)
         layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(6)
+        layout.setSizeConstraint(QVBoxLayout.SizeConstraint.SetFixedSize)
+        
+        # Determine text color per role
+        if role == "user":
+            text_color = "#FFFFFF"
+        elif role == "assistant":
+            text_color = "#EBEBEB"
+        else:
+            text_color = "#ef4444"
         
         self.text_browser = QTextBrowser()
         self.text_browser.setOpenExternalLinks(True)
         self.text_browser.setFrameShape(QFrame.Shape.NoFrame)
-        self.text_browser.setStyleSheet("background: transparent; font-family: 'Inter', sans-serif; font-size: 15px; line-height: 1.5; color: inherit;")
+        self.text_browser.setStyleSheet(f"background: transparent; font-family: 'Inter', sans-serif; font-size: 15px; line-height: 1.6; color: {text_color};")
         self.text_browser.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.text_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.text_browser.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.text_browser.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         
         layout.addWidget(self.text_browser)
         self._refresh_text()
@@ -216,6 +228,22 @@ class ModernChatBubble(QWidget):
             }
         """)
         self.options_btn.hide()  # Hidden by default, shown on hover
+        
+        self._options_menu = QMenu(self)
+        self._options_menu.setStyleSheet("QMenu { background-color: #1A1A1A; color: #E0E0E0; border: 1px solid #333333; border-radius: 8px; padding: 4px; } QMenu::item { padding: 5px 16px; border-radius: 4px; } QMenu::item:selected { background-color: #2A2A2A; }")
+        
+        if role == "user":
+            edit_action = QAction("✏️ Edit Message", self)
+            edit_action.triggered.connect(self._edit_bubble)
+            self._options_menu.addAction(edit_action)
+            
+        copy_action = QAction("📋 Copy Message", self)
+        copy_action.triggered.connect(self._copy_to_clipboard)
+        self._options_menu.addAction(copy_action)
+        delete_action = QAction("🗑️ Delete Message", self)
+        delete_action.triggered.connect(self._delete_bubble)
+        self._options_menu.addAction(delete_action)
+        self.options_btn.clicked.connect(self._show_options_menu)
         
         # Position button absolutely in top-right corner of bubble
         self.options_btn.move(self.bubble_frame.width() - 30, 8)
@@ -246,9 +274,35 @@ class ModernChatBubble(QWidget):
     def _refresh_text(self):
         html_str = _basic_markdown(self._raw_text)
         self.text_browser.setHtml(html_str)
-        self.text_browser.document().setTextWidth(self.bubble_frame.maximumWidth() - 32)
+        
+        # Measure ideal width and shrink the bubble to hug the text
+        self.text_browser.document().setTextWidth(-1)  # let it be natural
+        ideal_width = int(self.text_browser.document().idealWidth()) + 56
+        clamped = min(max(ideal_width, 85), 700)
+        self.bubble_frame.setMaximumWidth(clamped)
+        self.bubble_frame.setFixedWidth(clamped)
+        
+        # Constrain the text_browser widget itself to prevent defaulting to 640px
+        self.text_browser.setMaximumWidth(clamped - 32)
+        self.text_browser.document().setTextWidth(clamped - 56)
+        
         doc_height = int(self.text_browser.document().size().height())
-        self.text_browser.setMinimumHeight(doc_height)
+        self.text_browser.setFixedHeight(doc_height)
+        self.bubble_frame.setFixedHeight(doc_height + 24)
+    
+    def _edit_bubble(self):
+        self.edit_requested.emit(self._raw_text)
+    
+    def _copy_to_clipboard(self):
+        QApplication.clipboard().setText(self._raw_text)
+    
+    def _delete_bubble(self):
+        self.setParent(None)
+        self.deleteLater()
+    
+    def _show_options_menu(self):
+        pos = self.options_btn.mapToGlobal(self.options_btn.rect().bottomLeft())
+        self._options_menu.popup(pos)
 
 
 class ModernChatDisplay(QWidget):
@@ -307,6 +361,8 @@ class ModernChatDisplay(QWidget):
             self.logo_widget.hide()
             
         bubble = ModernChatBubble(role, text)
+        bubble.edit_requested.connect(lambda text: self.input_bar.input_edit.setPlainText(text))
+        
         self.chat_layout.insertWidget(self.chat_layout.count() - 1, bubble)
         self._scroll_to_bottom()
         return bubble

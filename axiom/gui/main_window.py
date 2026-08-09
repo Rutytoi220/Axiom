@@ -152,6 +152,7 @@ class SettingsDrawer(QFrame):
     # ── Private helpers ────────────────────────────────────────────────── #
     def _populate_models(self):
         """Fetch installed Ollama models and populate the dropdown."""
+        self.model_combo.blockSignals(True)
         self.model_combo.clear()
         self.model_combo.addItem("Auto-Select")
         try:
@@ -169,6 +170,8 @@ class SettingsDrawer(QFrame):
             pass  # Ollama not installed / timed out — silently skip
         except Exception as e:
             logger.warning(f"SettingsDrawer: could not fetch ollama models: {e}")
+        finally:
+            self.model_combo.blockSignals(False)
 
     def _on_connect_clicked(self):
         if self._connected:
@@ -237,6 +240,13 @@ class MainWindow(QMainWindow):
         self._project_manager = ProjectManager()
         self._current_project_id = "general"
         self._current_chat_id = None
+        # Ensure the default project directory exists on first run
+        if not any(p["id"] == "general" for p in self._project_manager.get_projects()):
+            self._project_manager.create_project(
+                title="General",
+                context_text="",
+                project_id="general"
+            )
 
         from axiom.gui.widgets.modern_chat import ModernChatDisplay
         from axiom.gui.widgets.modern_sidebar import ModernSidebar
@@ -327,8 +337,8 @@ class MainWindow(QMainWindow):
             self._chat_display.add_bubble("assistant", "⚡ AXIOM Pro Online.")
 
     def _on_new_chat(self) -> None:
-        chat_id = self._project_manager.create_conversation(self._current_project_id, "New Chat")
-        self._current_chat_id = chat_id
+        # Just clear the UI, don't create an empty chat file yet
+        self._current_chat_id = None
         self._refresh_sidebar()
         
         from axiom.gui.widgets.modern_chat import ModernChatBubble
@@ -570,6 +580,19 @@ class MainWindow(QMainWindow):
         self._streaming_bubble = self._chat_display.add_bubble('assistant', '⏳ Routing to Swarm Node…' if self._swarm.is_connected else '')
         self._active_swarm_pill = None
 
+        # Ensure we have a conversation file created before saving
+        if hasattr(self, '_project_manager'):
+            if not self._current_chat_id:
+                self._current_chat_id = self._project_manager.create_conversation(self._current_project_id, "New Chat")
+            
+            # Persist user message to JSON history
+            self._project_manager.append_message(self._current_project_id, self._current_chat_id, {
+                'role': 'user',
+                'content': display_text.strip()
+            })
+            # Also refresh the sidebar so if this was a "New Chat", the title auto-updates
+            self._refresh_sidebar()
+
         # Route: swarm node first, local engine as fallback
         if self._swarm.is_connected:
             sent = self._swarm.send_prompt(text)
@@ -652,7 +675,8 @@ class MainWindow(QMainWindow):
     def _on_token(self, token: str) -> None:
         if self._streaming_bubble:
             self._streaming_text += token
-            self._streaming_bubble.set_text(html.escape(self._streaming_text))
+            # Do NOT html.escape here — _basic_markdown in the bubble already handles escaping
+            self._streaming_bubble.set_text(self._streaming_text)
             self._chat_display._scroll_to_bottom()
 
     @Slot(str, str)
@@ -679,7 +703,8 @@ class MainWindow(QMainWindow):
 
     def _on_response_finished(self, text: str) -> None:
         if self._streaming_bubble and (not self._streaming_text):
-            self._streaming_bubble.set_text(html.escape(text))
+            # Do NOT html.escape — _basic_markdown already escapes safely
+            self._streaming_bubble.set_text(text)
         self._streaming_bubble = None
         self._streaming_text = ''
         self._chat_display._scroll_to_bottom()
