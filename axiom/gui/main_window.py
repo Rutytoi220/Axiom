@@ -43,6 +43,71 @@ class ChatInputEdit(QTextEdit):
         else:
             super().keyPressEvent(event)
 
+from PySide6.QtCore import QPropertyAnimation, QEasingCurve
+from PySide6.QtWidgets import QComboBox, QLineEdit
+
+class SettingsDrawer(QFrame):
+    """Sleek dark-mode settings sidebar."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMaximumWidth(0)
+        self.setStyleSheet("SettingsDrawer { background-color: #1A1A1A; border-left: 1px solid #333333; }")
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+        
+        # Title
+        title = QLabel("Settings")
+        title.setStyleSheet("color: #FFFFFF; font-size: 18px; font-weight: bold; margin-bottom: 10px;")
+        layout.addWidget(title)
+        
+        # Model Settings
+        model_label = QLabel("🧠 Model Settings")
+        model_label.setStyleSheet("color: #a0a0a0; font-size: 14px;")
+        layout.addWidget(model_label)
+        
+        self.model_combo = QComboBox()
+        self.model_combo.addItems(["Auto-Select", "Qwen 3 (8B)", "Llama 3 (8B)"])
+        self.model_combo.setStyleSheet("QComboBox { background-color: #2A2A2A; color: #FFFFFF; border: 1px solid #333333; border-radius: 4px; padding: 5px; }")
+        layout.addWidget(self.model_combo)
+        
+        # Swarm Nodes
+        node_label = QLabel("🌐 Swarm Nodes")
+        node_label.setStyleSheet("color: #a0a0a0; font-size: 14px; margin-top: 15px;")
+        layout.addWidget(node_label)
+        
+        node_layout = QHBoxLayout()
+        node_layout.setSpacing(5)
+        self.node_input = QLineEdit()
+        self.node_input.setPlaceholderText("IP or Tailscale PIN")
+        self.node_input.setStyleSheet("QLineEdit { background-color: #2A2A2A; color: #FFFFFF; border: 1px solid #333333; border-radius: 4px; padding: 5px; }")
+        
+        self.connect_btn = QPushButton("Connect")
+        self.connect_btn.setCursor(Qt.PointingHandCursor)
+        self.connect_btn.setStyleSheet("QPushButton { background-color: #10b981; color: #FFFFFF; border: none; border-radius: 4px; padding: 5px 10px; font-weight: bold; } QPushButton:hover { background-color: #059669; }")
+        self.connect_btn.clicked.connect(lambda: print(f"[UI] Connecting to Swarm Node: {self.node_input.text()}"))
+        
+        node_layout.addWidget(self.node_input)
+        node_layout.addWidget(self.connect_btn)
+        layout.addLayout(node_layout)
+        
+        layout.addStretch()
+        
+        self.anim = QPropertyAnimation(self, b"maximumWidth")
+        self.anim.setDuration(300)
+        self.anim.setEasingCurve(QEasingCurve.Type.InOutQuart)
+        
+    def toggle(self):
+        if self.maximumWidth() == 0:
+            self.anim.setStartValue(0)
+            self.anim.setEndValue(300)
+            self.anim.start()
+        else:
+            self.anim.setStartValue(self.width())
+            self.anim.setEndValue(0)
+            self.anim.start()
+
 class MainWindow(QMainWindow):
     """AXIOM Desktop v6.0 LTS main application window."""
 
@@ -78,6 +143,10 @@ class MainWindow(QMainWindow):
 
         self._chat_display = ModernChatDisplay(self)
         main_layout.addWidget(self._chat_display, 1)
+        
+        self.settings_drawer = SettingsDrawer(self)
+        main_layout.addWidget(self.settings_drawer)
+        self._chat_display.settings_btn.clicked.connect(self.settings_drawer.toggle)
         
         self._refresh_sidebar()
 

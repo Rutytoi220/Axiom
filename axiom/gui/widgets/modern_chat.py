@@ -6,8 +6,10 @@ from PySide6.QtCore import Qt, Signal, QSize, Slot, QTimer
 from PySide6.QtGui import QFont, QCursor
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel, QScrollArea,
-    QSizePolicy, QToolButton, QTextEdit, QTextBrowser, QApplication
+    QSizePolicy, QToolButton, QTextEdit, QTextBrowser, QApplication,
+    QMenu
 )
+from PySide6.QtGui import QFont, QCursor, QAction
 
 def _basic_markdown(raw_text: str) -> str:
     safe_text = html.escape(raw_text)
@@ -88,7 +90,26 @@ class ModernInputBar(QFrame):
         self.attach_btn.setText("＋")
         self.attach_btn.setFixedSize(36, 36)
         self.attach_btn.setCursor(Qt.PointingHandCursor)
-        self.attach_btn.setStyleSheet("QToolButton { border: none; background: transparent; font-size: 18px; color: #a0a0a0; } QToolButton:hover { color: #ffffff; }")
+        self.attach_btn.setStyleSheet("QToolButton::menu-indicator { image: none; } QToolButton { border: none; background: transparent; font-size: 18px; color: #a0a0a0; } QToolButton:hover { color: #ffffff; }")
+        
+        self.attach_menu = QMenu(self)
+        self.attach_menu.setStyleSheet("QMenu { background-color: #1A1A1A; color: #E0E0E0; border: 1px solid #333333; border-radius: 8px; padding: 5px; } QMenu::item { padding: 5px 20px; border-radius: 4px; } QMenu::item:selected { background-color: #2A2A2A; }")
+        
+        upload_action = QAction("📄 Upload Document", self)
+        upload_action.triggered.connect(lambda: print("[UI] Upload Document clicked"))
+        self.attach_menu.addAction(upload_action)
+        
+        vision_action = QAction("👁️ Enable Vision/Camera", self)
+        vision_action.triggered.connect(lambda: print("[UI] Enable Vision clicked"))
+        self.attach_menu.addAction(vision_action)
+        
+        tools_action = QAction("🔧 Manage Local Tools", self)
+        tools_action.triggered.connect(lambda: print("[UI] Manage Local Tools clicked"))
+        self.attach_menu.addAction(tools_action)
+        
+        self.attach_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.attach_btn.setMenu(self.attach_menu)
+        
         layout.addWidget(self.attach_btn, 0, Qt.AlignmentFlag.AlignBottom)
         
         # Auto-expanding Text Edit
@@ -242,6 +263,17 @@ class ModernChatDisplay(QWidget):
         from axiom.gui.widgets.swarm_hud import SwarmHUD
         self.swarm_hud = SwarmHUD()
         layout.addWidget(self.swarm_hud)
+        
+        top_bar = QHBoxLayout()
+        top_bar.addStretch()
+        self.settings_btn = QToolButton()
+        self.settings_btn.setText("⚙️")
+        self.settings_btn.setFixedSize(36, 36)
+        self.settings_btn.setCursor(Qt.PointingHandCursor)
+        self.settings_btn.setStyleSheet("QToolButton { background: transparent; border: none; font-size: 18px; color: #a0a0a0; } QToolButton:hover { color: #ffffff; }")
+        top_bar.addWidget(self.settings_btn)
+        top_bar.setContentsMargins(0, 10, 20, 0)
+        layout.addLayout(top_bar)
         
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
