@@ -9,9 +9,27 @@ AXIOM (`axiom-core`) is a professional, local-first Linux developer utility and 
 - **👁️ Sensory Engine**: Built-in, 100% offline Voice capabilities. Use privacy-first Push-to-Talk or JARVIS-style Wake Word ("Hey AXIOM") powered by `faster-whisper` and `openwakeword`, with responses synthesized directly via Linux native `espeak`/`pyttsx3`.
 - **💻 Native Linux UI**: A dense, PySide6-powered interface designed for professionals. Dynamic QSS dark-mode theming, terminal-style log output, and a non-intrusive Swarm HUD.
 
-## ⚡ Quickstart
+## 📥 Download & Installation (End Users)
 
-AXIOM is designed to be installed easily into any Python environment.
+> [!IMPORTANT]
+> **Ollama Prerequisite**  
+> AXIOM is a fully local-first interface and **requires** the Ollama system daemon to be installed and running on your host machine prior to launch. Install it via:  
+> ```bash
+> curl -fsSL https://ollama.com/install.sh | sh
+> ```
+
+[🚀 Download the latest AXIOM Linux AppImage here](https://github.com/Rutytoi220/Axiom/releases/latest)
+
+### How to Run:
+1. Download the `AXIOM_Pro-x86_64.AppImage` file.
+2. Right-click the file -> **Properties** -> **Permissions** -> Check **"Allow executing file as program"** (or simply run `chmod +x AXIOM_Pro-x86_64.AppImage` in your terminal).
+3. Double-click the file to launch the sovereign UI!
+
+---
+
+## 🛠️ Developer Setup (Source Installation)
+
+AXIOM is designed to be installed easily into any Python environment for development.
 
 ### 1. Install via pip
 ```bash
@@ -39,4 +57,4 @@ On your first launch, the Out-Of-Box Experience (OOBE) will guide you through se
 
 ---
 
-*AXIOM v1.0.0 LTS — Developed by the Open-Source Community.*
+*AXIOM v10.8.0 LTS — Developed by the Open-Source Community.*
