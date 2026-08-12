@@ -140,7 +140,7 @@ class ModernInputBar(QFrame):
     
     message_ready = Signal(str)
     image_attached = Signal(str)   # emits the absolute filepath
-    
+    mic_toggled    = Signal(bool)  # True = start listening, False = stop
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("inputPill")
@@ -184,20 +184,22 @@ class ModernInputBar(QFrame):
         self.input_edit.send_requested.connect(self._on_send)
         layout.addWidget(self.input_edit, 1, Qt.AlignmentFlag.AlignBottom)
         
-        # Mic Button (Optional/Right)
-        from axiom.gui.config_manager import get_ui_config_manager
-        voice_mode = get_ui_config_manager().load().voice_mode
-        self.mic_btn = None
-        if voice_mode == "push_to_talk":
-            self.mic_btn = QToolButton()
-            self.mic_btn.setText("🎤")
-            self.mic_btn.setFixedSize(36, 36)
-            self.mic_btn.setCheckable(True)
-            self.mic_btn.setCursor(Qt.PointingHandCursor)
-            self.mic_btn.setStyleSheet("QToolButton { border: none; background: transparent; font-size: 18px; color: #a0a0a0; } QToolButton:checked { color: #f59e0b; } QToolButton:hover { color: #ffffff; }")
-            layout.addWidget(self.mic_btn, 0, Qt.AlignmentFlag.AlignBottom)
+        # ── Mic Button ─────────────────────────────────────────────────── #
+        self.mic_btn = QToolButton()
+        self.mic_btn.setText("🎤")
+        self.mic_btn.setFixedSize(36, 36)
+        self.mic_btn.setCheckable(True)
+        self.mic_btn.setCursor(Qt.PointingHandCursor)
+        self.mic_btn.setToolTip("Push to Talk (hold to record)")
+        self.mic_btn.setStyleSheet(
+            "QToolButton { border: none; background: transparent; font-size: 18px; color: #a0a0a0; }"
+            "QToolButton:checked { color: #ef4444; }"
+            "QToolButton:hover { color: #ffffff; }"
+        )
+        self.mic_btn.toggled.connect(self.mic_toggled.emit)
+        layout.addWidget(self.mic_btn, 0, Qt.AlignmentFlag.AlignBottom)
             
-        # Send Button (Far Right)
+        # ── Send Button ─────────────────────────────────────────────────── #
         self.send_btn = QToolButton()
         self.send_btn.setText("↑")
         self.send_btn.setFixedSize(32, 32)

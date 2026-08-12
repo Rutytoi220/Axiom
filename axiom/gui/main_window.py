@@ -143,12 +143,49 @@ class SettingsDrawer(QFrame):
 
         layout.addStretch()
 
-        # ── Animation ─────────────────────────────────────────────────── #
+        # ── Audio / TTS Controls ─────────────────────────────────────────── #
+        audio_label = QLabel("🔉 Audio")
+        audio_label.setStyleSheet("color: #a0a0a0; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;")
+        layout.addWidget(audio_label)
+
+        self._tts_toggle_btn = QPushButton("🔊  Voice Responses: ON")
+        self._tts_toggle_btn.setCheckable(True)
+        self._tts_toggle_btn.setChecked(True)
+        self._tts_toggle_btn.setCursor(Qt.PointingHandCursor)
+        self._tts_toggle_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #10b981;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                padding: 7px 12px;
+                font-size: 13px;
+                font-weight: 600;
+                text-align: left;
+            }
+            QPushButton:!checked {
+                background-color: #374151;
+                color: #9CA3AF;
+            }
+        """)
+        self._tts_toggle_btn.toggled.connect(self._on_tts_toggled)
+        layout.addWidget(self._tts_toggle_btn)
+
+        # ── Animation ────────────────────────────────────────────────────── #
         self.anim = QPropertyAnimation(self, b"maximumWidth")
         self.anim.setDuration(300)
         self.anim.setEasingCurve(QEasingCurve.Type.InOutQuart)
 
         self._connected = False
+
+    def _on_tts_toggled(self, checked: bool):
+        label = "🔊  Voice Responses: ON" if checked else "🔇  Voice Responses: OFF"
+        self._tts_toggle_btn.setText(label)
+    
+    @property
+    def tts_enabled(self) -> bool:
+        """Whether TTS voice responses are currently enabled."""
+        return self._tts_toggle_btn.isChecked()
 
     # ── Private helpers ────────────────────────────────────────────────── #
     def _populate_models(self):
@@ -294,6 +331,7 @@ class MainWindow(QMainWindow):
 
         self._input = self._chat_display.input_bar.input_edit
         self._chat_display.input_bar.message_ready.connect(self._on_send)
+        self._chat_display.input_bar.mic_toggled.connect(self._on_mic_toggled)
         self._connect_bridge()
         self._init_audio()
         self._init_tray()
@@ -386,27 +424,14 @@ class MainWindow(QMainWindow):
         QApplication.quit()
 
     def _init_audio(self) -> None:
-        from axiom.gui.config_manager import get_ui_config_manager
-        self._voice_mode = get_ui_config_manager().load().voice_mode
-        self._tts = None
-        self._stt = None
-        self._recorder = None
-        self._wake_daemon = None
+        """Initialize the AudioManager facade (TTS + STT)."""
         try:
-            from axiom.audio.tts import TextToSpeechEngine
-            self._tts = TextToSpeechEngine.instance()
+            from axiom.core.audio import AudioManager
+            self._audio = AudioManager.instance()
+            logger.info('AudioManager initialized')
         except Exception as e:
-            logger.error(f'TTS init failed: {e}')
-        try:
-            from axiom.audio.stt import WhisperTranscriber, AudioRecorder, WakeWordDaemon
-            self._stt = WhisperTranscriber.instance()
-            self._recorder = AudioRecorder()
-            if self._voice_mode == 'wake_word':
-                self._wake_daemon = WakeWordDaemon(self)
-                self._wake_daemon.wake_word_detected.connect(self._on_wake_word)
-                self._wake_daemon.start()
-        except Exception as e:
-            logger.error(f'STT init failed: {e}')
+            self._audio = None
+            logger.error(f'AudioManager init failed: {e}')
 
     def _init_tray(self) -> None:
         self.tray_icon = QSystemTrayIcon(self)
@@ -626,9 +651,11 @@ class MainWindow(QMainWindow):
                 'role': 'assistant',
                 'content': response
             })
-        if hasattr(self, '_tts') and self._tts:
+        # TTS — respects the speaker toggle in SettingsDrawer
+        audio = getattr(self, '_audio', None)
+        if audio and self.settings_drawer.tts_enabled and self._bridge:
             import asyncio
-            asyncio.run_coroutine_threadsafe(self._tts.speak(response), self._bridge._loop)
+            asyncio.run_coroutine_threadsafe(audio.speak(response), self._bridge._loop)
 
     @Slot(str)
     def _on_model_changed(self, model: str) -> None:
@@ -648,25 +675,37 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.warning(f'Could not apply model change: {e}')
 
-    @Slot()
-    def _on_mic_toggled(self) -> None:
-        if not self._mic_btn or not self._recorder or (not self._stt):
+    @Slot(bool)
+    def _on_mic_toggled(self, listening: bool) -> None:
+        """Handle push-to-talk: start/stop recording and transcribe."""
+        audio = getattr(self, '_audio', None)
+        mic_btn = self._chat_display.input_bar.mic_btn
+        if not audio or not audio.has_stt:
+            # No STT available: uncheck the button visually and bail
+            if mic_btn and mic_btn.isChecked():
+                mic_btn.blockSignals(True)
+                mic_btn.setChecked(False)
+                mic_btn.blockSignals(False)
             return
-        if self._mic_btn.isChecked():
-            self._mic_btn.setStyleSheet('background-color: #ef4444; color: white; border: 1px solid #ef4444; border-radius: 8px; font-size: 18px;')
+
+        if listening:
+            audio.start_listening()
             self._input.setPlaceholderText('Listening...')
-            self._recorder.start_recording()
         else:
-            self._mic_btn.setStyleSheet('background-color: #161B22; border: 1px solid #30363D; border-radius: 8px; font-size: 18px;')
             self._input.setPlaceholderText('Transcribing...')
-            audio_data = self._recorder.stop_recording()
+            audio_data = audio.stop_listening()
             import asyncio
 
             async def _transcribe():
-                text = await self._stt.transcribe(audio_data)
-                from PySide6.QtCore import QMetaObject, Q_ARG, Qt
-                QMetaObject.invokeMethod(self, '_on_transcription_complete', Qt.ConnectionType.QueuedConnection, Q_ARG(str, text))
-            asyncio.run_coroutine_threadsafe(_transcribe(), self._bridge._loop)
+                text = await audio.transcribe(audio_data)
+                from PySide6.QtCore import QMetaObject, Q_ARG
+                QMetaObject.invokeMethod(
+                    self, '_on_transcription_complete',
+                    Qt.ConnectionType.QueuedConnection,
+                    Q_ARG(str, text)
+                )
+            if self._bridge:
+                asyncio.run_coroutine_threadsafe(_transcribe(), self._bridge._loop)
 
     @Slot(str)
     def _on_transcription_complete(self, text: str) -> None:
