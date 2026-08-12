@@ -10,6 +10,7 @@ Implements the modular layout:
 from __future__ import annotations
 import html
 import logging
+import os
 from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt, QSize, Slot, QTimer, Signal
 from PySide6.QtGui import QAction, QFont, QIcon, QKeySequence, QShortcut
@@ -457,14 +458,9 @@ class MainWindow(QMainWindow):
         """Capture screen, preview it, and summon."""
         from axiom.services.vision_service import VisionService
         import os
-        from PySide6.QtGui import QPixmap
         path = VisionService.capture_screen()
         if path and os.path.exists(path):
-            self._current_attachment = path
-            pixmap = QPixmap(path)
-            scaled = pixmap.scaledToHeight(100, Qt.TransformationMode.SmoothTransformation)
-            self._attachment_preview.setPixmap(scaled)
-            self._attachment_preview.show()
+            self._chat_display.attach_image(path)
         self.show()
         self.activateWindow()
         self.raise_()
@@ -559,22 +555,39 @@ class MainWindow(QMainWindow):
     @Slot()
     def _on_send(self) -> None:
         text = self._input.toPlainText().strip()
-        display_text = text
-        has_attachment = hasattr(self, '_current_attachment') and self._current_attachment
-        if not text and (not has_attachment):
+        attachment_path = getattr(self._chat_display, '_current_attachment_path', None)
+        
+        if not text and not attachment_path:
             return
-        if has_attachment:
+        
+        self._input.clear()
+        
+        # Build the routing payload
+        if attachment_path:
             import base64
             try:
-                with open(self._current_attachment, 'rb') as f:
-                    b64 = base64.b64encode(f.read()).decode('utf-8')
-                text += f'\n\n![screenshot](data:image/png;base64,{b64})'
-                display_text = f'{display_text}\n\n*[Attached Screen Capture]*' if display_text else '*[Attached Screen Capture]*'
+                with open(attachment_path, 'rb') as f:
+                    raw = f.read()
+                b64 = base64.b64encode(raw).decode('utf-8')
+                # Detect mime type from extension
+                ext = attachment_path.rsplit('.', 1)[-1].lower()
+                mime = 'image/png' if ext == 'png' else 'image/jpeg'
+                multimodal_payload = [
+                    {"type": "text", "text": text or "Describe this image."},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}
+                ]
+                route_payload = multimodal_payload  # list-style OpenAI content
+                display_text = f'{text}\n\n*[Image: {os.path.basename(attachment_path)}]*' if text else f'*[Image: {os.path.basename(attachment_path)}]*'
             except Exception as e:
-                logger.error(f'Failed to read attachment: {e}')
-            self._attachment_preview.hide()
-            self._current_attachment = None
-        self._input.clear()
+                logger.error(f'Failed to encode attachment: {e}')
+                route_payload = text
+                display_text = text
+            finally:
+                self._chat_display.clear_attachment()
+        else:
+            route_payload = text
+            display_text = text
+        
         self._chat_display.add_bubble('user', display_text.strip())
         self._streaming_text = ''
         self._streaming_bubble = self._chat_display.add_bubble('assistant', '⏳ Routing to Swarm Node…' if self._swarm.is_connected else '')
@@ -584,24 +597,20 @@ class MainWindow(QMainWindow):
         if hasattr(self, '_project_manager'):
             if not self._current_chat_id:
                 self._current_chat_id = self._project_manager.create_conversation(self._current_project_id, "New Chat")
-            
-            # Persist user message to JSON history
             self._project_manager.append_message(self._current_project_id, self._current_chat_id, {
                 'role': 'user',
                 'content': display_text.strip()
             })
-            # Also refresh the sidebar so if this was a "New Chat", the title auto-updates
             self._refresh_sidebar()
 
         # Route: swarm node first, local engine as fallback
         if self._swarm.is_connected:
-            sent = self._swarm.send_prompt(text)
+            sent = self._swarm.send_prompt(text if not attachment_path else str(route_payload))
             if not sent:
-                # Connection dropped between check and send — fall through
                 self._streaming_bubble.set_text('')
-                self._bridge.submit_task(text)
+                self._bridge.submit_task(route_payload)
         else:
-            self._bridge.submit_task(text)
+            self._bridge.submit_task(route_payload)
 
     @Slot(str)
     def _on_swarm_response(self, response: str) -> None:

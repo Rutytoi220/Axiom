@@ -1,13 +1,14 @@
 """AXIOM Desktop v3.0 — Next-Gen Modern Chat UI."""
 
 import html
+import os
 import re
 from PySide6.QtCore import Qt, Signal, QSize, Slot, QTimer
-from PySide6.QtGui import QFont, QCursor
+from PySide6.QtGui import QFont, QCursor, QPixmap
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel, QScrollArea,
     QSizePolicy, QToolButton, QTextEdit, QTextBrowser, QApplication,
-    QMenu
+    QMenu, QFileDialog
 )
 from PySide6.QtGui import QFont, QCursor, QAction
 
@@ -69,10 +70,76 @@ class AutoExpandTextEdit(QTextEdit):
             super().keyPressEvent(event)
 
 
+class _AttachmentStrip(QFrame):
+    """A slim preview strip shown above the input pill when an image is attached."""
+    
+    dismissed = Signal()   # emitted when user clicks the X
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("attachStrip")
+        self.setStyleSheet(
+            "QFrame#attachStrip {"
+            "  background: #1A1A1A;"
+            "  border: 1px solid #333;"
+            "  border-radius: 12px;"
+            "  padding: 4px 8px;"
+            "}"
+        )
+        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(72)
+        self.setMaximumWidth(750)
+        
+        row = QHBoxLayout(self)
+        row.setContentsMargins(8, 6, 8, 6)
+        row.setSpacing(10)
+        
+        self._thumb = QLabel()
+        self._thumb.setFixedSize(52, 52)
+        self._thumb.setStyleSheet("border-radius: 8px; background: #2A2A2A;")
+        self._thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        row.addWidget(self._thumb)
+        
+        self._filename = QLabel("")
+        self._filename.setStyleSheet("color: #CCCCCC; font-size: 12px; font-family: 'Inter', sans-serif;")
+        self._filename.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        row.addWidget(self._filename, 1)
+        
+        dismiss_btn = QToolButton()
+        dismiss_btn.setText("✕")
+        dismiss_btn.setFixedSize(22, 22)
+        dismiss_btn.setCursor(Qt.PointingHandCursor)
+        dismiss_btn.setStyleSheet(
+            "QToolButton { background: #333; border: none; border-radius: 11px;"
+            "  color: #999; font-size: 11px; }"
+            "QToolButton:hover { background: #ef4444; color: #fff; }"
+        )
+        dismiss_btn.clicked.connect(self.dismissed)
+        row.addWidget(dismiss_btn, 0, Qt.AlignmentFlag.AlignTop)
+        
+        self.hide()  # hidden until an image is attached
+    
+    def set_image(self, filepath: str) -> None:
+        pixmap = QPixmap(filepath)
+        if not pixmap.isNull():
+            self._thumb.setPixmap(
+                pixmap.scaled(52, 52, Qt.AspectRatioMode.KeepAspectRatio,
+                              Qt.TransformationMode.SmoothTransformation)
+            )
+        self._filename.setText(os.path.basename(filepath))
+        self.show()
+    
+    def clear_image(self) -> None:
+        self._thumb.clear()
+        self._filename.setText("")
+        self.hide()
+
+
 class ModernInputBar(QFrame):
     """The floating Pill shape input bar."""
     
     message_ready = Signal(str)
+    image_attached = Signal(str)   # emits the absolute filepath
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -95,8 +162,8 @@ class ModernInputBar(QFrame):
         self.attach_menu = QMenu(self)
         self.attach_menu.setStyleSheet("QMenu { background-color: #1A1A1A; color: #E0E0E0; border: 1px solid #333333; border-radius: 8px; padding: 5px; } QMenu::item { padding: 5px 20px; border-radius: 4px; } QMenu::item:selected { background-color: #2A2A2A; }")
         
-        upload_action = QAction("📄 Upload Document", self)
-        upload_action.triggered.connect(lambda: print("[UI] Upload Document clicked"))
+        upload_action = QAction("📄 Upload Image", self)
+        upload_action.triggered.connect(self._on_upload_image)
         self.attach_menu.addAction(upload_action)
         
         vision_action = QAction("👁️ Enable Vision/Camera", self)
@@ -144,6 +211,16 @@ class ModernInputBar(QFrame):
         if text:
             self.message_ready.emit(text)
             self.input_edit.clear()
+    
+    def _on_upload_image(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Attach Image",
+            os.path.expanduser("~"),
+            "Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif)"
+        )
+        if path:
+            self.image_attached.emit(path)
             
     def set_focus(self):
         self.input_edit.setFocus()
@@ -353,9 +430,31 @@ class ModernChatDisplay(QWidget):
         
         layout.addWidget(self.scroll_area, 1)
         
+        # ── Image Attachment Strip (hidden until user attaches something) ── #
+        self.attach_strip = _AttachmentStrip()
+        layout.addWidget(self.attach_strip, 0, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
+        
         self.input_bar = ModernInputBar()
+        self.input_bar.image_attached.connect(self.attach_image)
         layout.addWidget(self.input_bar, 0, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
         
+        # Wire strip dismiss to clear state
+        self.attach_strip.dismissed.connect(self._on_dismiss_attachment)
+        self._current_attachment_path: str | None = None
+        
+    def attach_image(self, filepath: str) -> None:
+        """Show the image attachment strip and store the path."""
+        self._current_attachment_path = filepath
+        self.attach_strip.set_image(filepath)
+    
+    def clear_attachment(self) -> None:
+        """Clear the attachment strip and state."""
+        self._current_attachment_path = None
+        self.attach_strip.clear_image()
+    
+    def _on_dismiss_attachment(self) -> None:
+        self.clear_attachment()
+
     def add_bubble(self, role: str, text: str) -> ModernChatBubble:
         if self.logo_widget.isVisible():
             self.logo_widget.hide()
@@ -371,3 +470,4 @@ class ModernChatDisplay(QWidget):
         QTimer.singleShot(50, lambda: self.scroll_area.verticalScrollBar().setValue(
             self.scroll_area.verticalScrollBar().maximum()
         ))
+

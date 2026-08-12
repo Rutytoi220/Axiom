@@ -160,7 +160,8 @@ Returns:
         from axiom.tools.document_reader import ReadDocumentContentTool
         from axiom.tools.clipboard_tools import ClipboardReadTool, ClipboardWriteTool
         from axiom.tools.desktop_control import DesktopAutomationTool
-        tools = [EchoTool(), ShellTool(), FileReadTool('.'), FileWriteTool('.'), SystemInfoTool(), SafeFileSearchTool(), FileOpenerTool(), AppLauncherTool(), ScreenCaptureTool(), ReadDocumentContentTool(), ClipboardReadTool(), ClipboardWriteTool(), DesktopAutomationTool()]
+        from axiom.tools.vision import VisionCaptureTool
+        tools = [EchoTool(), ShellTool(), FileReadTool('.'), FileWriteTool('.'), SystemInfoTool(), SafeFileSearchTool(), FileOpenerTool(), AppLauncherTool(), ScreenCaptureTool(), ReadDocumentContentTool(), ClipboardReadTool(), ClipboardWriteTool(), DesktopAutomationTool(), VisionCaptureTool()]
         tools.extend(create_legacy_tools())
         for tool in tools:
             self.engine.registry.register_tool(tool.tool_id, tool)
