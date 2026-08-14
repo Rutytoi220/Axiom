@@ -1,13 +1,13 @@
-# AXIOM: Local-First AI Operating System for Linux
+# AXIOM: Sovereign AI Operating System & Distributed Swarm (V11)
 
-AXIOM (`axiom-core`) is a professional, local-first Linux developer utility and AI operating system. Built from the ground up for privacy, speed, and deep system integration, AXIOM acts as a native desktop AI that thinks, remembers, and executes autonomously.
+AXIOM is a PySide6, local-first AI orchestrator equipped with Zero-Trust Tailscale Swarm capabilities, native desktop automation, multimodal vision, and real-time audio. Built for privacy, speed, and deep system integration, AXIOM transitions from a simple chat interface into a fully autonomous distributed AI operating system.
 
-## 🚀 Core Features
+## 🚀 The V11 Feature Matrix
 
-- **🧠 Neural Routing & Swarm Architecture**: Dynamically spawns background specialist agents (Coders, Researchers) depending on task complexity using a resilient ReAct Tool Chaining loop.
-- **📚 Vector Memory**: Persistent, distributed memory storage via ChromaDB and a dedicated SQLite Session database to effortlessly recall past conversations and deep context.
-- **👁️ Sensory Engine**: Built-in, 100% offline Voice capabilities. Use privacy-first Push-to-Talk or JARVIS-style Wake Word ("Hey AXIOM") powered by `faster-whisper` and `openwakeword`, with responses synthesized directly via Linux native `espeak`/`pyttsx3`.
-- **💻 Native Linux UI**: A dense, PySide6-powered interface designed for professionals. Dynamic QSS dark-mode theming, terminal-style log output, and a non-intrusive Swarm HUD.
+- 🌐 **The Swarm:** Headless Debian node execution over encrypted Tailscale mesh (`100.x.x.x`).
+- 👻 **Ghost in the Machine:** Native Linux desktop automation (mouse/keyboard control) via PyAutoGUI with strict failsafes.
+- 👁️ **Multimodal Vision:** 5-tier OS-level screen capture (Wayland/X11) routed to local vision models (`qwen3-vl`).
+- 🎙️ **Real-Time Audio:** Offline Push-to-Talk via `faster-whisper` and non-blocking `pyttsx3` TTS.
 
 ## 📥 Download & Installation (End Users)
 
@@ -18,12 +18,22 @@ AXIOM (`axiom-core`) is a professional, local-first Linux developer utility and 
 > curl -fsSL https://ollama.com/install.sh | sh
 > ```
 
-[🚀 Download the latest AXIOM Linux AppImage here](https://github.com/Rutytoi220/Axiom/releases/latest)
+[🚀 Download the v11.2.0 AXIOM Linux AppImage](https://github.com/Rutytoi220/Axiom/releases/tag/v11.2.0)
 
 ### How to Run:
-1. Download the `AXIOM_Pro-x86_64.AppImage` file.
-2. Right-click the file -> **Properties** -> **Permissions** -> Check **"Allow executing file as program"** (or simply run `chmod +x AXIOM_Pro-x86_64.AppImage` in your terminal).
-3. Double-click the file to launch the sovereign UI!
+To launch the universal Linux AppImage, simply run:
+```bash
+chmod +x AXIOM-v11.2.0-x86_64.AppImage && ./AXIOM-v11.2.0-x86_64.AppImage
+```
+
+---
+
+## 🛠️ Advanced Users: Node Setup
+
+To run a headless node for The Swarm over your Tailscale mesh:
+```bash
+uv run python axiom-node.py
+```
 
 ---
 
