@@ -54,16 +54,27 @@ def initialize_model_config(config: AxiomConfig, ollama: OllamaClient) -> None:
                 return False
 
         # Validate reasoning model
-        if config.ollama_model not in installed_models:
+        reason_model_clean = config.ollama_model.replace(":latest", "")
+        match_found_reason = False
+        for m in installed_models:
+            if reason_model_clean in m:
+                match_found_reason = True
+                config.ollama_model = m
+                break
+                
+        if not match_found_reason:
             success = _auto_pull_model(config.ollama_model)
             if not success:
                 # If pull failed, fallback to alternatives
                 candidates = ["llama3.1:latest", "qwen3:8b", "qwen3-vl:2b"]
                 swapped = False
                 for candidate in candidates:
-                    if candidate in installed_models:
-                        config.ollama_model = candidate
-                        swapped = True
+                    for m in installed_models:
+                        if candidate.replace(":latest", "") in m:
+                            config.ollama_model = m
+                            swapped = True
+                            break
+                    if swapped:
                         break
                 
                 if not swapped and installed_models:
@@ -73,25 +84,25 @@ def initialize_model_config(config: AxiomConfig, ollama: OllamaClient) -> None:
                 if swapped:
                     print(f"[*] Dynamically swapped reasoning model to: {config.ollama_model}\n")
             
-            ollama.config.model = config.ollama_model
+        ollama.config.model = config.ollama_model
             
         # Validate embedding model
-        # Remove :latest suffix for check if user specified it, or vice versa
         embed_model_clean = config.embedding_model.replace(":latest", "")
-        if config.embedding_model not in installed_models and f"{embed_model_clean}:latest" not in installed_models:
+        
+        # Fuzzy match to handle 'ollama/nomic-embed-text:latest' etc
+        match_found = False
+        for m in installed_models:
+            if embed_model_clean in m:
+                match_found = True
+                config.embedding_model = m
+                break
+                
+        if not match_found:
             success = _auto_pull_model(config.embedding_model)
             if not success:
-                # Fallback to local check
-                if "nomic-embed-text:latest" in installed_models:
-                    config.embedding_model = "nomic-embed-text:latest"
-                    print(f"[*] Dynamically swapped embedding model to: {config.embedding_model}\n")
-                elif "nomic-embed-text" in installed_models:
-                    config.embedding_model = "nomic-embed-text"
-                    print(f"[*] Dynamically swapped embedding model to: {config.embedding_model}\n")
-                else:
-                    print(f"[*] AXIOM may encounter 500 errors during vector storage unless an embedding model is pulled.")
+                print(f"[*] AXIOM may encounter 500 errors during vector storage unless an embedding model is pulled.")
             
-            ollama.config.embedding_model = config.embedding_model
+        ollama.config.embedding_model = config.embedding_model
             
         # Detect capabilities explicitly
         ollama._detect_capabilities()

@@ -74,11 +74,20 @@ class MCPBridgeManager:
     def start(self):
         """Load servers from configuration and bridge their tools."""
         try:
-            config = json.loads(self.config_path.read_text())
+            content = self.config_path.read_text().strip()
+            if not content:
+                config = {"mcpServers": {}}
+                self.config_path.write_text(json.dumps(config, indent=2))
+            else:
+                config = json.loads(content)
+                
             servers = config.get("mcpServers", {})
             for name, cfg in servers.items():
                 if "command" in cfg:
                     self.add_server(name, cfg["command"], cfg.get("args", []))
+        except json.JSONDecodeError:
+            logger.warning("MCP config is invalid JSON. Resetting to default.")
+            self.config_path.write_text(json.dumps({"mcpServers": {}}, indent=2))
         except Exception as e:
             logger.error(f"Failed to load MCP servers config: {e}")
 

@@ -9,6 +9,20 @@ import os
 import traceback
 from pathlib import Path
 
+def _patch_tiktoken_for_pyinstaller():
+    """tiktoken uses pkgutil.iter_modules which fails inside PyInstaller's frozen archive.
+    We manually populate the registry here before litellm is imported."""
+    try:
+        import tiktoken.registry
+        import tiktoken_ext.openai_public
+        if getattr(tiktoken.registry, "ENCODING_CONSTRUCTORS", None) is None:
+            tiktoken.registry.ENCODING_CONSTRUCTORS = {}
+        tiktoken.registry.ENCODING_CONSTRUCTORS.update(tiktoken_ext.openai_public.ENCODING_CONSTRUCTORS)
+    except Exception as e:
+        pass # Not critical if tiktoken isn't installed yet, or let it fail normally later
+
+_patch_tiktoken_for_pyinstaller()
+
 
 def _ensure_directories():
     """Sanity check startup paths."""
@@ -45,17 +59,19 @@ def main():
     else:
         # We might have axiom.cli or ui.cli
         try:
-            from axiom.api.cli import run_repl
-            run_repl()
+            from axiom.api.cli import CLI
+            CLI().cmdloop()
         except ImportError:
             from ui.cli import run_repl
             run_repl(model=args.model, verbose=args.verbose, system_prompt=args.system_prompt)
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     try:
         main()
-    except Exception as e:
+    except BaseException as e:
         crash_log = Path.home() / ".local" / "share" / "axiom" / "axiom_crash.log"
         # Make sure directory exists even if it failed before _ensure_directories
         crash_log.parent.mkdir(parents=True, exist_ok=True)

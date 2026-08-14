@@ -32,16 +32,26 @@ class AudioManager:
             from axiom.audio.tts import TextToSpeechEngine
             self._tts = TextToSpeechEngine.instance()
             logger.info("AudioManager: TTS ready")
+        except (OSError, ImportError, RuntimeError) as e:
+            self._tts = None
+            logger.warning(f"AudioManager: TTS gracefully disabled (missing system dependencies, e.g., espeak): {e}")
         except Exception as e:
-            logger.warning(f"AudioManager: TTS unavailable — {e}")
+            self._tts = None
+            logger.error(f"AudioManager: TTS init failed: {e}")
 
         try:
             from axiom.audio.stt import WhisperTranscriber, AudioRecorder
             self._stt = WhisperTranscriber.instance()
             self._recorder = AudioRecorder()
             logger.info("AudioManager: STT ready")
+        except (OSError, ImportError, RuntimeError) as e:
+            self._stt = None
+            self._recorder = None
+            logger.warning(f"AudioManager: STT gracefully disabled (missing system dependencies or model load failed): {e}")
         except Exception as e:
-            logger.warning(f"AudioManager: STT unavailable — {e}")
+            self._stt = None
+            self._recorder = None
+            logger.error(f"AudioManager: STT init failed: {e}")
 
     # ── TTS ───────────────────────────────────────────────────────────── #
 

@@ -17,14 +17,14 @@ fi
 
 # 1. Setup & Compilation (PyInstaller)
 echo -e "${BLUE}[INFO]${NC} Creating venv and installing PyInstaller..."
-uv venv --python 3.11
+uv venv --python 3.11 --clear
 uv pip install pyinstaller
 
 echo -e "${BLUE}[INFO]${NC} Locking and syncing dependencies..."
 uv sync --python 3.11
 
 echo -e "${BLUE}[INFO]${NC} Compiling with PyInstaller..."
-uv run --python 3.11 pyinstaller main.py --name AXIOM --windowed --noconfirm --clean
+uv run --python 3.11 pyinstaller axiom.spec --clean --noconfirm
 
 # 2. AppDir Construction
 echo -e "${BLUE}[INFO]${NC} Constructing AXIOM.AppDir..."
@@ -33,13 +33,14 @@ rm -rf "$APPDIR"
 mkdir -p "$APPDIR/usr/bin"
 
 echo -e "${BLUE}[INFO]${NC} Copying binaries to AppDir..."
+# With the COLLECT step in axiom.spec, PyInstaller generates a directory at dist/AXIOM/
 cp -r dist/AXIOM/* "$APPDIR/usr/bin/"
 
 echo -e "${BLUE}[INFO]${NC} Generating axiom.desktop..."
 cat <<EOF > "$APPDIR/axiom.desktop"
 [Desktop Entry]
 Name=AXIOM Pro
-Exec=AXIOM
+Exec=AppRun
 Icon=axiom-logo
 Type=Application
 Categories=Utility;Development;
@@ -73,7 +74,7 @@ fi
 
 echo -e "${BLUE}[INFO]${NC} Packaging AppImage..."
 # Run appimagetool
-./appimagetool-x86_64.AppImage "$APPDIR"
+./appimagetool-x86_64.AppImage "$APPDIR" AXIOM-v11.2.0-x86_64.AppImage
 
 echo -e "${BLUE}[INFO]${NC} Cleaning up temporary AppDir..."
 rm -rf "$APPDIR"

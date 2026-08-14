@@ -45,7 +45,7 @@ Returns:
             self._task = loop.create_task(self._monitor_loop())
             logger.info('HardwareTelemetryDaemon started.')
         except RuntimeError:
-            logger.warning('No running asyncio loop. Telemetry daemon cannot start.')
+            logger.debug('No running asyncio loop. Telemetry daemon will not start in synchronous environments.')
 
     def stop(self) -> None:
         """Stop the telemetry daemon."""

@@ -11,7 +11,17 @@ import aiosqlite
 logger = logging.getLogger(__name__)
 from axiom.memory.protocol import MemoryBackend
 from axiom.memory.semantic import SemanticIndex
-_SCHEMA = (Path(__file__).parent / 'schema.sql').read_text(encoding='utf-8')
+import sys
+import os
+
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    # Running in a PyInstaller bundle
+    base_dir = Path(sys._MEIPASS) / 'axiom' / 'memory'
+else:
+    # Running in normal Python environment
+    base_dir = Path(__file__).parent
+
+_SCHEMA = (base_dir / 'schema.sql').read_text(encoding='utf-8')
 
 class MemoryStore(MemoryBackend):
     """Async SQLite-backed memory store implementing the MemoryBackend protocol.

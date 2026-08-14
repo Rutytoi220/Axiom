@@ -84,7 +84,11 @@ class DesktopAutomationTool(BaseTool):
         """Lazy-import pyautogui and apply safety settings."""
         if self._gui is not None:
             return
-        import pyautogui
+        try:
+            import pyautogui
+        except (ImportError, OSError, RuntimeError) as e:
+            logger.warning(f"DesktopAutomationTool gracefully disabled (missing X11/Wayland libs, e.g., python3-xlib): {e}")
+            raise RuntimeError(f"Desktop automation is unavailable on this host due to missing system dependencies: {e}")
         pyautogui.FAILSAFE = True
         pyautogui.PAUSE = 0.5
         self._gui = pyautogui

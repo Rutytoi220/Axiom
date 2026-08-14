@@ -78,6 +78,8 @@ class VisionCaptureTool(BaseTool):
                 buf = io.BytesIO()
                 img.save(buf, format="PNG")
                 image_bytes = buf.getvalue()
+            except (ImportError, OSError, RuntimeError) as e:
+                logger.warning(f"pyautogui gracefully disabled (missing X11/Wayland libs): {e}")
             except Exception as e:
                 logger.debug(f"pyautogui screenshot failed: {e}")
 
@@ -89,6 +91,8 @@ class VisionCaptureTool(BaseTool):
                     monitor = sct.monitors[1]
                     sct_img = sct.grab(monitor)
                     image_bytes = mss.tools.to_png(sct_img.rgb, sct_img.size)
+            except (ImportError, OSError, RuntimeError) as e:
+                logger.warning(f"mss fallback gracefully disabled (missing X11 libs): {e}")
             except Exception as e:
                 logger.debug(f"mss fallback failed: {e}")
 
