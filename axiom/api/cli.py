@@ -81,12 +81,16 @@ Returns:
         self._init_system()
         import multiprocessing
         from axiom.memory.sleep_cycle import SleepCycleDaemon
+        from axiom.memory.pruner import MemoryPrunerDaemon
         from axiom.core.routine import RoutineEngine
         self.sleep_daemon: SleepCycleDaemon | None = None
+        self.pruner_daemon: MemoryPrunerDaemon | None = None
         self.routine_engine: RoutineEngine | None = None
         if multiprocessing.current_process().name == 'MainProcess':
             self.sleep_daemon = SleepCycleDaemon(self.engine.event_bus, self.memory, self.ollama)
             self.sleep_daemon.start()
+            self.pruner_daemon = MemoryPrunerDaemon(self.memory, self.ollama)
+            self.pruner_daemon.start()
             from axiom.core.routine import RoutineEngine
             self.routine_engine = RoutineEngine(self)
             self.routine_engine.start()
@@ -661,9 +665,10 @@ Returns:
                     if sys.platform == "win32":
                         import subprocess
                         # Write to Windows Event Viewer Application Log
+                        escaped_msg = error_msg.replace("'", "''")
                         subprocess.run([
                             "powershell", "-Command",
-                            f"Write-EventLog -LogName Application -Source Application -EventId 1000 -EntryType Error -Message '{error_msg.replace('\'', '\'\'')}'"
+                            f"Write-EventLog -LogName Application -Source Application -EventId 1000 -EntryType Error -Message '{escaped_msg}'"
                         ], check=False)
                     elif sys.platform == "darwin":
                         import subprocess
