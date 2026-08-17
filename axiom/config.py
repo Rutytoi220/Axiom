@@ -5,6 +5,8 @@ from pathlib import Path
 
 from enum import Enum
 
+CONFIG_DIR = Path.home() / ".config" / "axiom"
+
 class AuthMode(Enum):
     STRICT = 'strict'
     BASIC = 'basic'
@@ -52,6 +54,8 @@ Returns:
     
     # UI / GUI Settings
     first_launch: bool = True
+    oobe_completed: bool = False
+    vision_model: str = ''
     theme_mode: str = 'dark'  # 'system', 'dark', 'light'
     ui_profile_level: str = 'standard' # 'standard', 'advanced', 'developer'
     llm_complexity: str = 'detailed' # 'concise', 'detailed', 'academic'
@@ -101,6 +105,8 @@ Returns:
             'monitor_window_focus': self.monitor_window_focus, 
             'monitor_clipboard': self.monitor_clipboard,
             'first_launch': self.first_launch,
+            'oobe_completed': self.oobe_completed,
+            'vision_model': self.vision_model,
             'theme_mode': self.theme_mode,
             'ui_profile_level': self.ui_profile_level,
             'llm_complexity': self.llm_complexity,
@@ -118,7 +124,7 @@ Returns:
         """Save configuration to ~/.config/axiom/settings.json."""
         import json
         from pathlib import Path
-        config_dir = Path.home() / ".config" / "axiom"
+        config_dir = CONFIG_DIR
         config_dir.mkdir(parents=True, exist_ok=True)
         config_path = config_dir / "settings.json"
         
@@ -133,13 +139,19 @@ Returns:
         """Load configuration from ~/.config/axiom/settings.json."""
         import json
         from pathlib import Path
-        config_path = Path.home() / ".config" / "axiom" / "settings.json"
+        config_path = CONFIG_DIR / "settings.json"
         
         if config_path.exists():
             try:
                 with open(config_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    return cls.from_dict(data)
+                if 'oobe_completed' not in data:
+                    # Migrating a pre-v11 install: if the legacy UI config already
+                    # exists, this user was already onboarded once and should not
+                    # be forced through the new wizard again.
+                    legacy_ui_config = CONFIG_DIR / "ui_config.json"
+                    data['oobe_completed'] = legacy_ui_config.exists()
+                return cls.from_dict(data)
             except Exception as e:
                 print(f"Failed to load AXIOM config: {e}")
         return cls()
