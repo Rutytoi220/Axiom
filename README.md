@@ -2,12 +2,24 @@
 
 AXIOM is a PySide6, local-first AI orchestrator equipped with Zero-Trust Tailscale Swarm capabilities, native desktop automation, multimodal vision, and real-time audio. Built for privacy, speed, and deep system integration, AXIOM transitions from a simple chat interface into a fully autonomous distributed AI operating system.
 
+## 🏗️ Architecture
+
+> **[→ View the full interactive architecture diagram](https://rutytoi220.github.io/Axiom/AXIOM_ARCHITECTURE.html)**
+
+A complete map of the data flow: PySide6 GUI → AxiomBridge → IPC → Engine/EventBus → OrchestratorAgent → SmartRouter → LiteLLM/Ollama, plus the Memory subsystem, Vision pipeline, Tailscale Swarm, Tool Arsenal, and MCP Bridge.
+
+---
+
 ## 🚀 The V11 Feature Matrix
 
 - 🌐 **The Swarm:** Headless Debian node execution over encrypted Tailscale mesh (`100.x.x.x`).
 - 👻 **Ghost in the Machine:** Native Linux desktop automation (mouse/keyboard control) via PyAutoGUI with strict failsafes.
 - 👁️ **Multimodal Vision:** 5-tier OS-level screen capture (Wayland/X11) routed to local vision models (`qwen3-vl`).
 - 🎙️ **Real-Time Audio:** Offline Push-to-Talk via `faster-whisper` and non-blocking `pyttsx3` TTS.
+- 🔌 **MCP Bridge:** Dynamically discovers and registers tools from any MCP-compatible server at boot.
+- 🧠 **Semantic Memory:** SQLite + Qdrant vector store with temporal decay scoring and `nomic-embed-text` embeddings.
+
+---
 
 ## 📥 Download & Installation (End Users)
 
@@ -47,7 +59,7 @@ AXIOM is designed to be installed easily into any Python environment for develop
 git clone https://github.com/Rutytoi220/Axiom.git
 cd Axiom
 
-# Install dependencies (or use pip install .)
+# Install dependencies (or use pip install .)\
 pip install -r requirements.txt
 pip install .
 ```
@@ -67,4 +79,4 @@ On your first launch, AXIOM greets you with the "First Contact" Out-Of-Box Exper
 
 ---
 
-*AXIOM v10.8.0 LTS — Developed by the Open-Source Community.*
+*AXIOM v11.2.0 — Developed by the Open-Source Community.*
