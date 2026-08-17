@@ -26,7 +26,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version-file: ".python-version"
+          python-version: "3.10"
 
       - name: Install dependencies
         run: |
@@ -37,4 +37,6 @@ jobs:
         run: uv run ruff check .
 
       - name: Run Pytest
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: xvfb-run -a uv run pytest
