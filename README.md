@@ -63,7 +63,7 @@ axiomd &
 axiom
 ```
 
-On your first launch, the Out-Of-Box Experience (OOBE) will guide you through selecting your UI accent color and setting up your Voice interaction preferences (Push-to-Talk vs Wake Word).
+On your first launch, AXIOM greets you with the "First Contact" Out-Of-Box Experience (OOBE) — a 4-page onboarding wizard that welcomes you, live-scans your machine for Ollama/Tailscale/Audio readiness, introduces The Arsenal (Ghost in the Machine, Sensory Engine, The Swarm), and lets you pick your default Chat and Vision models from your installed Ollama models before handing off to the main interface.
 
 ---
 
