@@ -1,4 +1,13 @@
 """Orchestrator agent with a stable state-machine tool-calling loop."""
+# ── ReAct / SoM prompt helpers (imported lazily to avoid circular deps) ──────
+try:
+    from axiom.core.system_prompt import extract_xml_tool_call, build_som_override
+except ImportError:
+    # Graceful degradation if the module is missing (e.g. on old installations)
+    def extract_xml_tool_call(text):  # type: ignore[misc]
+        return None
+    def build_som_override(names=None):  # type: ignore[misc]
+        return ""
 import asyncio
 import json
 import logging
@@ -342,6 +351,18 @@ Returns:
             if state == AgentState.THINK:
                 self._log(f'THINK round {rounds}: {plan.current()}', steps)
 
+                # [SOM REACT OVERRIDE] ─────────────────────────────────────────
+                # When the intent is vision or desktop control, inject the strict
+                # ReAct XML state-machine prompt on the first round so small
+                # models follow the THOUGHT → <tool_call> rail exactly.
+                if rounds == 1 and intent in ('vision', 'desktop') and (not override_prompt):
+                    try:
+                        tool_names = list(self.registry.list_tools().keys()) if self.registry and hasattr(self.registry, 'list_tools') else []
+                        override_prompt = build_som_override(tool_names)
+                        logger.info('[SoM] Injected ReAct XML state-machine override for intent=%s', intent)
+                    except Exception as _som_err:
+                        logger.warning('[SoM] Could not inject override: %s', _som_err)
+
                 # [RAG INTERCEPT] - Inject semantic memory context on first round
                 if rounds == 1:
                     try:
@@ -402,6 +423,24 @@ Returns:
                                 'error': '[System Warning]: Do not output raw markdown instructions. You are in Autopilot Mode—invoke the tool call schema directly to execute this action.'
                             })
                             continue
+
+                # [XML TOOL-CALL EXTRACTOR] ────────────────────────────────────
+                # Highest-priority fallback: parse <tool_call>{…}</tool_call>
+                # blobs emitted by models running under the ReAct / SoM prompt.
+                # This runs *before* the legacy plaintext regex chain so that
+                # well-formed XML blocks are never misrouted by pattern noise.
+                if not tool_calls and content and use_tools:
+                    xml_call = extract_xml_tool_call(str(content))
+                    if xml_call:
+                        logger.info('[XML Extractor] Extracted tool call via <tool_call> tag: %s', xml_call.get('function', {}).get('name'))
+                        tool_calls.append(xml_call)
+                        # Strip the entire <thought>…</thought> and <tool_call>…</tool_call>
+                        # blocks from the visible content so they don't leak to the UI.
+                        import re as _re
+                        clean = _re.sub(r'<thought>[\s\S]*?</thought>', '', str(content), flags=_re.IGNORECASE).strip()
+                        clean = _re.sub(r'<tool_call>[\s\S]*?</tool_call>', '', clean, flags=_re.IGNORECASE).strip()
+                        response_msg['content'] = clean
+                        content = clean
 
                 if not tool_calls and content and use_tools:
                     pattern_python = '(\\w+)\\s*\\(["\\\']?(.*?)["\\\']?\\)'
