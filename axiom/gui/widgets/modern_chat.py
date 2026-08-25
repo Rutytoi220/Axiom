@@ -157,6 +157,11 @@ class ModernChatBubble(QFrame):
             }}
         """)
 
+    def set_text(self, text: str):
+        self._raw_text = text
+        html_content = markdown.markdown(self._raw_text, extensions=['fenced_code', 'tables'])
+        self.text_browser.setHtml(html_content)
+
 class ModernChatDisplay(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
