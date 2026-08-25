@@ -232,9 +232,6 @@ class SomClickTool(BaseTool):
             default=1,
         ))
 
-        # Lazy-loaded pyautogui reference.
-        self._gui = None
-
     # ── Public execute ────────────────────────────────────────────────────────
 
     async def execute(  # type: ignore[override]
@@ -283,21 +280,11 @@ class SomClickTool(BaseTool):
 
         # ── Perform the click ─────────────────────────────────────────────────
         try:
-            self._ensure_gui()
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                partial(
-                    self._gui.click,
-                    x=x, y=y,
-                    button=button,
-                    clicks=int(clicks),
-                    interval=0.05,
-                ),
-            )
-        except RuntimeError as exc:
-            # _ensure_gui() raised — desktop automation not available.
-            return ToolResult(success=False, error=str(exc))
+            subprocess.run(["hyprctl", "dispatch", "movecursor", f"{x} {y}"])
+            
+            btn_code = "3" if button == "right" else "1"
+            for _ in range(int(clicks)):
+                subprocess.run(["hyprctl", "dispatch", "click", btn_code])
         except Exception as exc:
             logger.error("SomClickTool: click failed at (%d, %d): %s", x, y, exc)
             return ToolResult(
@@ -319,23 +306,6 @@ class SomClickTool(BaseTool):
         )
 
     # ── Private helpers ───────────────────────────────────────────────────────
-
-    def _ensure_gui(self) -> None:
-        """Lazy-import pyautogui with FAILSAFE enabled. Raises RuntimeError if unavailable."""
-        if self._gui is not None:
-            return
-        try:
-            import pyautogui  # type: ignore
-        except (ImportError, OSError, RuntimeError) as exc:
-            raise RuntimeError(
-                f"Desktop automation (pyautogui) unavailable on this host: {exc}. "
-                "This tool only works on local desktop nodes, not headless Swarm Nodes."
-            ) from exc
-
-        pyautogui.FAILSAFE = True   # move mouse to top-left corner to abort
-        pyautogui.PAUSE = 0.3       # slight delay between actions prevents race conditions
-        self._gui = pyautogui
-        logger.info("SomClickTool: pyautogui initialised (FAILSAFE=True).")
 
 
 # ── Utility ───────────────────────────────────────────────────────────────────

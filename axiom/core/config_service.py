@@ -1,13 +1,42 @@
 import logging
 from typing import Optional, List
+import urllib.request
+import subprocess
+import time
 from axiom.config import AxiomConfig
 from axiom.llm.ollama_client import OllamaClient
 
 logger = logging.getLogger(__name__)
 
+def ensure_ollama_running():
+    try:
+        urllib.request.urlopen("http://127.0.0.1:11434/", timeout=1)
+        return True
+    except Exception:
+        print("[System] Ollama daemon not found. Starting 'ollama serve' in background...")
+        subprocess.Popen(
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True
+        )
+        # Wait up to 5 seconds for it to boot
+        for _ in range(10):
+            time.sleep(0.5)
+            try:
+                urllib.request.urlopen("http://127.0.0.1:11434/", timeout=1)
+                print("[System] Ollama daemon successfully started.")
+                return True
+            except Exception:
+                continue
+        print("[Error] Failed to start Ollama daemon.")
+        return False
+
 def initialize_model_config(config: AxiomConfig, ollama: OllamaClient) -> None:
     """Dynamically validates and aligns AXIOM's model config with the local Ollama instance."""
     print("[ConfigService] Checking Ollama connection and installed models...")
+    
+    ensure_ollama_running()
     
     try:
         if not ollama.is_available():
