@@ -228,4 +228,7 @@ class ModernSidebar(QFrame):
                 border-image: none;
                 image: none;
             }}
+            QTreeView::branch:selected {{ background: transparent; }}
+            QTreeView::branch:hover {{ background: transparent; }}
+            QTreeView::branch:active {{ background: transparent; }}
         """)
