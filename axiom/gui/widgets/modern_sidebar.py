@@ -1,241 +1,226 @@
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont, QCursor
+import os
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QFrame, QTreeWidget, QTreeWidgetItem, QSizePolicy, QToolButton
+    QWidget, QVBoxLayout, QPushButton, QTreeWidget, 
+    QTreeWidgetItem, QLabel, QHBoxLayout, QFrame
 )
+from PySide6.QtCore import Qt, Signal, QSize
+from PySide6.QtGui import QIcon
+from axiom.gui.styles.theme_manager import ThemeManager
 
-class ModeSelector(QFrame):
-    """A sleek pill-shaped segmented control for mode selection."""
-    mode_changed = Signal(str)
+class SegmentedControl(QFrame):
+    value_changed = Signal(str)
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setStyleSheet("""
-            QFrame {
-                background-color: #262626;
-                border-radius: 16px;
-                padding: 4px;
-            }
-            QPushButton {
-                background-color: transparent;
+    def __init__(self, theme_manager: ThemeManager):
+        super().__init__()
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.t = theme_manager.theme
+        self.layout = QHBoxLayout(self)
+        self.layout.setContentsMargins(4, 4, 4, 4)
+        self.layout.setSpacing(4)
+        
+        self.buttons = []
+        self.active_btn = None
+        
+        for mode in ["Basic", "Strict", "Autopilot"]:
+            btn = QPushButton(mode)
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda checked, b=btn: self._on_toggled(b))
+            self.buttons.append(btn)
+            self.layout.addWidget(btn)
+            
+        self.buttons[0].setChecked(True)
+        self.active_btn = self.buttons[0]
+        self._apply_theme()
+
+    def _on_toggled(self, clicked_btn):
+        for btn in self.buttons:
+            if btn != clicked_btn:
+                btn.setChecked(False)
+        clicked_btn.setChecked(True)
+        self.active_btn = clicked_btn
+        self.value_changed.emit(clicked_btn.text().lower())
+        self._apply_theme()
+
+    def _apply_theme(self):
+        self.setStyleSheet(f"""
+            SegmentedControl {{
+                background-color: #0E0E17;
+                border-radius: 18px;
+                border: 1px solid #2D2B3D;
+                padding: 2px;
+            }}
+            QPushButton {{
+                background: transparent;
+                color: {self.t.colors.text_secondary};
                 border: none;
-                color: #A0A0A0;
-                font-family: 'Inter', sans-serif;
-                font-size: 13px;
-                font-weight: 500;
                 padding: 6px 12px;
-                border-radius: 12px;
-            }
-            QPushButton:hover {
+                border-radius: 14px;
+                font-family: {self.t.typography.font_main};
+                font-size: {self.t.typography.size_sm}px;
+                font-weight: 500;
+            }}
+            QPushButton:checked {{
+                background-color: #2D2B3D;
                 color: #FFFFFF;
-            }
-            QPushButton:checked {
-                color: #FFFFFF;
-                font-weight: bold;
-            }
+            }}
+            QPushButton:hover:!checked {{
+                color: {self.t.colors.text_primary};
+            }}
         """)
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        self.btn_basic = QPushButton("Basic")
-        self.btn_basic.setCheckable(True)
-        self.btn_basic.setCursor(Qt.PointingHandCursor)
-        self.btn_basic.clicked.connect(lambda: self.select_mode("basic"))
-
-        self.btn_strict = QPushButton("Strict")
-        self.btn_strict.setCheckable(True)
-        self.btn_strict.setCursor(Qt.PointingHandCursor)
-        self.btn_strict.clicked.connect(lambda: self.select_mode("strict"))
-
-        self.btn_autopilot = QPushButton("Autopilot")
-        self.btn_autopilot.setCheckable(True)
-        self.btn_autopilot.setCursor(Qt.PointingHandCursor)
-        self.btn_autopilot.clicked.connect(lambda: self.select_mode("autopilot"))
-
-        layout.addWidget(self.btn_basic)
-        layout.addWidget(self.btn_strict)
-        layout.addWidget(self.btn_autopilot)
-        
-        # Default selection
-        self.select_mode("autopilot")
-
-    def select_mode(self, mode: str):
-        self.btn_basic.setChecked(mode == "basic")
-        self.btn_strict.setChecked(mode == "strict")
-        self.btn_autopilot.setChecked(mode == "autopilot")
-
-        # Apply specific accent colors when checked
-        self.btn_basic.setStyleSheet("QPushButton:checked { background-color: #4B5563; }")
-        self.btn_strict.setStyleSheet("QPushButton:checked { background-color: #D97706; }")
-        self.btn_autopilot.setStyleSheet("QPushButton:checked { background-color: #2563EB; }")
-        
-        self.mode_changed.emit(mode)
-
 
 class ModernSidebar(QFrame):
-    """The sleek, modern left sidebar for navigation and mode selection."""
-    
     new_chat_requested = Signal()
     new_project_requested = Signal()
-    conversation_selected = Signal(str, str) # project_id, chat_id
+    new_project_chat_requested = Signal(str)
+    conversation_selected = Signal(str, str)
     mode_changed = Signal(str)
+    chat_selected = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(260)
-        self.setStyleSheet("""
-            QFrame {
-                background-color: #171717;
-                border-right: 1px solid #2E2E2E;
-            }
-            QLabel {
-                color: #888888;
-                font-family: 'Inter', sans-serif;
-                font-size: 12px;
-                font-weight: 600;
-                text-transform: uppercase;
-                margin-top: 10px;
-                margin-bottom: 4px;
-                border: none;
-            }
-            QTreeWidget {
+        self.theme_manager = getattr(parent, 'theme_manager', ThemeManager())
+        self.t = self.theme_manager.theme
+        
+        self.setFixedWidth(280)
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(12, 12, 12, 12)
+        self.layout.setSpacing(16)
+
+        self.mode_selector = SegmentedControl(self.theme_manager)
+        self.mode_selector.value_changed.connect(self.mode_changed.emit)
+        self.layout.addWidget(self.mode_selector)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(8)
+        
+        self.new_chat_btn = QPushButton("+ New Chat")
+        self.new_chat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.new_chat_btn.setFixedHeight(40)
+        self.new_chat_btn.clicked.connect(self.new_chat_requested.emit)
+        
+        self.new_proj_btn = QPushButton("+ Project")
+        self.new_proj_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.new_proj_btn.setFixedHeight(40)
+        self.new_proj_btn.clicked.connect(self.new_project_requested.emit)
+
+        btn_layout.addWidget(self.new_chat_btn)
+        btn_layout.addWidget(self.new_proj_btn)
+        self.layout.addLayout(btn_layout)
+
+        self.tree = QTreeWidget()
+        self.tree.setColumnCount(1)
+        self.tree.setHeaderHidden(True)
+        self.tree.setIndentation(16)
+        self.tree.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.tree.setAttribute(Qt.WidgetAttribute.WA_MacShowFocusRect, False)
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._show_context_menu)
+        
+        self.layout.addWidget(self.tree)
+        self.tree.itemSelectionChanged.connect(self._on_tree_selection)
+
+        self.layout.addStretch(1)
+
+        self.settings_btn = QPushButton("⚙ Settings")
+        self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.settings_btn.setFixedHeight(40)
+        self.layout.addWidget(self.settings_btn)
+
+        self._apply_theme()
+
+    def _on_tree_selection(self):
+        items = self.tree.selectedItems()
+        if not items:
+            return
+        item = items[0]
+        if item.parent():
+            chat_id = item.data(0, Qt.ItemDataRole.UserRole)
+            project_id = item.parent().data(0, Qt.ItemDataRole.UserRole)
+            self.conversation_selected.emit(project_id, chat_id)
+
+    def _show_context_menu(self, pos):
+        from PySide6.QtWidgets import QMenu
+        item = self.tree.itemAt(pos)
+        if item and not item.parent():
+            project_id = item.data(0, Qt.ItemDataRole.UserRole)
+            menu = QMenu(self)
+            new_chat_action = menu.addAction("➕ New Chat in Project")
+            action = menu.exec(self.tree.mapToGlobal(pos))
+            if action == new_chat_action:
+                self.new_project_chat_requested.emit(project_id)
+
+    def populate_projects(self, projects_data: list) -> None:
+        self.tree.clear()
+        
+        for p_data in projects_data:
+            proj = p_data["project"]
+            chats = p_data["chats"]
+            
+            proj_item = QTreeWidgetItem(self.tree)
+            proj_item.setText(0, proj.get("name", "Unnamed Project"))
+            proj_item.setData(0, Qt.ItemDataRole.UserRole, proj.get("id"))
+            proj_item.setExpanded(True)
+            proj_item.setSizeHint(0, QSize(0, 44))
+            
+            font = proj_item.font(0)
+            font.setBold(True)
+            proj_item.setFont(0, font)
+            proj_item.setFlags(proj_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            
+            for chat in chats:
+                chat_item = QTreeWidgetItem(proj_item)
+                chat_item.setText(0, chat.get("title", "New Chat"))
+                chat_item.setData(0, Qt.ItemDataRole.UserRole, chat.get("id"))
+                chat_item.setSizeHint(0, QSize(0, 44))
+
+    def _apply_theme(self):
+        self.setStyleSheet(f"""
+            ModernSidebar {{
+                background-color: {self.t.colors.bg_base};
+                border-right: 1px solid {self.t.colors.border_default};
+            }}
+            QPushButton {{
+                background-color: {self.t.colors.bg_surface};
+                color: {self.t.colors.text_primary};
+                border: 1px solid {self.t.colors.border_default};
+                border-radius: 20px;
+                font-family: {self.t.typography.font_main};
+                font-size: {self.t.typography.size_sm}px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {self.t.colors.bg_surface_hover};
+                border: 1px solid {self.t.colors.accent};
+            }}
+            QTreeWidget {{
                 background: transparent;
                 border: none;
-                color: #D1D5DB;
-                font-family: 'Inter', sans-serif;
-                font-size: 13px;
-                outline: 0;
-            }
-            QTreeWidget::item {
-                padding: 6px 4px;
-                border-radius: 6px;
-            }
-            QTreeWidget::item:hover {
-                background-color: #262626;
-                color: #FFFFFF;
-            }
-            QTreeWidget::item:selected {
-                background-color: #333333;
-                color: #FFFFFF;
-                font-weight: bold;
-            }
-            QTreeWidget::branch:has-children:!has-siblings:closed,
-            QTreeWidget::branch:closed:has-children:has-siblings {
+                outline: none;
+            }}
+            QTreeWidget::item {{
+                color: {self.t.colors.text_secondary};
+                padding: 0px 16px;
+                border-radius: 12px;
+                margin: 2px 4px;
+                border: none;
+                outline: none;
+            }}
+            QTreeWidget::item:hover {{
+                background-color: {self.t.colors.bg_surface};
+                color: {self.t.colors.text_primary};
+            }}
+            QTreeWidget::item:selected {{
+                background-color: {self.t.colors.bg_surface_active};
+                color: {self.t.colors.text_primary};
+                border: none;
+                outline: none;
+            }}
+            QTreeWidget::item:focus {{ outline: none; background-color: transparent; }}
+            QTreeWidget::item:selected:active {{ outline: none; border: none; }}
+            QTreeView::branch {{
                 border-image: none;
                 image: none;
-            }
-            QTreeWidget::branch:open:has-children:!has-siblings,
-            QTreeWidget::branch:open:has-children:has-siblings {
-                border-image: none;
-                image: none;
-            }
+                background: transparent;
+            }}
         """)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 20, 16, 20)
-        layout.setSpacing(10)
-
-        # New Chat Button
-        self.btn_new_chat = QPushButton("+ New Chat")
-        self.btn_new_chat.setCursor(Qt.PointingHandCursor)
-        self.btn_new_chat.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.btn_new_chat.setStyleSheet("""
-            QPushButton {
-                background-color: #2D2D2D;
-                color: #FFFFFF;
-                border: 1px solid #404040;
-                border-radius: 8px;
-                padding: 10px;
-                font-family: 'Inter', sans-serif;
-                font-size: 14px;
-                font-weight: 500;
-                text-align: left;
-            }
-            QPushButton:hover {
-                background-color: #383838;
-            }
-        """)
-        self.btn_new_chat.clicked.connect(self.new_chat_requested.emit)
-        
-        # New Project Button
-        self.btn_new_project = QPushButton("+ New Project")
-        self.btn_new_project.setCursor(Qt.PointingHandCursor)
-        self.btn_new_project.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.btn_new_project.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                color: #A0A0A0;
-                border: 1px solid #333333;
-                border-radius: 8px;
-                padding: 8px 10px;
-                font-family: 'Inter', sans-serif;
-                font-size: 13px;
-                font-weight: 500;
-                text-align: left;
-            }
-            QPushButton:hover {
-                background-color: #262626;
-                color: #FFFFFF;
-                border: 1px solid #404040;
-            }
-        """)
-        self.btn_new_project.clicked.connect(self.new_project_requested.emit)
-        
-        layout.addWidget(self.btn_new_chat)
-        layout.addWidget(self.btn_new_project)
-
-        # Tree Widget for Projects -> Conversations
-        layout.addWidget(QLabel("Projects"))
-        self.tree = QTreeWidget()
-        self.tree.setHeaderHidden(True)
-        self.tree.setIndentation(15)
-        layout.addWidget(self.tree)
-        
-        self.tree.itemSelectionChanged.connect(self._on_item_selected)
-        
-        layout.addStretch()
-
-        # Mode Selector
-        self.mode_selector = ModeSelector()
-        self.mode_selector.mode_changed.connect(self.mode_changed.emit)
-        layout.addWidget(self.mode_selector)
-
-    def populate_projects(self, projects_with_chats: list):
-        """Populate the tree with projects and their conversations.
-        Format: [{'project': meta_dict, 'chats': [chat_dict, ...]}, ...]
-        """
-        self.tree.clear()
-        for item_data in projects_with_chats:
-            proj = item_data['project']
-            chats = item_data['chats']
-            
-            if proj["id"] == "general":
-                parent_node = self.tree
-            else:
-                # Create Project Node
-                proj_item = QTreeWidgetItem(self.tree)
-                proj_item.setText(0, f"📁 {proj['title']}")
-                proj_item.setData(0, Qt.ItemDataRole.UserRole, {"type": "project", "id": proj["id"]})
-                parent_node = proj_item
-            
-            # Create Chat Nodes
-            for chat in chats:
-                chat_item = QTreeWidgetItem(parent_node)
-                chat_item.setText(0, f"💬 {chat['title']}")
-                chat_item.setData(0, Qt.ItemDataRole.UserRole, {"type": "chat", "project_id": proj["id"], "id": chat["id"]})
-                
-            if proj["id"] != "general":
-                self.tree.expandItem(proj_item)
-
-    def _on_item_selected(self):
-        selected = self.tree.selectedItems()
-        if not selected:
-            return
-            
-        item = selected[0]
-        data = item.data(0, Qt.ItemDataRole.UserRole)
-        if data and data.get("type") == "chat":
-            self.conversation_selected.emit(data["project_id"], data["id"])

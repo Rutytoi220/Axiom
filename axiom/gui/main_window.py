@@ -447,14 +447,24 @@ class MainWindow(QMainWindow):
         QApplication.quit()
 
     def _init_audio(self) -> None:
-        """Initialize the AudioManager facade (TTS + STT)."""
-        try:
-            from axiom.core.audio import AudioManager
-            self._audio = AudioManager.instance()
-            logger.info('AudioManager initialized')
-        except Exception as e:
-            self._audio = None
-            logger.error(f'AudioManager init failed: {e}')
+        """Initialize the AudioManager facade (TTS + STT) in a background thread.
+
+        AudioManager may trigger WhisperModel loading which takes several
+        seconds.  Running it on a daemon thread lets the UI paint and respond
+        immediately while the model loads silently in the background.
+        """
+        import threading
+
+        def _load():
+            try:
+                from axiom.core.audio import AudioManager
+                self._audio = AudioManager.instance()
+                logger.info('AudioManager initialized (background thread)')
+            except Exception as exc:
+                self._audio = None
+                logger.error('AudioManager init failed: %s', exc)
+
+        threading.Thread(target=_load, daemon=True).start()
 
     def _init_tray(self) -> None:
         self.tray_icon = QSystemTrayIcon(self)
@@ -498,6 +508,8 @@ class MainWindow(QMainWindow):
             "toggle_sidebar": lambda: self._toggle_sidebar(),
             "clear_chat":     lambda: self._on_clear_chat(),
             "open_settings":  lambda: self.settings_drawer.toggle(),
+            "prev_chat":      lambda: self._on_prev_chat(),
+            "next_chat":      lambda: self._on_next_chat(),
             # search_history: no UI hook yet — skipped gracefully
         }
         for action_id, spec in SHORTCUTS.items():
@@ -528,6 +540,54 @@ class MainWindow(QMainWindow):
             item = layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+
+    def _on_prev_chat(self) -> None:
+        """Select the previous chat item in the sidebar tree."""
+        self._navigate_chat(direction=-1)
+
+    def _on_next_chat(self) -> None:
+        """Select the next chat item in the sidebar tree."""
+        self._navigate_chat(direction=+1)
+
+    def _navigate_chat(self, direction: int) -> None:
+        """Walk the sidebar tree by `direction` (+1 next, -1 prev).
+
+        Project headers are not selectable (ItemIsSelectable cleared in
+        populate_projects), so we skip them and only land on chat leaves.
+        """
+        tree = self.sidebar.tree
+
+        # Flatten all tree items into a list in display order.
+        def _flatten(parent_item=None):
+            items = []
+            count = parent_item.childCount() if parent_item else tree.topLevelItemCount()
+            for i in range(count):
+                child = parent_item.child(i) if parent_item else tree.topLevelItem(i)
+                items.append(child)
+                items.extend(_flatten(child))
+            return items
+
+        all_items = _flatten()
+        # Keep only selectable chat leaves (project headers have ItemIsSelectable cleared).
+        selectable = [
+            it for it in all_items
+            if bool(it.flags() & Qt.ItemFlag.ItemIsSelectable)
+        ]
+        if not selectable:
+            return
+
+        selected = tree.selectedItems()
+        current = selected[0] if selected else None
+
+        if current and current in selectable:
+            idx = selectable.index(current)
+        else:
+            # Nothing selected yet — jump to first or last depending on direction.
+            idx = -1 if direction > 0 else 0
+
+        new_idx = (idx + direction) % len(selectable)
+        tree.setCurrentItem(selectable[new_idx])
+        tree.scrollToItem(selectable[new_idx])
 
     def _on_global_start_audio(self) -> None:
         """Activate the mic from a global hotkey — show window then start STT."""

@@ -49,9 +49,23 @@ class ModernInputBar(QFrame):
         self.layout.setContentsMargins(16, 0, 16, 0)
         self.layout.setSpacing(12)
 
-        self.attach_btn = QPushButton("📎")
-        self.attach_btn.setFixedSize(28, 28)
+        self.attach_btn = QPushButton("+")
+        self.attach_btn.setFixedSize(32, 32)
         self.attach_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.attach_btn.setStyleSheet("""
+            QPushButton {
+                background: #2D2B3D;
+                color: white;
+                border-radius: 16px;
+                font-weight: bold;
+                font-size: 18px;
+                min-width: 32px; max-width: 32px;
+                min-height: 32px; max-height: 32px;
+                border: none;
+                margin-right: 12px;
+            }
+            QPushButton:hover { background: #3D3B50; }
+        """)
 
         self.input_area = AutoExpandTextEdit(theme_manager)
         self.input_edit = self.input_area  # ALIAS for main_window.py
@@ -197,6 +211,9 @@ class ModernChatDisplay(QWidget):
         self.scroll_layout.setContentsMargins(0, 0, 0, 0)
         self.scroll_layout.setSpacing(16)
         self.scroll_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        # Sentinel stretch — keeps bubbles pinned to natural height.
+        # add_bubble inserts before this item so bubbles never stretch to fill.
+        self.scroll_layout.addStretch(1)
         
         self.scroll_area.setWidget(self.scroll_widget)
         
@@ -229,15 +246,15 @@ class ModernChatDisplay(QWidget):
     def add_bubble(self, role: str, text: str):
         if text.strip() == "AXIOM v11.2":
             return None
-            
+
         if text.strip() == "":
             text = "<i>[Executing Tool...]</i>"
-            
+
         if self.watermark.isVisible():
             self.watermark.hide()
-            
+
         bubble = ModernChatBubble(role, text, self.theme_manager)
-        
+
         wrapper = QHBoxLayout()
         if role == "user":
             wrapper.addStretch()
@@ -245,7 +262,8 @@ class ModernChatDisplay(QWidget):
         else:
             wrapper.addWidget(bubble)
             wrapper.addStretch()
-            
-        self.scroll_layout.addLayout(wrapper)
+
+        # Insert before the sentinel stretch so bubbles don't expand vertically.
+        self.scroll_layout.insertLayout(self.scroll_layout.count() - 1, wrapper)
         self._scroll_to_bottom()
         return bubble

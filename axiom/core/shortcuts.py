@@ -84,6 +84,18 @@ SHORTCUTS: Dict[str, Dict[str, Any]] = {
         "global": False,
         "description": "Search through conversation history (unbound by default).",
     },
+    "prev_chat": {
+        "name": "Previous Chat",
+        "default": "Alt+Up",
+        "global": False,
+        "description": "Select the previous chat in the sidebar.",
+    },
+    "next_chat": {
+        "name": "Next Chat",
+        "default": "Alt+Down",
+        "global": False,
+        "description": "Select the next chat in the sidebar.",
+    },
 
     # ── Global (pynput — works even when AXIOM is hidden) ─────────────────────
     "toggle_axiom": {
