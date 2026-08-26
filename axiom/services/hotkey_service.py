@@ -1,71 +1,133 @@
+"""AXIOM Services — Global Hotkey Listener.
+
+Reads every action marked ``global=True`` from the central shortcut registry
+(``axiom.core.shortcuts.SHORTCUTS``) and registers them with pynput's
+``GlobalHotKeys``.  Emits a corresponding Qt Signal on activation so the main
+Qt thread can react safely.
+
+Adding a new global hotkey
+--------------------------
+1. Add the action to ``SHORTCUTS`` in ``axiom/core/shortcuts.py`` with
+   ``"global": True`` and a pynput-format key string as ``"default"``.
+2. Add a matching ``Signal()`` to ``HotkeySignaler`` below.
+3. Add a line to ``_ACTION_SIGNAL_MAP`` mapping the action_id to that signal.
+That's it — no further changes needed here.
+"""
+
 import logging
 import threading
+from typing import Dict, Optional
+
 from PySide6.QtCore import QObject, Signal
-from pynput import keyboard
+
+try:
+    from pynput import keyboard
+    _PYNPUT_AVAILABLE = True
+except ImportError:
+    _PYNPUT_AVAILABLE = False
+
+from axiom.core.shortcuts import SHORTCUTS
 
 logger = logging.getLogger(__name__)
 
+
 class HotkeySignaler(QObject):
-    """QObject to bridge pynput events to the main Qt thread safely."""
-    toggle_requested = Signal()
-    context_summoned = Signal()
-    vision_summoned = Signal()
+    """QObject that bridges pynput thread events into the Qt main thread safely.
+
+    One Signal per global action.  Add a new Signal here whenever you add a
+    new ``global=True`` entry to the shortcut registry.
+    """
+    toggle_requested = Signal()    # toggle_axiom
+    context_summoned = Signal()    # (legacy — kept for backwards compat)
+    vision_summoned  = Signal()    # (legacy — kept for backwards compat)
+    start_audio      = Signal()    # start_audio
+    capture_screen   = Signal()    # capture_screen
+
+
+# Maps action_id (from SHORTCUTS) → the HotkeySignaler method name to emit.
+_ACTION_SIGNAL_MAP: Dict[str, str] = {
+    "toggle_axiom":   "toggle_requested",
+    "start_audio":    "start_audio",
+    "capture_screen": "capture_screen",
+}
+
 
 class GlobalHotkeyService:
-    """Listens for a global hotkey and emits a Qt Signal."""
+    """Dynamically registers all global hotkeys from the shortcut registry."""
 
-    def __init__(self, hotkey: str = '<ctrl>+<alt>+<space>', context_hotkey: str = '<ctrl>+<alt>+c', vision_hotkey: str = '<ctrl>+<alt>+v'):
-        self.hotkey = hotkey
-        self.context_hotkey = context_hotkey
-        self.vision_hotkey = vision_hotkey
+    def __init__(self) -> None:
         self.signaler = HotkeySignaler()
-        self._listener = None
+        self._listener: Optional[object] = None
         self._running = False
 
-    def start(self):
-        """Starts the global hotkey listener in a background thread."""
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def start(self) -> None:
+        """Start the global hotkey listener in a daemon background thread."""
         if self._running:
+            return
+        if not _PYNPUT_AVAILABLE:
+            logger.error("pynput not installed — global hotkeys disabled.")
             return
 
         self._running = True
-        
-        def on_activate():
-            logger.info("Global hotkey activated.")
-            # Emit signal to notify Qt main thread safely
-            self.signaler.toggle_requested.emit()
 
-        def on_context_activate():
-            logger.info("Context hotkey activated.")
-            self.signaler.context_summoned.emit()
-            
-        def on_vision_activate():
-            logger.info("Vision hotkey activated.")
-            self.signaler.vision_summoned.emit()
+        # Build the pynput hotkey map dynamically from the registry.
+        hotkey_map: Dict[str, object] = {}
+        for action_id, spec in SHORTCUTS.items():
+            if not spec.get("global"):
+                continue
+            key_str: Optional[str] = spec.get("default")
+            if not key_str:
+                continue
+            signal_name = _ACTION_SIGNAL_MAP.get(action_id)
+            if signal_name is None:
+                logger.warning(
+                    "[HotkeyService] No signal mapped for global action '%s'. "
+                    "Add it to _ACTION_SIGNAL_MAP in hotkey_service.py.",
+                    action_id,
+                )
+                continue
+
+            # Capture by value in the closure.
+            def _make_handler(sig_name: str, act_id: str):
+                def _handler():
+                    logger.info("[HotkeyService] Global hotkey fired: %s", act_id)
+                    getattr(self.signaler, sig_name).emit()
+                return _handler
+
+            hotkey_map[key_str] = _make_handler(signal_name, action_id)
+            logger.debug(
+                "[HotkeyService] Registered global hotkey: %s -> %s",
+                key_str, action_id,
+            )
+
+        if not hotkey_map:
+            logger.warning("[HotkeyService] No global hotkeys to register.")
+            return
 
         def _run_listener():
-            logger.info(f"Starting global hotkey listener for: {self.hotkey}")
+            logger.info(
+                "[HotkeyService] Starting pynput listener for %d hotkeys.",
+                len(hotkey_map),
+            )
             try:
-                self._listener = keyboard.GlobalHotKeys({
-                    self.hotkey: on_activate,
-                    self.context_hotkey: on_context_activate,
-                    self.vision_hotkey: on_vision_activate
-                })
+                self._listener = keyboard.GlobalHotKeys(hotkey_map)
                 self._listener.start()
                 self._listener.join()
-            except Exception as e:
-                logger.error(f"Failed to start hotkey listener: {e}")
+            except Exception as exc:
+                logger.error("[HotkeyService] Listener error: %s", exc)
 
-        # Start in a daemon thread so it doesn't block PySide6 teardown
         thread = threading.Thread(target=_run_listener, daemon=True)
         thread.start()
 
-    def stop(self):
-        """Stops the global hotkey listener."""
+    def stop(self) -> None:
+        """Stop the pynput listener cleanly."""
         self._running = False
         if self._listener:
             try:
                 self._listener.stop()
-            except Exception as e:
-                logger.error(f"Error stopping hotkey listener: {e}")
+            except Exception as exc:
+                logger.error("[HotkeyService] Error stopping listener: %s", exc)
             self._listener = None
-        logger.info("Global hotkey listener stopped.")
+        logger.info("[HotkeyService] Global hotkey listener stopped.")

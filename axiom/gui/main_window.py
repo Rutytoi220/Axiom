@@ -14,8 +14,10 @@ import os
 from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt, QSize, Slot, QTimer, Signal
 from PySide6.QtGui import QAction, QFont, QIcon, QKeySequence, QShortcut
-from PySide6.QtWidgets import QButtonGroup, QDockWidget, QFrame, QHBoxLayout, QLabel, QMainWindow, QPushButton, QScrollArea, QSizePolicy, QStatusBar, QTextEdit, QToolBar, QToolButton, QVBoxLayout, QWidget, QSystemTrayIcon, QMenu, QApplication
+from PySide6.QtWidgets import QButtonGroup, QDockWidget, QFrame, QHBoxLayout, QLabel, QMainWindow, QPushButton, QScrollArea, QSizePolicy, QStatusBar, QTextEdit, QToolBar, QToolButton, QVBoxLayout, QWidget, QSystemTrayIcon, QMenu, QApplication, QSplitter
 from axiom.config import get_config, AuthMode
+from axiom.core.shortcuts import SHORTCUTS
+from axiom.gui.styles.theme_manager import get_theme_manager
 from axiom.gui.widgets.swarm_pill import SwarmPill
 from axiom.gui.widgets.settings_dialog import SettingsDialog
 from axiom.gui.widgets.scheduler_ui import TemporalSchedulerDialog
@@ -273,7 +275,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle('AXIOM Pro — Sovereign AI')
         self.setMinimumSize(800, 600)
         self.resize(1000, 750)
-        self.setStyleSheet('QMainWindow { background-color: #121212; }')
+        self._theme_manager = get_theme_manager()
         
         self._project_manager = ProjectManager()
         self._current_project_id = "general"
@@ -295,15 +297,23 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        
         self.sidebar = ModernSidebar(self)
         self.sidebar.new_chat_requested.connect(self._on_new_chat)
         self.sidebar.new_project_requested.connect(self._on_new_project_requested)
         self.sidebar.conversation_selected.connect(self._on_conversation_selected)
         self.sidebar.mode_changed.connect(self._on_mode_changed)
-        main_layout.addWidget(self.sidebar)
+        self.splitter.addWidget(self.sidebar)
 
         self._chat_display = ModernChatDisplay(self)
-        main_layout.addWidget(self._chat_display, 1)
+        self.splitter.addWidget(self._chat_display)
+        
+        self.splitter.setCollapsible(0, False)
+        self.splitter.setCollapsible(1, False)
+        self.splitter.setSizes([280, 800])
+        
+        main_layout.addWidget(self.splitter, 1)
         
         self.settings_drawer = SettingsDrawer(self)
         main_layout.addWidget(self.settings_drawer)
@@ -336,7 +346,16 @@ class MainWindow(QMainWindow):
         self._init_audio()
         self._init_tray()
         self._init_hotkey()
-        self._chat_display.add_bubble('assistant', '⚡ AXIOM Pro Online.')
+        self._register_local_shortcuts()
+        self._chat_display.add_bubble('assistant', 'AXIOM v11.2')
+        
+        self._apply_theme()
+        self._theme_manager.theme_changed.connect(self._apply_theme)
+
+    def _apply_theme(self):
+        t = self._theme_manager.theme
+        self.setStyleSheet(f"QMainWindow {{ background-color: {t.colors.bg_base}; color: {t.colors.text_primary}; font-family: {t.typography.font_main}; }}")
+        self.splitter.setStyleSheet(f"QSplitter::handle {{ background-color: {t.colors.border_default}; width: {t.geometry.border_width}px; }}")
 
     def _refresh_sidebar(self) -> None:
         projects = self._project_manager.get_projects()
@@ -367,13 +386,15 @@ class MainWindow(QMainWindow):
                 item.widget().deleteLater()
                 
         if chat_data:
-            self._chat_display.logo_widget.hide()
+            if hasattr(self._chat_display, 'watermark'):
+                self._chat_display.watermark.hide()
             messages = chat_data.get("messages", [])
             for msg in messages:
                 self._chat_display.add_bubble(msg.get("role", "user"), msg.get("content", ""))
         else:
-            self._chat_display.logo_widget.show()
-            self._chat_display.add_bubble("assistant", "⚡ AXIOM Pro Online.")
+            if hasattr(self._chat_display, 'watermark'):
+                self._chat_display.watermark.show()
+            self._chat_display.add_bubble("assistant", "AXIOM v11.2")
 
     def _on_new_chat(self) -> None:
         # Just clear the UI, don't create an empty chat file yet
@@ -385,8 +406,10 @@ class MainWindow(QMainWindow):
             item = self._chat_display.chat_layout.itemAt(i)
             if item.widget() and isinstance(item.widget(), ModernChatBubble):
                 item.widget().deleteLater()
-        self._chat_display.logo_widget.show()
-        self._chat_display.add_bubble("assistant", "⚡ AXIOM Pro Online.")
+        
+        if hasattr(self._chat_display, 'watermark'):
+            self._chat_display.watermark.show()
+        self._chat_display.add_bubble("assistant", "AXIOM v11.2")
 
     def _on_mode_changed(self, mode: str) -> None:
         if self._bridge and hasattr(self._bridge, 'set_auth_mode'):
@@ -454,12 +477,68 @@ class MainWindow(QMainWindow):
         try:
             from axiom.services.hotkey_service import GlobalHotkeyService
             self._hotkey_service = GlobalHotkeyService()
-            self._hotkey_service.signaler.toggle_requested.connect(lambda: self.hide() if self.isVisible() else self.show())
+            self._hotkey_service.signaler.toggle_requested.connect(
+                lambda: self.hide() if self.isVisible() else self.show()
+            )
             self._hotkey_service.signaler.context_summoned.connect(self._on_context_summoned)
             self._hotkey_service.signaler.vision_summoned.connect(self._on_vision_summoned)
+            # New registry-driven global signals
+            self._hotkey_service.signaler.start_audio.connect(self._on_global_start_audio)
+            self._hotkey_service.signaler.capture_screen.connect(self._on_vision_summoned)
             self._hotkey_service.start()
         except ImportError:
             logger.error('pynput not found. Global hotkey disabled.')
+
+    def _register_local_shortcuts(self) -> None:
+        """Create QShortcut bindings for every non-global entry in SHORTCUTS."""
+        actions = {
+            "new_chat":       lambda: self._on_new_chat(),
+            "new_project":    lambda: self._on_new_project_requested(),
+            "focus_input":    lambda: self._chat_display.input_bar.input_area.setFocus(),
+            "toggle_sidebar": lambda: self._toggle_sidebar(),
+            "clear_chat":     lambda: self._on_clear_chat(),
+            "open_settings":  lambda: self.settings_drawer.toggle(),
+            # search_history: no UI hook yet — skipped gracefully
+        }
+        for action_id, spec in SHORTCUTS.items():
+            if spec.get("global"):
+                continue
+            key = spec.get("default")
+            if not key:
+                continue
+            handler = actions.get(action_id)
+            if handler is None:
+                continue
+            sc = QShortcut(QKeySequence(key), self)
+            sc.activated.connect(handler)
+            print(f"[GUI] Registered local shortcut: {action_id} -> {key}")
+
+    def _toggle_sidebar(self) -> None:
+        """Collapse or restore the sidebar via the splitter."""
+        sizes = self.splitter.sizes()
+        if sizes[0] > 0:
+            self.splitter.setSizes([0, sum(sizes)])
+        else:
+            self.splitter.setSizes([280, max(0, sum(sizes) - 280)])
+
+    def _on_clear_chat(self) -> None:
+        """Clear all bubbles from the chat view."""
+        layout = self._chat_display.scroll_layout
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+    def _on_global_start_audio(self) -> None:
+        """Activate the mic from a global hotkey — show window then start STT."""
+        self.show()
+        self.activateWindow()
+        self.raise_()
+        # Simulate a mic toggle-on if the button exists
+        if hasattr(self._chat_display, 'input_bar'):
+            mic_btn = self._chat_display.input_bar.mic_btn
+            if not mic_btn.isChecked():
+                mic_btn.click()
 
     @Slot()
     def _on_context_summoned(self) -> None:
@@ -467,7 +546,7 @@ class MainWindow(QMainWindow):
         from axiom.services.clipboard_service import ClipboardService
         clipboard_text = ClipboardService.get_text()
         if clipboard_text:
-            injection = f'\n```\n{clipboard_text}\n```\n'
+            injection = f'\\n```\\n{clipboard_text}\\n```\\n'
             self._input.setText(injection)
             cursor = self._input.textCursor()
             cursor.setPosition(0)
@@ -559,7 +638,7 @@ class MainWindow(QMainWindow):
         from PySide6.QtWidgets import QMessageBox
         msg = QMessageBox(self)
         msg.setWindowTitle('[SECURITY APPROVAL REQUIRED]')
-        msg.setText(f'AXIOM requests permission to execute an external action:\n\nTool: {tool_name}\nCommand / Args: {arguments}')
+        msg.setText(f'AXIOM requests permission to execute an external action:\\n\\nTool: {tool_name}\\nCommand / Args: {arguments}')
         msg.setIcon(QMessageBox.Icon.Warning)
         allow_btn = msg.addButton('Allow Execution', QMessageBox.ButtonRole.AcceptRole)
         allow_btn.setStyleSheet('background-color: #10b981; color: white; font-weight: bold; border: none; padding: 6px 12px; border-radius: 4px;')
@@ -602,7 +681,7 @@ class MainWindow(QMainWindow):
                     {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}
                 ]
                 route_payload = multimodal_payload  # list-style OpenAI content
-                display_text = f'{text}\n\n*[Image: {os.path.basename(attachment_path)}]*' if text else f'*[Image: {os.path.basename(attachment_path)}]*'
+                display_text = f'{text}\\n\\n*[Image: {os.path.basename(attachment_path)}]*' if text else f'*[Image: {os.path.basename(attachment_path)}]*'
             except Exception as e:
                 logger.error(f'Failed to encode attachment: {e}')
                 route_payload = text
@@ -847,5 +926,6 @@ class MainWindow(QMainWindow):
     def _on_dock_visibility_changed(self, visible: bool) -> None:
         self._expert_btn.setChecked(visible)
         self._expert_btn.setText(f"⚙️ Expert Mode: {('ON' if visible else 'OFF')}")
+        
     def update_model_label(self, model: str) -> None:
         pass
