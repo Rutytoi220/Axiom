@@ -308,6 +308,75 @@ class SomClickTool(BaseTool):
     # ── Private helpers ───────────────────────────────────────────────────────
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Tool 3 — type_text
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SomTypeTool(BaseTool):
+    """Type text deterministically via Wayland's wtype."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            tool_id="type_text",
+            name="SomTypeTool",
+            description="Type a string of text into the currently focused window using Wayland's wtype.",
+        )
+        self.add_parameter(ToolParameter(
+            name="text",
+            type="string",
+            description="The text to type.",
+            required=True,
+        ))
+
+    async def execute(self, text: str, **_kwargs) -> ToolResult:  # type: ignore[override]
+        try:
+            subprocess.run(["wtype", text])
+            return ToolResult(
+                success=True,
+                output=f"Successfully typed: '{text}'"
+            )
+        except Exception as exc:
+            logger.error("SomTypeTool: failed to type: %s", exc)
+            return ToolResult(
+                success=False,
+                error=f"Failed to type text: {exc}"
+            )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tool 4 — press_key
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SomKeyTool(BaseTool):
+    """Press a specific key via Wayland's wtype."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            tool_id="press_key",
+            name="SomKeyTool",
+            description="Press a specific keyboard key (e.g., 'Return', 'Tab', 'Escape') into the currently focused window using Wayland's wtype.",
+        )
+        self.add_parameter(ToolParameter(
+            name="key",
+            type="string",
+            description="The key to press (e.g., 'Return', 'Tab').",
+            required=True,
+        ))
+
+    async def execute(self, key: str, **_kwargs) -> ToolResult:  # type: ignore[override]
+        try:
+            subprocess.run(["wtype", "-k", key])
+            return ToolResult(
+                success=True,
+                output=f"Successfully pressed key: '{key}'"
+            )
+        except Exception as exc:
+            logger.error("SomKeyTool: failed to press key: %s", exc)
+            return ToolResult(
+                success=False,
+                error=f"Failed to press key: {exc}"
+            )
+
 # ── Utility ───────────────────────────────────────────────────────────────────
 
 def _which(cmd: str) -> bool:

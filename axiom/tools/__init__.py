@@ -6,7 +6,7 @@ import os
 import shlex
 import platform
 import shutil
-__all__ = ['ToolResult', 'ToolParameter', 'BaseTool', 'EchoTool', 'ShellTool', 'FileReadTool', 'FileWriteTool', 'SystemInfoTool', 'FileTool', 'SafeFileSearchTool', 'FileOpenerTool', 'AppLauncherTool', 'ClipboardReadTool', 'ClipboardWriteTool', 'GUIInspectTool', 'GUIActuateTool', 'PlaywrightWebTool', 'WorkspaceOrchestrateTool', 'LiveVisionStreamTool', 'CaptureSomScreenTool', 'SomClickTool']
+__all__ = ['ToolResult', 'ToolParameter', 'BaseTool', 'EchoTool', 'ShellTool', 'FileReadTool', 'FileWriteTool', 'SystemInfoTool', 'FileTool', 'SafeFileSearchTool', 'FileOpenerTool', 'AppLauncherTool', 'ClipboardReadTool', 'ClipboardWriteTool', 'GUIInspectTool', 'GUIActuateTool', 'PlaywrightWebTool', 'WorkspaceOrchestrateTool', 'LiveVisionStreamTool', 'CaptureSomScreenTool', 'SomClickTool', 'SomTypeTool', 'SomKeyTool']
 from abc import ABC
 from typing import Any, Dict, List, Optional
 from pathlib import Path
@@ -1314,7 +1314,7 @@ from axiom.tools.live_vision import LiveVisionStreamTool
 
 # ── Vimium-style Set-of-Mark vision tools ──────────────────────────────────
 try:
-    from axiom.tools.som_tools import CaptureSomScreenTool, SomClickTool
+    from axiom.tools.som_tools import CaptureSomScreenTool, SomClickTool, SomTypeTool, SomKeyTool
 except ImportError as _e:  # opencv-python not installed — degrade gracefully
     import logging as _logging
     _logging.getLogger(__name__).warning(
@@ -1324,4 +1324,8 @@ except ImportError as _e:  # opencv-python not installed — degrade gracefully
     class CaptureSomScreenTool:  # type: ignore[no-redef]
         pass
     class SomClickTool:  # type: ignore[no-redef]
+        pass
+    class SomTypeTool:  # type: ignore[no-redef]
+        pass
+    class SomKeyTool:  # type: ignore[no-redef]
         pass

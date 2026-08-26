@@ -14,7 +14,7 @@ import os
 from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt, QSize, Slot, QTimer, Signal
 from PySide6.QtGui import QAction, QFont, QIcon, QKeySequence, QShortcut
-from PySide6.QtWidgets import QButtonGroup, QDockWidget, QFrame, QHBoxLayout, QLabel, QMainWindow, QPushButton, QScrollArea, QSizePolicy, QStatusBar, QTextEdit, QToolBar, QToolButton, QVBoxLayout, QWidget, QSystemTrayIcon, QMenu, QApplication, QSplitter
+from PySide6.QtWidgets import QButtonGroup, QDockWidget, QFrame, QHBoxLayout, QLabel, QMainWindow, QPushButton, QScrollArea, QSizePolicy, QStatusBar, QTextEdit, QToolBar, QToolButton, QVBoxLayout, QWidget, QSystemTrayIcon, QMenu, QApplication, QSplitter, QFileDialog
 from axiom.config import get_config, AuthMode
 from axiom.core.shortcuts import SHORTCUTS
 from axiom.gui.styles.theme_manager import get_theme_manager
@@ -304,9 +304,11 @@ class MainWindow(QMainWindow):
         self.sidebar.new_project_requested.connect(self._on_new_project_requested)
         self.sidebar.conversation_selected.connect(self._on_conversation_selected)
         self.sidebar.mode_changed.connect(self._on_mode_changed)
+        self.sidebar.settings_btn.clicked.connect(self._show_settings)
         self.splitter.addWidget(self.sidebar)
 
         self._chat_display = ModernChatDisplay(self)
+        self._chat_display.input_bar.attach_btn.clicked.connect(self._on_attach_file)
         self.splitter.addWidget(self._chat_display)
         
         self.splitter.setCollapsible(0, False)
@@ -356,6 +358,24 @@ class MainWindow(QMainWindow):
         t = self._theme_manager.theme
         self.setStyleSheet(f"QMainWindow {{ background-color: {t.colors.bg_base}; color: {t.colors.text_primary}; font-family: {t.typography.font_main}; }}")
         self.splitter.setStyleSheet(f"QSplitter::handle {{ background-color: {t.colors.border_default}; width: {t.geometry.border_width}px; }}")
+
+    def _show_settings(self):
+        dialog = SettingsDialog(self)
+        dialog.exec()
+
+    def _on_attach_file(self):
+        file_name, _ = QFileDialog.getOpenFileName(
+            self, "Attach File", "", "Text Files (*.txt *.py *.md *.json *.csv);;All Files (*)"
+        )
+        if file_name:
+            try:
+                with open(file_name, "r", encoding="utf-8") as f:
+                    file_content = f.read()
+                current_text = self._chat_display.input_bar.input_area.toPlainText()
+                new_text = f"{current_text}\n\n--- FILE: {file_name} ---\n{file_content}\n"
+                self._chat_display.input_bar.input_area.setPlainText(new_text)
+            except Exception as e:
+                logger.error("Failed to read file: %s", e)
 
     def _refresh_sidebar(self) -> None:
         projects = self._project_manager.get_projects()
