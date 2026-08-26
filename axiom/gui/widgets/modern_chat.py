@@ -54,17 +54,14 @@ class ModernInputBar(QFrame):
         self.attach_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.attach_btn.setStyleSheet("""
             QPushButton {
-                background: #2D2B3D;
-                color: white;
-                border-radius: 16px;
+                background: transparent;
+                color: #8F8CA8;
+                font-size: 24px;
                 font-weight: bold;
-                font-size: 18px;
-                min-width: 32px; max-width: 32px;
-                min-height: 32px; max-height: 32px;
                 border: none;
-                margin-right: 12px;
+                padding-bottom: 2px;
             }
-            QPushButton:hover { background: #3D3B50; }
+            QPushButton:hover { color: #FFFFFF; }
         """)
 
         self.input_area = AutoExpandTextEdit(theme_manager)
@@ -142,7 +139,8 @@ class ModernChatBubble(QFrame):
         self.text_browser.document().setDocumentMargin(0)
         self.text_browser.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.text_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.text_browser.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        # Size policy is intentionally left at default (Preferred/Preferred).
+        # resizeEvent below takes over height management precisely.
         
         html_content = markdown.markdown(self._raw_text, extensions=['fenced_code', 'tables'])
         self.text_browser.setHtml(html_content)
@@ -175,6 +173,20 @@ class ModernChatBubble(QFrame):
         self._raw_text = text
         html_content = markdown.markdown(self._raw_text, extensions=['fenced_code', 'tables'])
         self.text_browser.setHtml(html_content)
+        # Trigger a height recalculation after content changes.
+        self.resizeEvent(None)
+
+    def resizeEvent(self, event):
+        if event is not None:
+            super().resizeEvent(event)
+        vp_width = self.text_browser.viewport().width()
+        if vp_width > 0:
+            # Force text reflow to the exact viewport width so Qt knows the height.
+            self.text_browser.document().setTextWidth(vp_width)
+        exact_h = int(self.text_browser.document().size().height())
+        if exact_h > 0:
+            self.text_browser.setFixedHeight(exact_h)
+            self.setFixedHeight(exact_h + 24)  # 24px = 12px top + 12px bottom padding
 
 class ModernChatDisplay(QWidget):
     def __init__(self, parent=None):

@@ -124,7 +124,7 @@ class ModernSidebar(QFrame):
 
         self.settings_btn = QPushButton("⚙ Settings")
         self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.settings_btn.setFixedHeight(40)
+        self.settings_btn.setFixedHeight(36)
         self.layout.addWidget(self.settings_btn)
 
         self._apply_theme()
@@ -181,17 +181,21 @@ class ModernSidebar(QFrame):
                 border-right: 1px solid {self.t.colors.border_default};
             }}
             QPushButton {{
-                background-color: {self.t.colors.bg_surface};
+                background-color: #1E1E2E;
                 color: {self.t.colors.text_primary};
                 border: 1px solid {self.t.colors.border_default};
-                border-radius: 20px;
+                border-radius: 18px;
                 font-family: {self.t.typography.font_main};
                 font-size: {self.t.typography.size_sm}px;
                 font-weight: 500;
             }}
             QPushButton:hover {{
-                background-color: {self.t.colors.bg_surface_hover};
+                background-color: #2D2B3D;
                 border: 1px solid {self.t.colors.accent};
+            }}
+            QTreeView {{
+                show-decoration-selected: 0;
+                outline: none;
             }}
             QTreeWidget {{
                 background: transparent;
@@ -216,11 +220,12 @@ class ModernSidebar(QFrame):
                 border: none;
                 outline: none;
             }}
-            QTreeWidget::item:focus {{ outline: none; background-color: transparent; }}
+            QTreeWidget::item:focus {{ outline: none; border: none; }}
             QTreeWidget::item:selected:active {{ outline: none; border: none; }}
             QTreeView::branch {{
+                background: transparent;
+                border: none;
                 border-image: none;
                 image: none;
-                background: transparent;
             }}
         """)
