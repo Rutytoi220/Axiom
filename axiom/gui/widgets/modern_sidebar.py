@@ -125,7 +125,10 @@ class ModernSidebar(QFrame):
         self.settings_btn = QPushButton("⚙ Settings")
         self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.settings_btn.setFixedHeight(36)
-        self.layout.addWidget(self.settings_btn)
+        settings_layout = QHBoxLayout()
+        settings_layout.setContentsMargins(16, 0, 16, 16)
+        settings_layout.addWidget(self.settings_btn)
+        self.layout.addLayout(settings_layout)
 
         self._apply_theme()
 
