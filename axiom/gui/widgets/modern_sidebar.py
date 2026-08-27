@@ -111,7 +111,10 @@ class ModernSidebar(QFrame):
         self.tree = QTreeWidget()
         self.tree.setColumnCount(1)
         self.tree.setHeaderHidden(True)
-        self.tree.setIndentation(16)
+        self.tree.setRootIsDecorated(False)
+        self.tree.setIndentation(10)
+        self.tree.setUniformRowHeights(True)
+        self.tree.setAnimated(True)
         self.tree.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.tree.setAttribute(Qt.WidgetAttribute.WA_MacShowFocusRect, False)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -204,42 +207,41 @@ class ModernSidebar(QFrame):
                 background-color: #2D2B3D;
                 border: 1px solid {self.t.colors.accent};
             }}
-            QTreeView {{
-                show-decoration-selected: 0;
-                outline: none;
-            }}
-            QTreeWidget {{
+        """)
+        self.tree.setStyleSheet("""
+            QTreeWidget {
                 background: transparent;
                 border: none;
                 outline: none;
-            }}
-            QTreeWidget::item {{
-                color: {self.t.colors.text_secondary};
-                padding: 0px 16px;
-                border-radius: 12px;
+                padding: 4px;
+            }
+            QTreeWidget::item {
+                padding: 8px 12px;
                 margin: 2px 4px;
+                border-radius: 8px;
+                color: #CAD3F5;
+                font-size: 13px;
+            }
+            QTreeWidget::item:selected {
+                background-color: #2D2B3D;
+                color: #FFFFFF;
+                font-weight: 600;
+            }
+            QTreeWidget::item:hover:!selected {
+                background-color: #1E1E2E;
+            }
+            QScrollBar:vertical {
                 border: none;
-                outline: none;
-            }}
-            QTreeWidget::item:hover {{
-                background-color: {self.t.colors.bg_surface};
-                color: {self.t.colors.text_primary};
-            }}
-            QTreeWidget::item:selected {{
-                background-color: {self.t.colors.bg_surface_active};
-                color: {self.t.colors.text_primary};
+                background: #181825;
+                width: 8px;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:vertical {
+                background: #313244;
+                border-radius: 4px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 border: none;
-                outline: none;
-            }}
-            QTreeWidget::item:focus {{ outline: none; border: none; }}
-            QTreeWidget::item:selected:active {{ outline: none; border: none; }}
-            QTreeView::branch {{
-                background: transparent;
-                border: none;
-                border-image: none;
-                image: none;
-            }}
-            QTreeView::branch:selected {{ background: transparent; }}
-            QTreeView::branch:hover {{ background: transparent; }}
-            QTreeView::branch:active {{ background: transparent; }}
+                background: none;
+            }
         """)
