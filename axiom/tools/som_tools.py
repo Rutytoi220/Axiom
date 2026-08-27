@@ -29,8 +29,11 @@ from typing import Optional
 
 from axiom.tools import BaseTool, ToolParameter, ToolResult
 from axiom.vision.som_manager import SoMManager
+from axiom.services.os_controller.factory import get_os_controller
 
 logger = logging.getLogger(__name__)
+
+os_driver = get_os_controller()
 
 # ── Singleton SoMManager ──────────────────────────────────────────────────────
 # Shared between both tools so click_tag always sees the tags from the most
@@ -280,11 +283,7 @@ class SomClickTool(BaseTool):
 
         # ── Perform the click ─────────────────────────────────────────────────
         try:
-            subprocess.run(["hyprctl", "dispatch", "movecursor", f"{x} {y}"])
-            
-            btn_code = "3" if button == "right" else "1"
-            for _ in range(int(clicks)):
-                subprocess.run(["hyprctl", "dispatch", "click", btn_code])
+            os_driver.click(x, y, button, clicks)
         except Exception as exc:
             logger.error("SomClickTool: click failed at (%d, %d): %s", x, y, exc)
             return ToolResult(
@@ -330,7 +329,7 @@ class SomTypeTool(BaseTool):
 
     async def execute(self, text: str, **_kwargs) -> ToolResult:  # type: ignore[override]
         try:
-            subprocess.run(["wtype", text])
+            os_driver.type_text(text)
             return ToolResult(
                 success=True,
                 output=f"Successfully typed: '{text}'"
@@ -365,7 +364,7 @@ class SomKeyTool(BaseTool):
 
     async def execute(self, key: str, **_kwargs) -> ToolResult:  # type: ignore[override]
         try:
-            subprocess.run(["wtype", "-k", key])
+            os_driver.press_key(key)
             return ToolResult(
                 success=True,
                 output=f"Successfully pressed key: '{key}'"
