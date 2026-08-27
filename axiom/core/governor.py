@@ -32,27 +32,37 @@ class ThermalGovernor:
         self.bus.subscribe("telemetry.update", self._on_telemetry)
         
         # Thresholds
-        self.max_cpu_temp = 90.0
+        self.max_cpu_temp_avg = 88.0
+        self.max_cpu_temp_peak = 95.0
+        self.hysteresis_temp = 78.0
         self.max_gpu_temp = 90.0
         self.max_vram_usage = 95.0
         
         # State
         self.is_throttled = False
+        self._violation_count = 0
         
         logger.info("ThermalGovernor initialized.")
 
     def _on_telemetry(self, event: Any) -> None:
         """Evaluate hardware telemetry and trigger limits if breached."""
+        import os
+        if os.environ.get("AXIOM_DISABLE_THROTTLE", "0") == "1":
+            return
+            
         data = getattr(event, "data", {})
         
         cpu_temp = data.get("cpu_temp", -1.0)
+        cpu_temp_max = data.get("cpu_temp_max", -1.0)
         gpu_temp = data.get("gpu_temp", -1.0)
         vram = data.get("vram", -1.0)
         
         breach_reasons = []
         
-        if cpu_temp > self.max_cpu_temp:
-            breach_reasons.append(f"CPU Temp Critical ({cpu_temp:.1f}C)")
+        is_cpu_violation = (cpu_temp > self.max_cpu_temp_avg) or (cpu_temp_max > self.max_cpu_temp_peak)
+        
+        if is_cpu_violation:
+            breach_reasons.append(f"CPU Temp Critical (Avg: {cpu_temp:.1f}C, Peak: {cpu_temp_max:.1f}C)")
             
         if gpu_temp > self.max_gpu_temp:
             breach_reasons.append(f"GPU Temp Critical ({gpu_temp:.1f}C)")
@@ -61,13 +71,17 @@ class ThermalGovernor:
             breach_reasons.append(f"VRAM Capacity Critical ({vram:.1f}%)")
 
         if breach_reasons:
-            if not self.is_throttled:
-                logger.warning(f"ThermalGovernor: Throttling engaged! {', '.join(breach_reasons)}")
-                self.is_throttled = True
-                self.bus.publish_sync("system.throttle", {"active": True, "reasons": breach_reasons})
+            self._violation_count += 1
+            if self._violation_count > 3:
+                if not self.is_throttled:
+                    logger.warning(f"ThermalGovernor: Throttling engaged! {', '.join(breach_reasons)}")
+                    self.is_throttled = True
+                    self.bus.publish_sync("system.throttle", {"active": True, "reasons": breach_reasons})
         else:
+            self._violation_count = 0
             if self.is_throttled:
-                # Add hysteresis logic here in the future if needed
-                logger.info("ThermalGovernor: Operating parameters nominal. Throttling disengaged.")
-                self.is_throttled = False
-                self.bus.publish_sync("system.throttle", {"active": False, "reasons": []})
+                # Apply hysteresis: only disengage when CPU avg drops below 78.0C
+                if cpu_temp < self.hysteresis_temp:
+                    logger.info(f"ThermalGovernor: Operating parameters nominal (CPU Avg: {cpu_temp:.1f}C). Throttling disengaged.")
+                    self.is_throttled = False
+                    self.bus.publish_sync("system.throttle", {"active": False, "reasons": []})

@@ -74,12 +74,41 @@ class GlobalHotkeyService:
 
         # Build the pynput hotkey map dynamically from the registry.
         hotkey_map: Dict[str, object] = {}
+        
+        def _normalize_pynput_hotkey(kstr: str) -> str:
+            parts = kstr.lower().split("+")
+            normalized = []
+            for p in parts:
+                p = p.strip()
+                if p in ("super", "win", "windows", "meta"):
+                    normalized.append("<cmd>")
+                elif p in ("ctrl", "control"):
+                    normalized.append("<ctrl>")
+                elif p in ("alt", "option"):
+                    normalized.append("<alt>")
+                elif p == "shift":
+                    normalized.append("<shift>")
+                elif p == "space":
+                    normalized.append("<space>")
+                elif p == "enter":
+                    normalized.append("<enter>")
+                elif p == "tab":
+                    normalized.append("<tab>")
+                elif p == "esc" or p == "escape":
+                    normalized.append("<esc>")
+                else:
+                    normalized.append(p)
+            return "+".join(normalized)
+
         for action_id, spec in SHORTCUTS.items():
             if not spec.get("global"):
                 continue
             key_str: Optional[str] = spec.get("default")
             if not key_str:
                 continue
+                
+            pynput_key = _normalize_pynput_hotkey(key_str)
+            
             signal_name = _ACTION_SIGNAL_MAP.get(action_id)
             if signal_name is None:
                 logger.warning(
@@ -96,10 +125,10 @@ class GlobalHotkeyService:
                     getattr(self.signaler, sig_name).emit()
                 return _handler
 
-            hotkey_map[key_str] = _make_handler(signal_name, action_id)
+            hotkey_map[pynput_key] = _make_handler(signal_name, action_id)
             logger.debug(
-                "[HotkeyService] Registered global hotkey: %s -> %s",
-                key_str, action_id,
+                "[HotkeyService] Registered global hotkey: %s (%s) -> %s",
+                key_str, pynput_key, action_id,
             )
 
         if not hotkey_map:
@@ -112,7 +141,16 @@ class GlobalHotkeyService:
                 len(hotkey_map),
             )
             try:
-                self._listener = keyboard.GlobalHotKeys(hotkey_map)
+                # Wrap initialization to gracefully drop malformed keys without crashing the daemon loop
+                try:
+                    self._listener = keyboard.GlobalHotKeys(hotkey_map)
+                except ValueError as ve:
+                    logger.error(f"[HotkeyService] Failed to parse hotkey syntax: {ve}. Please check SHORTCUTS configuration.")
+                    return
+                except Exception as ex:
+                    logger.error(f"[HotkeyService] Could not hook into global keyboard events: {ex}")
+                    return
+                    
                 self._listener.start()
                 self._listener.join()
             except Exception as exc:

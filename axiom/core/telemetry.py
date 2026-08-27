@@ -72,19 +72,26 @@ class TelemetryDaemon:
         
         # We can also get CPU temp if supported by OS, fallback to -1
         cpu_temp = -1.0
+        cpu_temp_max = -1.0
         try:
             temps = psutil.sensors_temperatures()
             if temps:
-                # Prioritize known CPU temp sensors over random ACPI zones
+                sensor_entries = []
                 if 'coretemp' in temps and temps['coretemp']:
-                    cpu_temp = temps['coretemp'][0].current
+                    sensor_entries = temps['coretemp']
                 elif 'k10temp' in temps and temps['k10temp']:
-                    cpu_temp = temps['k10temp'][0].current
+                    sensor_entries = temps['k10temp']
                 else:
                     for name, entries in temps.items():
                         if entries:
-                            cpu_temp = entries[0].current
+                            sensor_entries = entries
                             break
+                            
+                if sensor_entries:
+                    valid_temps = [entry.current for entry in sensor_entries if entry.current is not None and entry.current > 0]
+                    if valid_temps:
+                        cpu_temp = sum(valid_temps) / len(valid_temps)
+                        cpu_temp_max = max(valid_temps)
         except Exception:
             pass
 
@@ -108,6 +115,7 @@ class TelemetryDaemon:
         return {
             "cpu": cpu_percent,
             "cpu_temp": cpu_temp,
+            "cpu_temp_max": cpu_temp_max,
             "ram": ram_percent,
             "gpu_temp": gpu_temp,
             "vram": vram_percent
