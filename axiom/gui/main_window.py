@@ -20,6 +20,7 @@ from axiom.core.shortcuts import SHORTCUTS
 from axiom.gui.styles.theme_manager import get_theme_manager
 from axiom.gui.widgets.swarm_pill import SwarmPill
 from axiom.gui.widgets.settings_dialog import SettingsDialog
+from axiom.gui.widgets.hub_dialog import AxiomHubDialog
 from axiom.gui.widgets.scheduler_ui import TemporalSchedulerDialog
 from axiom.services.scheduler import TemporalService
 from axiom.services.sys_watchdog import SystemHealthWatchdog
@@ -305,6 +306,7 @@ class MainWindow(QMainWindow):
         self.sidebar.conversation_selected.connect(self._on_conversation_selected)
         self.sidebar.mode_changed.connect(self._on_mode_changed)
         self.sidebar.settings_btn.clicked.connect(self._show_settings)
+        self.sidebar.hub_btn.clicked.connect(self._show_hub)
         self.splitter.addWidget(self.sidebar)
 
         self._chat_display = ModernChatDisplay(self)
@@ -362,6 +364,16 @@ class MainWindow(QMainWindow):
     def _show_settings(self):
         dialog = SettingsDialog(self)
         dialog.exec()
+
+    def _show_hub(self):
+        dialog = AxiomHubDialog(self)
+        dialog.tool_installed.connect(self._on_tool_installed)
+        dialog.exec()
+
+    def _on_tool_installed(self, tool_id: str):
+        if self._bridge and hasattr(self._bridge, 'send_reload_plugins'):
+            self._bridge.send_reload_plugins()
+        self._chat_display.add_bubble('system', f'✅ Tool "{tool_id}" installed and dynamically hot-reloaded.')
 
     def _on_attach_file(self):
         file_name, _ = QFileDialog.getOpenFileName(

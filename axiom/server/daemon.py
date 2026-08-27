@@ -114,6 +114,10 @@ class AxiomDaemonServer:
                             # run_in_executor returns a Future and schedules it automatically.
                             loop = asyncio.get_running_loop()
                             loop.run_in_executor(None, self.cli.orchestrator.run, prompt, True)
+                    elif action == "reload_plugins":
+                        logger.info("Hot-reloading plugins triggered via IPC...")
+                        self.cli.orchestrator.reload_plugins()
+                        await websocket.send(json.dumps({"type": "response", "action": "reload_plugins", "success": True}))
                     elif action == "get_tools":
                         tools = self.cli.orchestrator._tool_registry._core_registry.list_tools()
                         from axiom.config import get_config

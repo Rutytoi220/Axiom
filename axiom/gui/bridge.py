@@ -216,6 +216,13 @@ class AxiomBridge(QObject):
         import json, asyncio
         asyncio.run_coroutine_threadsafe(self._client.websocket.send(json.dumps(event)), self._loop)
 
+    def send_reload_plugins(self) -> None:
+        if self._loop is None or not self._client.is_connected:
+            return
+        event = {"action": "reload_plugins"}
+        import json, asyncio
+        asyncio.run_coroutine_threadsafe(self._client.websocket.send(json.dumps(event)), self._loop)
+
     def set_strict_mode(self, enabled: bool) -> None:
         if self._loop is None or not self._client.is_connected:
             return

@@ -119,6 +119,27 @@ Returns:
         else:
             self._llm = None
 
+    def reload_plugins(self) -> None:
+        """Dynamically reload user plugins without restarting the agent."""
+        import logging
+        logger = logging.getLogger("axiom.plugin_manager")
+        logger.info("Hot-reloading plugins...")
+        try:
+            from axiom.core.plugin_manager import PluginManager
+            plugin_manager = PluginManager()
+            custom_tools = plugin_manager.load_user_tools()
+            if self.registry and hasattr(self.registry, 'register_tool'):
+                existing_tools = list(self.registry.list_tools().keys()) if hasattr(self.registry, 'list_tools') else []
+                for tool in custom_tools:
+                    if tool.tool_id not in existing_tools:
+                        try:
+                            self.registry.register_tool(tool.tool_id, tool)
+                            logger.info(f"Dynamically registered new tool: {tool.tool_id}")
+                        except Exception as e:
+                            logger.error(f"Failed to hot-register {tool.tool_id}: {e}")
+        except Exception as e:
+            logger.error(f"Error during hot-reload: {e}")
+
     @property
     def description(self) -> str:
         """Human-readable summary for introspection (e.g. the CLI's `agents` command)."""

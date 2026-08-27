@@ -130,6 +130,14 @@ class ModernSidebar(QFrame):
         settings_layout.addWidget(self.settings_btn)
         self.layout.addLayout(settings_layout)
 
+        self.hub_btn = QPushButton("🌐 AXIOM Hub")
+        self.hub_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.hub_btn.setFixedHeight(36)
+        hub_layout = QHBoxLayout()
+        hub_layout.setContentsMargins(16, 0, 16, 16)
+        hub_layout.addWidget(self.hub_btn)
+        self.layout.addLayout(hub_layout)
+
         self._apply_theme()
 
     def _on_tree_selection(self):
