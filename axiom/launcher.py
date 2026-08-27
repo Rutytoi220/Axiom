@@ -14,6 +14,11 @@ def is_daemon_running(port: int = 9410) -> bool:
         return s.connect_ex(('127.0.0.1', port)) == 0
 
 def main():
+    if len(sys.argv) > 1:
+        from axiom.cli.main import main as cli_main
+        cli_main()
+        return
+
     os.environ["QT_QPA_PLATFORM"] = os.environ.get("QT_QPA_PLATFORM", "xcb")
     
     daemon_process = None

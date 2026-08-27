@@ -1,1 +1,1 @@
-"""CLI and interactive command routing."""
+"""CLI package for AXIOM."""

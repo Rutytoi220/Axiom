@@ -4,7 +4,9 @@ import os
 import tempfile
 import pytest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
+
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 def pytest_configure(config):
     """Pytest configuration hook."""
@@ -20,6 +22,15 @@ def mock_home_directory(monkeypatch):
         monkeypatch.setenv("XDG_CONFIG_HOME", os.path.join(temp_home, ".config"))
         monkeypatch.setenv("XDG_DATA_HOME", os.path.join(temp_home, ".local", "share"))
         
-        # Patching Path.home directly across the app
         with patch("pathlib.Path.home", return_value=Path(temp_home)):
             yield temp_home
+
+@pytest.fixture
+def mock_orchestrator():
+    orchestrator = MagicMock()
+    return orchestrator
+
+@pytest.fixture
+def mock_gui_bridge():
+    bridge = MagicMock()
+    return bridge

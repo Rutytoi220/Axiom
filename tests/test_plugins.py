@@ -232,3 +232,43 @@ class TestNXBTPlugin:
         plugin.initialize()
 
         assert plugin.shutdown() is True
+
+class TestDynamicPluginManager:
+    def test_dynamic_plugin_loading(self, mock_home_directory):
+        from axiom.core.plugin_manager import PluginManager
+        from pathlib import Path
+        
+        plugins_dir = Path(mock_home_directory) / ".config" / "ChienGPT" / "plugins"
+        plugins_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Write a valid plugin
+        valid_plugin = plugins_dir / "valid_tool.py"
+        valid_plugin.write_text("""
+from axiom.tools.base import BaseTool
+
+class TestPluginTool(BaseTool):
+    def __init__(self):
+        super().__init__('test_plugin', 'Test Plugin', 'Test description')
+    
+    async def execute(self, **kw):
+        pass
+""")
+
+        # Write a malformed plugin
+        invalid_plugin = plugins_dir / "invalid_tool.py"
+        invalid_plugin.write_text("""
+from axiom.tools.base import BaseTool
+
+class BrokenPluginTool(BaseTool):
+    def __init__(self):
+        super().__init__('broken', 'Broken', 'broken')
+    
+    syntax error!
+""")
+
+        pm = PluginManager()
+        tools = pm.load_user_tools()
+        
+        # We should only get the valid tool, and the program should not crash
+        assert len(tools) == 1
+        assert tools[0].tool_id == "test_plugin"
