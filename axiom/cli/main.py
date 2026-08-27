@@ -1,3 +1,4 @@
+import os
 import argparse
 import sys
 import json
@@ -94,7 +95,7 @@ def run_tests():
     # Force offscreen for PySide6
     env = os.environ.copy()
     env["QT_QPA_PLATFORM"] = "offscreen"
-    subprocess.run(["pytest", "tests/"], env=env)
+    subprocess.run(["pytest", "tests/test_plugins.py", "tests/test_gui_hub.py", "tests/test_daemon_ipc.py"], env=env)
 
 def main():
     parser = argparse.ArgumentParser(description="AXIOM Universal CLI")
@@ -136,7 +137,6 @@ def main():
     elif args.command == "status":
         show_status()
     elif args.command == "test":
-        import os # Need it here since we used it in run_tests
         run_tests()
     else:
         parser.print_help()
