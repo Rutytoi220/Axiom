@@ -489,12 +489,20 @@ class MainWindow(QMainWindow):
 
         def _load():
             try:
+                import socket
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(0.5)
+                    if s.connect_ex(('127.0.0.1', 9410)) == 0:
+                        logger.info("Daemon is running (port 9410 open). Skipping GUI local audio engine to prevent lock contention.")
+                        self._audio = None
+                        return
+                        
                 from axiom.core.audio import AudioManager
                 self._audio = AudioManager.instance()
                 logger.info('AudioManager initialized (background thread)')
             except Exception as exc:
                 self._audio = None
-                logger.error('AudioManager init failed: %s', exc)
+                logger.warning('AudioManager init failed (expected if daemon owns lock): %s', exc)
 
         threading.Thread(target=_load, daemon=True).start()
 

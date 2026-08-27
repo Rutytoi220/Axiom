@@ -160,7 +160,9 @@ class AxiomDaemonServer:
                             "success": True
                         }))
                 except Exception as e:
-                    logger.error(f"Error handling WS message: {e}")
+                    logger.error(f"[Daemon] Error handling client message: {e}", exc_info=True)
+        except Exception as we:
+            logger.error(f"[Daemon] Client connection error: {we}")
         finally:
             self.clients.discard(websocket)
             logger.info("Client disconnected.")
