@@ -84,6 +84,25 @@ Returns:
     Return value.
 """
         super().__init__(name='orchestrator', registry=registry, bus=bus, memory=memory)
+        
+        # ── Dynamic Plugin Loader ──────────────────────────────────────────── #
+        try:
+            from axiom.core.plugin_manager import PluginManager
+            plugin_manager = PluginManager()
+            custom_tools = plugin_manager.load_user_tools()
+            if self.registry and hasattr(self.registry, 'register_tool'):
+                import logging
+                plogger = logging.getLogger("axiom.plugin_manager")
+                for tool in custom_tools:
+                    try:
+                        self.registry.register_tool(tool.tool_id, tool)
+                        plogger.info(f"Registered user tool {tool.tool_id}")
+                    except Exception as e:
+                        plogger.error(f"Failed to register user tool {tool.tool_id}: {e}")
+        except Exception as _pe:
+            import logging
+            logging.getLogger(__name__).error(f"PluginManager failed to initialize: {_pe}")
+
         self._agents = {}
         self._chat_history: List[Dict[str, str]] = []
         self._state = 'idle'
