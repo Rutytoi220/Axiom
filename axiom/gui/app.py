@@ -197,19 +197,17 @@ def run_gui() -> None:
         tray = _build_tray(app, window)
         window.show()
 
-    # Check first launch via UI config
-    from axiom.gui.config_manager import get_ui_config_manager
-    ui_manager = get_ui_config_manager()
-    
-    if not ui_manager.exists():
-        from axiom.gui.windows.oobe_window import OOBEWindow
-        onboarding = OOBEWindow()
-        onboarding.initialization_complete.connect(launch_main_hud)
-        # Keep reference to prevent GC
-        app._onboarding = onboarding
-        onboarding.show()
-    else:
-        launch_main_hud()
+    # Check first launch via new unified config
+    if not config.oobe_completed:
+        from axiom.gui.widgets.oobe_wizard import OobeWizardDialog
+        wizard = OobeWizardDialog()
+        wizard.exec()
+        
+        # Refresh config in case it was updated during the wizard
+        config = get_config()
+        
+    # Launch main HUD after ensuring OOBE is complete
+    launch_main_hud()
 
     def _on_ipc_connection() -> None:
         sock = server.nextPendingConnection()

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from enum import Enum
 
-CONFIG_DIR = Path.home() / ".config" / "axiom"
+CONFIG_DIR = Path.home() / ".config" / "ChienGPT"
 
 class AuthMode(Enum):
     STRICT = 'strict'
@@ -56,8 +56,12 @@ Returns:
     first_launch: bool = True
     oobe_completed: bool = False
     vision_model: str = ''
+    theme: str = 'minimalist'  # 'minimalist', 'cyberpunk', 'nothing'
     theme_mode: str = 'dark'  # 'system', 'dark', 'light'
     ui_profile_level: str = 'standard' # 'standard', 'advanced', 'developer'
+    persona_tone: str = 'balanced'
+    persona_complexity: str = 'standard'
+    special_instructions: str = ''
     llm_complexity: str = 'detailed' # 'concise', 'detailed', 'academic'
     auto_ollama_start: bool = True
     model_selection_mode: str = 'auto'  # 'auto', 'manual'
@@ -107,8 +111,12 @@ Returns:
             'first_launch': self.first_launch,
             'oobe_completed': self.oobe_completed,
             'vision_model': self.vision_model,
+            'theme': self.theme,
             'theme_mode': self.theme_mode,
             'ui_profile_level': self.ui_profile_level,
+            'persona_tone': self.persona_tone,
+            'persona_complexity': self.persona_complexity,
+            'special_instructions': self.special_instructions,
             'llm_complexity': self.llm_complexity,
             'auto_ollama_start': self.auto_ollama_start,
             'model_selection_mode': self.model_selection_mode,
@@ -121,12 +129,12 @@ Returns:
         }
 
     def save(self) -> None:
-        """Save configuration to ~/.config/axiom/settings.json."""
+        """Save configuration to ~/.config/ChienGPT/config.json."""
         import json
         from pathlib import Path
         config_dir = CONFIG_DIR
         config_dir.mkdir(parents=True, exist_ok=True)
-        config_path = config_dir / "settings.json"
+        config_path = config_dir / "config.json"
         
         try:
             with open(config_path, 'w', encoding='utf-8') as f:
@@ -136,10 +144,10 @@ Returns:
 
     @classmethod
     def load(cls) -> 'AxiomConfig':
-        """Load configuration from ~/.config/axiom/settings.json."""
+        """Load configuration from ~/.config/ChienGPT/config.json."""
         import json
         from pathlib import Path
-        config_path = CONFIG_DIR / "settings.json"
+        config_path = CONFIG_DIR / "config.json"
         
         if config_path.exists():
             try:

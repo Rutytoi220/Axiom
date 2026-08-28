@@ -850,6 +850,15 @@ Returns:
             base_prompt += f"\n\n[System Context: User is currently looking at active window: '{active_win}']"
         except ImportError:
             pass
+            
+        persona_str = (
+            f"\n\nYou are currently set to a {getattr(config, 'persona_tone', 'balanced')} tone "
+            f"with {getattr(config, 'persona_complexity', 'standard')} complexity."
+        )
+        if getattr(config, 'special_instructions', '').strip():
+            persona_str += f" Special instructions: {config.special_instructions}"
+        base_prompt += persona_str
+        
         if config.behavior and config.behavior.profile in ('tech_beginner', 'casual'):
             base_prompt += ' The user is a beginner or casual user. You MUST prioritize safe, read-only assistive tools like SafeFileSearchTool, FileOpenerTool, and AppLauncherTool over raw Bash or FileEdit tools. Explain things simply.'
         if intent != 'chat' and hasattr(self, 'registry') and self.registry:
