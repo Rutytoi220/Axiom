@@ -1,0 +1,131 @@
+/* AXIOM Global Theme Template */
+
+QWidget {
+    background-color: @bg_base@;
+    color: @text_main@;
+    font-family: @font_main@;
+}
+
+QMainWindow, QDialog {
+    background-color: @bg_base@;
+}
+
+QLineEdit, QTextEdit, QPlainTextEdit, QComboBox {
+    background-color: @bg_surface@;
+    color: @text_main@;
+    border: 1px solid @borders@;
+    border-radius: @radius_sm@;
+    padding: @spacing_sm@;
+}
+
+QPushButton {
+    background-color: @bg_surface@;
+    color: @text_main@;
+    border: 1px solid @borders@;
+    border-radius: @radius_md@;
+    padding: @spacing_sm@ @spacing_md@;
+}
+
+QPushButton:hover {
+    border: 1px solid @primary@;
+    color: @accent@;
+}
+
+QFrame#surface, QFrame#border {
+    background-color: @bg_surface@;
+    border: 1px solid @borders@;
+    border-radius: @radius_md@;
+    padding: @spacing_md@;
+}
+
+QLabel {
+    color: @text_main@;
+}
+
+QLabel[status="muted"] {
+    color: @text_muted@;
+}
+
+QTextEdit.code, QPlainTextEdit.code {
+    font-family: @font_mono@;
+}
+
+/* =========================================================================
+   Sidebar Segmented Control
+   ========================================================================= */
+QFrame#segmented_control {
+    background-color: @bg_surface@;
+    border-radius: @radius_md@;
+    border: 1px solid @borders@;
+}
+QPushButton#segmented_btn {
+    background-color: transparent;
+    color: @text_muted@;
+    border: none;
+    border-radius: @radius_sm@;
+}
+QPushButton#segmented_btn:hover {
+    color: @text_main@;
+}
+QPushButton#segmented_btn[status="active"] {
+    background-color: @primary@;
+    color: #FFFFFF;
+}
+
+/* =========================================================================
+   Chat Window Specifics
+   ========================================================================= */
+QPushButton#attach_btn {
+    background: transparent;
+    color: @text_muted@;
+    font-size: 24px;
+    font-weight: bold;
+    border: none;
+    padding-bottom: 2px;
+}
+QPushButton#attach_btn:hover {
+    color: @text_main@;
+}
+
+#swarm_hud {
+    background: transparent;
+    border: none;
+}
+
+#chat_scroll_area, #chat_scroll_widget {
+    background: transparent;
+    border: none;
+}
+
+QLabel#chat_watermark {
+    color: @borders@;
+    font-size: 32px;
+    font-weight: bold;
+    background: transparent;
+}
+
+/* =========================================================================
+   Chat Bubbles
+   ========================================================================= */
+QFrame#chat_bubble {
+    border-radius: @radius_lg@;
+}
+
+QFrame#chat_bubble[role="user"] {
+    background-color: @primary@;
+}
+QFrame#chat_bubble[role="user"] QTextBrowser {
+    color: #FFFFFF;
+    background: transparent;
+    border: none;
+}
+
+QFrame#chat_bubble[role="assistant"] {
+    background-color: @bg_surface@;
+    border: 1px solid @borders@;
+}
+QFrame#chat_bubble[role="assistant"] QTextBrowser {
+    color: @text_main@;
+    background: transparent;
+    border: none;
+}

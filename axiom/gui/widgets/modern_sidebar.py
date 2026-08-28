@@ -13,7 +13,7 @@ class SegmentedControl(QFrame):
     def __init__(self, theme_manager: ThemeManager):
         super().__init__()
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.t = theme_manager.theme
+        self.setObjectName("segmented_control")
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(4, 4, 4, 4)
         self.layout.setSpacing(4)
@@ -23,13 +23,16 @@ class SegmentedControl(QFrame):
         
         for mode in ["Basic", "Strict", "Autopilot"]:
             btn = QPushButton(mode)
+            btn.setObjectName("segmented_btn")
             btn.setCheckable(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setProperty("status", "inactive")
             btn.clicked.connect(lambda checked, b=btn: self._on_toggled(b))
             self.buttons.append(btn)
             self.layout.addWidget(btn)
             
         self.buttons[0].setChecked(True)
+        self.buttons[0].setProperty("status", "active")
         self.active_btn = self.buttons[0]
         self._apply_theme()
 
@@ -37,38 +40,19 @@ class SegmentedControl(QFrame):
         for btn in self.buttons:
             if btn != clicked_btn:
                 btn.setChecked(False)
+                btn.setProperty("status", "inactive")
+                btn.style().unpolish(btn)
+                btn.style().polish(btn)
         clicked_btn.setChecked(True)
+        clicked_btn.setProperty("status", "active")
+        clicked_btn.style().unpolish(clicked_btn)
+        clicked_btn.style().polish(clicked_btn)
         self.active_btn = clicked_btn
         self.value_changed.emit(clicked_btn.text().lower())
         self._apply_theme()
 
     def _apply_theme(self):
-        self.setStyleSheet(f"""
-            SegmentedControl {{
-                background-color: #0E0E17;
-                border-radius: 18px;
-                border: 1px solid #2D2B3D;
-                padding: 2px;
-            }}
-            QPushButton {{
-                background: transparent;
-                color: {self.t.colors.text_secondary};
-                border: none;
-                padding: 6px 12px;
-                border-radius: 14px;
-                font-family: {self.t.typography.font_main};
-                font-size: {self.t.typography.size_sm}px;
-                font-weight: 500;
-            }}
-            QPushButton:checked {{
-                background-color: #2D2B3D;
-                color: #FFFFFF;
-            }}
-            QPushButton:hover:!checked {{
-                color: {self.t.colors.text_primary};
-            }}
-        """)
-
+        pass
 class ModernSidebar(QFrame):
     new_chat_requested = Signal()
     new_project_requested = Signal()
@@ -80,7 +64,6 @@ class ModernSidebar(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.theme_manager = getattr(parent, 'theme_manager', ThemeManager())
-        self.t = self.theme_manager.theme
         
         self.setFixedWidth(280)
         self.layout = QVBoxLayout(self)
@@ -129,7 +112,7 @@ class ModernSidebar(QFrame):
         self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.settings_btn.setFixedHeight(36)
         settings_layout = QHBoxLayout()
-        settings_layout.setContentsMargins(16, 0, 16, 16)
+        settings_layout.setContentsMargins(0, 0, 0, 0)
         settings_layout.addWidget(self.settings_btn)
         self.layout.addLayout(settings_layout)
 
@@ -137,7 +120,7 @@ class ModernSidebar(QFrame):
         self.hub_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.hub_btn.setFixedHeight(36)
         hub_layout = QHBoxLayout()
-        hub_layout.setContentsMargins(16, 0, 16, 16)
+        hub_layout.setContentsMargins(0, 0, 0, 0)
         hub_layout.addWidget(self.hub_btn)
         self.layout.addLayout(hub_layout)
 
@@ -189,59 +172,4 @@ class ModernSidebar(QFrame):
                 chat_item.setSizeHint(0, QSize(0, 44))
 
     def _apply_theme(self):
-        self.setStyleSheet(f"""
-            ModernSidebar {{
-                background-color: {self.t.colors.bg_base};
-                border-right: 1px solid {self.t.colors.border_default};
-            }}
-            QPushButton {{
-                background-color: #1E1E2E;
-                color: {self.t.colors.text_primary};
-                border: 1px solid {self.t.colors.border_default};
-                border-radius: 18px;
-                font-family: {self.t.typography.font_main};
-                font-size: {self.t.typography.size_sm}px;
-                font-weight: 500;
-            }}
-            QPushButton:hover {{
-                background-color: #2D2B3D;
-                border: 1px solid {self.t.colors.accent};
-            }}
-        """)
-        self.tree.setStyleSheet("""
-            QTreeWidget {
-                background: transparent;
-                border: none;
-                outline: none;
-                padding: 4px;
-            }
-            QTreeWidget::item {
-                padding: 8px 12px;
-                margin: 2px 4px;
-                border-radius: 8px;
-                color: #CAD3F5;
-                font-size: 13px;
-            }
-            QTreeWidget::item:selected {
-                background-color: #2D2B3D;
-                color: #FFFFFF;
-                font-weight: 600;
-            }
-            QTreeWidget::item:hover:!selected {
-                background-color: #1E1E2E;
-            }
-            QScrollBar:vertical {
-                border: none;
-                background: #181825;
-                width: 8px;
-                border-radius: 4px;
-            }
-            QScrollBar::handle:vertical {
-                background: #313244;
-                border-radius: 4px;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                border: none;
-                background: none;
-            }
-        """)
+        pass

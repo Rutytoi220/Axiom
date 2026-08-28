@@ -11,7 +11,6 @@ class AutoExpandTextEdit(QTextEdit):
 
     def __init__(self, theme_manager: ThemeManager):
         super().__init__()
-        self.t = theme_manager.theme
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setPlaceholderText("Ask AXIOM...")
@@ -42,27 +41,16 @@ class ModernInputBar(QFrame):
     def __init__(self, theme_manager: ThemeManager):
         super().__init__()
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.t = theme_manager.theme
-        self.setFixedHeight(48)
+        self.setMinimumHeight(48)
         
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(16, 0, 16, 0)
         self.layout.setSpacing(12)
 
         self.attach_btn = QPushButton("+")
+        self.attach_btn.setObjectName("attach_btn")
         self.attach_btn.setFixedSize(32, 32)
         self.attach_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.attach_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                color: #8F8CA8;
-                font-size: 24px;
-                font-weight: bold;
-                border: none;
-                padding-bottom: 2px;
-            }
-            QPushButton:hover { color: #FFFFFF; }
-        """)
 
         self.input_area = AutoExpandTextEdit(theme_manager)
         self.input_edit = self.input_area  # ALIAS for main_window.py
@@ -80,41 +68,16 @@ class ModernInputBar(QFrame):
         
         self.input_area.return_pressed.connect(self.send_btn.click)
 
-        self.layout.addWidget(self.attach_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.layout.addWidget(self.attach_btn, 0, Qt.AlignmentFlag.AlignBottom)
         self.layout.addWidget(self.input_area, 1, Qt.AlignmentFlag.AlignVCenter)
-        self.layout.addWidget(self.mic_btn, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.layout.addWidget(self.send_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.layout.addWidget(self.mic_btn, 0, Qt.AlignmentFlag.AlignBottom)
+        self.layout.addWidget(self.send_btn, 0, Qt.AlignmentFlag.AlignBottom)
 
         self._apply_theme()
 
     def _apply_theme(self):
-        self.setStyleSheet(f"""
-            ModernInputBar {{
-                background-color: {self.t.colors.bg_surface};
-                border: 1px solid {self.t.colors.border_default};
-                border-radius: 24px;
-            }}
-            QTextEdit {{
-                background: transparent;
-                border: none;
-                outline: none;
-                color: {self.t.colors.text_primary};
-                font-family: {self.t.typography.font_main};
-                font-size: {self.t.typography.size_md}px;
-                line-height: 24px;
-            }}
-            QPushButton, QToolButton {{
-                background: transparent;
-                color: {self.t.colors.text_secondary};
-                border: none;
-                border-radius: 14px;
-                font-size: 16px;
-            }}
-            QPushButton:hover, QToolButton:hover {{
-                background: rgba(139, 92, 246, 0.2);
-                color: {self.t.colors.accent};
-            }}
-        """)
+        # Delegate styles to base.qss.template
+        pass
         
     def _on_send(self):
         text = self.input_area.toPlainText().strip()
@@ -126,12 +89,13 @@ class ModernChatBubble(QFrame):
     def __init__(self, role: str, text: str, theme_manager: ThemeManager):
         super().__init__()
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setObjectName("chat_bubble")
         self.role = role
-        self.t = theme_manager.theme
+        self.setProperty("role", role)
         self._raw_text = text
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setContentsMargins(12, 12, 12, 12)
         self.layout.setSpacing(0)
 
         self.text_browser = QTextBrowser()
@@ -149,25 +113,8 @@ class ModernChatBubble(QFrame):
         self._apply_theme()
 
     def _apply_theme(self):
-        bg_color = self.t.colors.bg_surface_active if self.role == "user" else self.t.colors.bg_surface
-        border = self.t.colors.border_default if self.role == "user" else self.t.colors.border_strong
-        
-        self.setStyleSheet(f"""
-            ModernChatBubble {{
-                background-color: {bg_color};
-                border: 1px solid {border};
-                border-radius: 18px;
-                padding: 12px 18px;
-            }}
-            QTextBrowser {{
-                background: transparent;
-                border: none;
-                color: {self.t.colors.text_primary};
-                font-family: {self.t.typography.font_main};
-                font-size: {self.t.typography.size_md}px;
-                line-height: 1.6;
-            }}
-        """)
+        # Delegate styles to base.qss.template
+        pass
 
     def set_text(self, text: str):
         self._raw_text = text
@@ -192,7 +139,6 @@ class ModernChatDisplay(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.theme_manager = getattr(parent, 'theme_manager', ThemeManager())
-        self.t = self.theme_manager.theme
         
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(32, 0, 32, 24)
@@ -202,7 +148,7 @@ class ModernChatDisplay(QWidget):
         self.swarm_hud = SwarmHUD()
         if hasattr(self, 'swarm_hud') and self.swarm_hud is not None:
             self.swarm_hud.hide()
-            self.swarm_hud.setStyleSheet("background: transparent; border: none;")
+            self.swarm_hud.setObjectName("swarm_hud")
         self.layout.addWidget(self.swarm_hud)
         
         top_bar = QHBoxLayout()
@@ -213,11 +159,12 @@ class ModernChatDisplay(QWidget):
         self.layout.addLayout(top_bar)
 
         self.scroll_area = QScrollArea()
+        self.scroll_area.setObjectName("chat_scroll_area")
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
-        self.scroll_area.setStyleSheet("background: transparent;")
         
         self.scroll_widget = QWidget()
+        self.scroll_widget.setObjectName("chat_scroll_widget")
         self.scroll_layout = QVBoxLayout(self.scroll_widget)
         self.chat_layout = self.scroll_layout
         self.scroll_layout.setContentsMargins(0, 0, 0, 0)
@@ -230,7 +177,7 @@ class ModernChatDisplay(QWidget):
         self.scroll_area.setWidget(self.scroll_widget)
         
         self.watermark = QLabel("AXIOM v11.2", self.scroll_area.viewport())
-        self.watermark.setStyleSheet("color: rgba(255, 255, 255, 0.08); font-size: 32px; font-weight: bold; background: transparent;")
+        self.watermark.setObjectName("chat_watermark")
         self.watermark.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.watermark.lower()
         

@@ -18,30 +18,19 @@ logger = logging.getLogger(__name__)
 
 
 def _load_stylesheet(app: "QApplication") -> None:  # type: ignore[name-defined]
-    from axiom.config import get_config
-    from PySide6.QtCore import Qt
+    from axiom.gui.styles.theme_manager import get_theme_manager
     from axiom.gui.config_manager import get_ui_config_manager
-    config = get_config()
+    
     ui_config = get_ui_config_manager().load()
-    theme_mode = ui_config.theme.lower()
+    theme_name = ui_config.theme.lower()
     
-    is_dark = True
-    if theme_mode == "light":
-        is_dark = False
-    elif theme_mode == "system":
-        if hasattr(app.styleHints(), 'colorScheme'):
-            is_dark = app.styleHints().colorScheme() == Qt.ColorScheme.Dark
-
-    theme_file = "themes.qss" if is_dark else "light_theme.qss"
-    qss_path = Path(__file__).parent / "styles" / theme_file
-    
-    if qss_path.exists():
-        qss_text = qss_path.read_text(encoding="utf-8")
-        qss_text = qss_text.replace("@ACCENT_COLOR@", ui_config.accent_color)
-        app.setStyleSheet(qss_text)
-        logger.debug("Loaded QSS theme from %s", qss_path)
-    else:
-        logger.warning("Theme file not found: %s", qss_path)
+    # We map 'minimalist' or 'system' or 'dark' to axiom_pro as the default fallback for now
+    if theme_name not in ["axiom_pro", "jarvis"]:
+        theme_name = "axiom_pro"
+        
+    theme_manager = get_theme_manager()
+    theme_manager.apply_theme(app, theme_name)
+    logger.debug("Applied theme via ThemeManager: %s", theme_name)
 
 
 def _build_tray(app: "QApplication", window: "MainWindow") -> "QSystemTrayIcon":  # type: ignore[name-defined]

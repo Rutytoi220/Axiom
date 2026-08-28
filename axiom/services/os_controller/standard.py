@@ -1,5 +1,4 @@
 import logging
-import pyautogui
 from axiom.services.os_controller.base import BaseOSController
 
 logger = logging.getLogger(__name__)
@@ -8,6 +7,7 @@ class StandardController(BaseOSController):
     """OS Controller for X11, Windows, and macOS using pyautogui."""
 
     def click(self, x: int, y: int, button: str = "left", clicks: int = 1) -> None:
+        import pyautogui
         try:
             pyautogui.click(x=x, y=y, button=button, clicks=clicks)
         except Exception as e:
@@ -15,6 +15,7 @@ class StandardController(BaseOSController):
             raise RuntimeError(f"Standard click failed: {e}")
 
     def type_text(self, text: str) -> None:
+        import pyautogui
         try:
             pyautogui.typewrite(text)
         except Exception as e:
@@ -22,6 +23,7 @@ class StandardController(BaseOSController):
             raise RuntimeError(f"Standard type_text failed: {e}")
 
     def press_key(self, key: str) -> None:
+        import pyautogui
         try:
             pyautogui.press(key)
         except Exception as e:

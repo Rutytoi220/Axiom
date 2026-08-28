@@ -62,7 +62,7 @@ class SettingsDrawer(QFrame):
         super().__init__(parent)
         self.setMaximumWidth(0)
         self.setMinimumWidth(0)
-        self.setStyleSheet("SettingsDrawer { background-color: #1A1A1A; border-left: 1px solid #333333; }")
+        self.setObjectName("surface")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
@@ -70,68 +70,61 @@ class SettingsDrawer(QFrame):
 
         # ── Title ──────────────────────────────────────────────────────── #
         title = QLabel("Settings")
-        title.setStyleSheet("color: #FFFFFF; font-size: 18px; font-weight: bold; margin-bottom: 10px;")
+        title.setStyleSheet("font-size: 18px; font-weight: bold; margin-bottom: 10px;")
         layout.addWidget(title)
 
         # ── Model Settings ─────────────────────────────────────────────── #
         model_label = QLabel("\U0001f9e0 Model Settings")
-        model_label.setStyleSheet("color: #a0a0a0; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;")
+        model_label.setProperty("status", "muted")
         layout.addWidget(model_label)
 
         self.model_combo = QComboBox()
-        self.model_combo.setStyleSheet("""
-            QComboBox {
-                background-color: #2A2A2A;
-                color: #FFFFFF;
-                border: 1px solid #333333;
-                border-radius: 6px;
-                padding: 6px 10px;
-                font-size: 13px;
-            }
-            QComboBox::drop-down { border: none; }
-            QComboBox QAbstractItemView {
-                background-color: #2A2A2A;
-                color: #FFFFFF;
-                selection-background-color: #3A3A3A;
-                border: 1px solid #333333;
-            }
-        """)
+        
         layout.addWidget(self.model_combo)
         self._populate_models()
         self.model_combo.currentTextChanged.connect(self.model_changed)
+        
+        # ── Theme Settings ─────────────────────────────────────────────── #
+        theme_label = QLabel("🎨 Theme Settings")
+        theme_label.setProperty("status", "muted")
+        layout.addWidget(theme_label)
+        
+        self.theme_combo = QComboBox()
+        from axiom.gui.styles.theme_manager import get_theme_manager
+        tm = get_theme_manager()
+        self.theme_combo.addItems(["axiom_pro", "jarvis"] + [t for t in tm._registry.list_theme_ids() if t not in ["axiom_pro", "jarvis"]])
+        
+        current = tm.active_theme_name or "axiom_pro"
+        if current in [self.theme_combo.itemText(i) for i in range(self.theme_combo.count())]:
+            self.theme_combo.setCurrentText(current)
+            
+        layout.addWidget(self.theme_combo)
+        self.theme_combo.currentTextChanged.connect(
+            lambda text: get_theme_manager().apply_theme(QApplication.instance(), text)
+        )
 
         # ── Swarm Nodes ────────────────────────────────────────────────── #
         node_label = QLabel("\U0001f310 Swarm Nodes")
-        node_label.setStyleSheet("color: #a0a0a0; font-size: 13px; font-weight: 600; letter-spacing: 0.5px; margin-top: 10px;")
+        node_label.setProperty("status", "muted")
         layout.addWidget(node_label)
 
         # Status indicator
         self._status_label = QLabel("● Disconnected")
-        self._status_label.setStyleSheet("color: #ef4444; font-size: 12px;")
+        self._status_label.setProperty("status", "danger"); self._status_label.setStyleSheet("font-size: 12px;")
         layout.addWidget(self._status_label)
 
         node_layout = QHBoxLayout()
+        node_layout.setContentsMargins(0, 0, 0, 0)
         node_layout.setSpacing(6)
         self.node_input = QLineEdit()
         self.node_input.setPlaceholderText("192.168.x.x:8000")
-        self.node_input.setStyleSheet("""
-            QLineEdit {
-                background-color: #2A2A2A;
-                color: #FFFFFF;
-                border: 1px solid #333333;
-                border-radius: 6px;
-                padding: 6px;
-                font-size: 13px;
-            }
-            QLineEdit:focus { border: 1px solid #10b981; }
-        """)
+        
 
         self.connect_btn = QPushButton("Connect")
         self.connect_btn.setCursor(Qt.PointingHandCursor)
-        self._btn_idle_style = "QPushButton { background-color: #10b981; color: #FFFFFF; border: none; border-radius: 6px; padding: 6px 12px; font-weight: bold; font-size: 12px; } QPushButton:hover { background-color: #059669; }"
-        self._btn_connecting_style = "QPushButton { background-color: #f59e0b; color: #FFFFFF; border: none; border-radius: 6px; padding: 6px 12px; font-weight: bold; font-size: 12px; }"
-        self._btn_connected_style = "QPushButton { background-color: #3b82f6; color: #FFFFFF; border: none; border-radius: 6px; padding: 6px 12px; font-weight: bold; font-size: 12px; } QPushButton:hover { background-color: #2563eb; }"
-        self.connect_btn.setStyleSheet(self._btn_idle_style)
+        self.connect_btn.setProperty("status", "")
+        self.connect_btn.style().unpolish(self.connect_btn)
+        self.connect_btn.style().polish(self.connect_btn)
         self.connect_btn.clicked.connect(self._on_connect_clicked)
 
         node_layout.addWidget(self.node_input, 1)
@@ -140,7 +133,7 @@ class SettingsDrawer(QFrame):
 
         # Node list — shows connected node
         self._node_list_label = QLabel("")
-        self._node_list_label.setStyleSheet("color: #6b7280; font-size: 11px; font-style: italic;")
+        self._node_list_label.setProperty("status", "muted"); self._node_list_label.setStyleSheet("font-size: 11px; font-style: italic;")
         self._node_list_label.setWordWrap(True)
         layout.addWidget(self._node_list_label)
 
@@ -148,7 +141,7 @@ class SettingsDrawer(QFrame):
 
         # ── Audio / TTS Controls ─────────────────────────────────────────── #
         audio_label = QLabel("🔉 Audio")
-        audio_label.setStyleSheet("color: #a0a0a0; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;")
+        audio_label.setProperty("status", "muted"); audio_label.setStyleSheet("font-size: 13px; font-weight: 600; letter-spacing: 0.5px;")
         layout.addWidget(audio_label)
 
         self._tts_toggle_btn = QPushButton("🔊  Voice Responses: ON")
@@ -174,6 +167,48 @@ class SettingsDrawer(QFrame):
         self._tts_toggle_btn.toggled.connect(self._on_tts_toggled)
         layout.addWidget(self._tts_toggle_btn)
 
+        layout.addSpacing(20)
+
+        self._sync_btn = QPushButton("\U0001f504 Device Sync")
+        self._sync_btn.setCursor(Qt.PointingHandCursor)
+        self._sync_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #8B5CF6;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                padding: 10px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #7C3AED;
+            }
+        """)
+        self._sync_btn.clicked.connect(self._on_sync_clicked)
+        layout.addWidget(self._sync_btn)
+
+        layout.addSpacing(10)
+
+        self._update_btn = QPushButton("🔄 Check for Updates")
+        self._update_btn.setCursor(Qt.PointingHandCursor)
+        self._update_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3B82F6;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                padding: 10px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #2563EB;
+            }
+        """)
+        self._update_btn.clicked.connect(self._on_update_clicked)
+        layout.addWidget(self._update_btn)
+
         # ── Animation ────────────────────────────────────────────────────── #
         self.anim = QPropertyAnimation(self, b"maximumWidth")
         self.anim.setDuration(300)
@@ -189,6 +224,16 @@ class SettingsDrawer(QFrame):
     def tts_enabled(self) -> bool:
         """Whether TTS voice responses are currently enabled."""
         return self._tts_toggle_btn.isChecked()
+
+    def _on_sync_clicked(self):
+        from axiom.gui.widgets.sync_dialog import SyncDialog
+        dlg = SyncDialog(self)
+        dlg.exec()
+
+    def _on_update_clicked(self):
+        from axiom.gui.widgets.update_dialog import UpdateDialog
+        dlg = UpdateDialog(self)
+        dlg.exec()
 
     # ── Private helpers ────────────────────────────────────────────────── #
     def _populate_models(self):
@@ -222,36 +267,44 @@ class SettingsDrawer(QFrame):
             if host:
                 self.connect_btn.setText("Connecting…")
                 self.connect_btn.setEnabled(False)
-                self.connect_btn.setStyleSheet(self._btn_connecting_style)
+                self.connect_btn.setProperty("status", "warning")
+                self.connect_btn.style().unpolish(self.connect_btn)
+                self.connect_btn.style().polish(self.connect_btn)
                 self.connect_requested.emit(host)
 
     # ── Public slots called by MainWindow ─────────────────────────────── #
     def on_swarm_connected(self):
         self._connected = True
         self._status_label.setText("● Connected")
-        self._status_label.setStyleSheet("color: #10b981; font-size: 12px;")
+        self._status_label.setProperty("status", "success"); self._status_label.style().unpolish(self._status_label); self._status_label.style().polish(self._status_label)
         host = self.node_input.text().strip()
         self._node_list_label.setText(f"Node: {host}")
         self.connect_btn.setText("Disconnect")
         self.connect_btn.setEnabled(True)
-        self.connect_btn.setStyleSheet(self._btn_connected_style)
+        self.connect_btn.setProperty("status", "active")
+        self.connect_btn.style().unpolish(self.connect_btn)
+        self.connect_btn.style().polish(self.connect_btn)
 
     def on_swarm_disconnected(self):
         self._connected = False
         self._status_label.setText("● Disconnected")
-        self._status_label.setStyleSheet("color: #ef4444; font-size: 12px;")
+        self._status_label.setProperty("status", "danger"); self._status_label.setStyleSheet("font-size: 12px;")
         self._node_list_label.setText("")
         self.connect_btn.setText("Connect")
         self.connect_btn.setEnabled(True)
-        self.connect_btn.setStyleSheet(self._btn_idle_style)
+        self.connect_btn.setProperty("status", "")
+        self.connect_btn.style().unpolish(self.connect_btn)
+        self.connect_btn.style().polish(self.connect_btn)
 
     def on_swarm_error(self, msg: str):
         self._connected = False
         self._status_label.setText(f"● Error: {msg[:40]}")
-        self._status_label.setStyleSheet("color: #f59e0b; font-size: 12px;")
+        self._status_label.setProperty("status", "warning"); self._status_label.style().unpolish(self._status_label); self._status_label.style().polish(self._status_label)
         self.connect_btn.setText("Retry")
         self.connect_btn.setEnabled(True)
-        self.connect_btn.setStyleSheet(self._btn_idle_style)
+        self.connect_btn.setProperty("status", "")
+        self.connect_btn.style().unpolish(self.connect_btn)
+        self.connect_btn.style().polish(self.connect_btn)
 
     # ── Toggle animation ──────────────────────────────────────────────── #
     def toggle(self):
@@ -293,7 +346,7 @@ class MainWindow(QMainWindow):
         from axiom.gui.widgets.modern_sidebar import ModernSidebar
 
         central_widget = QWidget()
-        central_widget.setStyleSheet("background: transparent;")
+        
         main_layout = QHBoxLayout(central_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
@@ -355,7 +408,7 @@ class MainWindow(QMainWindow):
         
         # Init startup status
         self._startup_status = QLabel("⏳ Background services starting...")
-        self._startup_status.setStyleSheet("color: #f59e0b; font-size: 12px; font-weight: bold; padding-left: 10px;")
+        self._startup_status.setProperty("status", "warning"); self._startup_status.setStyleSheet("font-size: 12px; font-weight: bold; padding-left: 10px;")
         self.statusBar().addWidget(self._startup_status)
         
         self._apply_theme()
@@ -363,9 +416,7 @@ class MainWindow(QMainWindow):
 
     def _apply_theme(self):
         t = self._theme_manager.theme
-        self.setStyleSheet(f"QMainWindow {{ background-color: {t.colors.bg_base}; color: {t.colors.text_primary}; font-family: {t.typography.font_main}; }}")
-        self.splitter.setStyleSheet(f"QSplitter::handle {{ background-color: {t.colors.border_default}; width: {t.geometry.border_width}px; }}")
-
+                
     def _show_settings(self):
         dialog = SettingsDialog(self)
         dialog.exec()
@@ -685,12 +736,12 @@ class MainWindow(QMainWindow):
             res = await mgr.check_for_updates()
             if res.get('update_available'):
                 self._status_updates.setText(f"[ Updates: {res['latest_version']} Available ]")
-                self._status_updates.setStyleSheet('font-weight: 600; color: #f38ba8; padding-right: 10px;')
+                self._status_updates.setProperty("status", "danger"); self._status_updates.style().unpolish(self._status_updates); self._status_updates.style().polish(self._status_updates)
                 from PySide6.QtCore import QMetaObject, Q_ARG, Qt
                 QMetaObject.invokeMethod(self, '_prompt_update', Qt.ConnectionType.QueuedConnection, Q_ARG(str, res['latest_version']))
             else:
                 self._status_updates.setText('[ Updates: Up-to-Date ]')
-                self._status_updates.setStyleSheet('font-weight: 600; color: #a6e3a1; padding-right: 10px;')
+                self._status_updates.setProperty("status", "success"); self._status_updates.style().unpolish(self._status_updates); self._status_updates.style().polish(self._status_updates)
         loop = asyncio.get_event_loop()
         if loop.is_running():
             asyncio.run_coroutine_threadsafe(_check(), loop)
@@ -717,6 +768,8 @@ class MainWindow(QMainWindow):
         self._bridge.swarm_agent_completed.connect(self._on_swarm_completed)
         self._bridge.axiomfs_status.connect(self._on_axiomfs_status)
         self._bridge.governor_approval_requested.connect(self._on_approval_requested)
+        if hasattr(self._bridge, 'tool_status_changed'):
+            self._bridge.tool_status_changed.connect(self._on_tool_status)
         pass
         self._bridge.ui_widget_generated.connect(self._on_widget_generated)
         pass
@@ -728,14 +781,20 @@ class MainWindow(QMainWindow):
         if service and state:
             if state == "READY":
                 self._startup_status.setText(f"✅ {service} Ready")
-                self._startup_status.setStyleSheet("color: #10b981; font-size: 12px; font-weight: bold; padding-left: 10px;")
+                self._startup_status.setProperty("status", "success")
+                self._startup_status.style().unpolish(self._startup_status)
+                self._startup_status.style().polish(self._startup_status)
             elif state == "DEGRADED":
                 self._startup_status.setText(f"⚠️ {service} Degraded")
-                self._startup_status.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: bold; padding-left: 10px;")
+                self._startup_status.setProperty("status", "danger")
+                self._startup_status.style().unpolish(self._startup_status)
+                self._startup_status.style().polish(self._startup_status)
         elif state == "READY":
             # The final startup.service.ready event has no service name
             self._startup_status.setText("✅ System Ready")
-            self._startup_status.setStyleSheet("color: #10b981; font-size: 12px; font-weight: bold; padding-left: 10px;")
+            self._startup_status.setProperty("status", "success")
+            self._startup_status.style().unpolish(self._startup_status)
+            self._startup_status.style().polish(self._startup_status)
             QTimer.singleShot(5000, lambda: self._startup_status.hide())
 
     def _on_axiomfs_status(self, status: str) -> None:
@@ -744,13 +803,19 @@ class MainWindow(QMainWindow):
     def _on_daemon_connection_changed(self, state: str) -> None:
         if state == 'connected':
             self._status_daemon.setText('⚡ Daemon: Connected')
-            self._status_daemon.setStyleSheet('color: #10b981; font-weight: bold; padding-left: 5px; padding-right: 15px;')
+            self._status_daemon.setProperty("status", "success")
+            self._status_daemon.style().unpolish(self._status_daemon)
+            self._status_daemon.style().polish(self._status_daemon)
         elif state == 'connecting':
             self._status_daemon.setText('⏳ Daemon: Starting...')
-            self._status_daemon.setStyleSheet('color: #f59e0b; font-weight: bold; padding-left: 5px; padding-right: 15px;')
+            self._status_daemon.setProperty("status", "warning")
+            self._status_daemon.style().unpolish(self._status_daemon)
+            self._status_daemon.style().polish(self._status_daemon)
         else:
             self._status_daemon.setText('🔌 Daemon: Disconnected')
-            self._status_daemon.setStyleSheet('color: #f87171; font-weight: bold; padding-left: 5px; padding-right: 15px;')
+            self._status_daemon.setProperty("status", "danger")
+            self._status_daemon.style().unpolish(self._status_daemon)
+            self._status_daemon.style().polish(self._status_daemon)
 
     @Slot(dict)
     def _on_swarm_status_changed(self, payload: dict) -> None:
@@ -763,10 +828,10 @@ class MainWindow(QMainWindow):
         msg.setText(f'AXIOM requests permission to execute an external action:\\n\\nTool: {tool_name}\\nCommand / Args: {arguments}')
         msg.setIcon(QMessageBox.Icon.Warning)
         allow_btn = msg.addButton('Allow Execution', QMessageBox.ButtonRole.AcceptRole)
-        allow_btn.setStyleSheet('background-color: #10b981; color: white; font-weight: bold; border: none; padding: 6px 12px; border-radius: 4px;')
+        allow_btn.setProperty("status", "success")
         deny_btn = msg.addButton('Deny Action', QMessageBox.ButtonRole.RejectRole)
-        deny_btn.setStyleSheet('background-color: #ef4444; color: white; font-weight: bold; border: none; padding: 6px 12px; border-radius: 4px;')
-        msg.setStyleSheet('QMessageBox { background-color: #1a1a1f; color: #d4d4d8; } QLabel { color: #d4d4d8; font-family: monospace; }')
+        deny_btn.setProperty("status", "danger")
+        
         msg.exec()
         ctx['result']['granted'] = msg.clickedButton() == allow_btn
         ctx['event'].set()
@@ -949,7 +1014,14 @@ class MainWindow(QMainWindow):
 
     @Slot(str, str)
     def _on_tool_status(self, tool_id: str, status: str) -> None:
-        pass
+        pill_text = f"<i>[AXIOM is executing: {tool_id}...]</i><br><b>Status:</b> {status}"
+        if self._streaming_bubble:
+            self._streaming_text = pill_text
+            self._streaming_bubble.set_text(self._streaming_text)
+        else:
+            self._streaming_text = pill_text
+            self._streaming_bubble = self._chat_display.add_bubble('assistant', self._streaming_text)
+        self._chat_display._scroll_to_bottom()
 
     def _on_swarm_started(self, agent_name: str, task: str) -> None:
         if hasattr(self, '_swarm_hud'):
@@ -1002,13 +1074,13 @@ class MainWindow(QMainWindow):
     def _on_ollama_status_changed(self, is_online: bool, latency: float) -> None:
         if is_online:
             self._ollama_status_label.setText(f'🟢 Ollama: Online ({latency:.0f}ms)')
-            self._ollama_status_label.setStyleSheet('font-weight: 600; font-size: 13px; color: #10b981;')
+            self._ollama_status_label.setProperty("status", "success"); self._ollama_status_label.style().unpolish(self._ollama_status_label); self._ollama_status_label.style().polish(self._ollama_status_label)
             self._ollama_start_btn.setVisible(False)
             self._ollama_start_action.setVisible(False)
             self._bridge.refresh_models()
         else:
             self._ollama_status_label.setText('🔴 Ollama: Offline')
-            self._ollama_status_label.setStyleSheet('font-weight: 600; font-size: 13px; color: #ef4444;')
+            self._ollama_status_label.setProperty("status", "danger"); self._ollama_status_label.style().unpolish(self._ollama_status_label); self._ollama_status_label.style().polish(self._ollama_status_label)
             self._ollama_start_btn.setVisible(True)
             self._ollama_start_action.setVisible(True)
             if getattr(self, '_first_ollama_ping', True):
@@ -1052,7 +1124,7 @@ class MainWindow(QMainWindow):
     @Slot()
     def _on_ollama_start_clicked(self) -> None:
         self._ollama_status_label.setText('🟡 Starting Daemon...')
-        self._ollama_status_label.setStyleSheet('font-weight: 600; font-size: 13px; color: #fbbf24;')
+        self._ollama_status_label.setProperty("status", "warning"); self._ollama_status_label.style().unpolish(self._ollama_status_label); self._ollama_status_label.style().polish(self._ollama_status_label)
         self._ollama_start_btn.setEnabled(False)
         self._ollama_monitor.trigger_rapid_polling()
         import threading

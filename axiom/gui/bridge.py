@@ -58,6 +58,7 @@ class AxiomBridge(QObject):
     axiomfs_status: Signal = Signal(str)
     governor_approval_requested: Signal = Signal(str, dict)
     ui_widget_generated: Signal = Signal(dict)
+    startup_service_update: Signal = Signal(dict)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -275,6 +276,8 @@ class AxiomBridge(QObject):
             self.governor_approval_requested.emit(payload.get("tool_name", ""), payload.get("arguments", {}))
         elif event_type == "axiomfs.status":
             self.axiomfs_status.emit(payload.get("status", "Unknown"))
+        elif event_type == "startup.service.update" or event_type == "startup.service.ready":
+            self.startup_service_update.emit(payload)
         elif event_type.startswith("swarm."):
             self._on_swarm_event(event_type, payload)
 

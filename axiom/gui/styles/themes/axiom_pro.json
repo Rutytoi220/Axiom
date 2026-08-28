@@ -1,0 +1,21 @@
+{
+    "id": "axiom_pro",
+    "name": "Axiom Pro",
+    "author": "AXIOM Team",
+    "version": "1.0.0",
+    "tokens": {
+        "bg_base": "#0D1117",
+        "bg_surface": "#161B22",
+        "primary": "#8B5CF6",
+        "accent": "#A78BFA",
+        "text_main": "#FAFAFA",
+        "text_muted": "#8B949E",
+        "borders": "#30363D",
+        "spacing_sm": "8px",
+        "spacing_md": "16px",
+        "radius_sm": "4px",
+        "radius_md": "8px",
+        "font_main": "'Inter', sans-serif",
+        "font_mono": "'JetBrains Mono', monospace"
+    }
+}

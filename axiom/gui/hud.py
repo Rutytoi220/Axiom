@@ -63,65 +63,22 @@ class HUDWindow(QWidget):
         
         self.input_field = QLineEdit()
         self.input_field.setPlaceholderText("Ask AXIOM... (Press Enter to submit)")
-        self.input_field.setStyleSheet("""
-            QLineEdit {
-                background: transparent;
-                border: none;
-                color: #cdd6f4;
-                font-size: 16px;
-            }
-        """)
+        
         self.input_field.returnPressed.connect(self._on_submit)
         header_layout.addWidget(self.input_field)
         
         self.dictate_btn = QPushButton("🎙️ Dictate")
-        self.dictate_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #313244;
-                color: #cdd6f4;
-                border: none;
-                border-radius: 6px;
-                padding: 5px 10px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #45475a;
-            }
-        """)
+        
         self.dictate_btn.clicked.connect(self._on_dictate_toggle)
         header_layout.addWidget(self.dictate_btn)
 
         self.crop_btn = QPushButton("✂️ Crop Vision")
-        self.crop_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #313244;
-                color: #cdd6f4;
-                border: none;
-                border-radius: 6px;
-                padding: 5px 10px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #45475a;
-            }
-        """)
+        
         self.crop_btn.clicked.connect(self._on_crop_vision)
         header_layout.addWidget(self.crop_btn)
         
         self.paste_btn = QPushButton("📋 Paste Context")
-        self.paste_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #313244;
-                color: #cdd6f4;
-                border: none;
-                border-radius: 6px;
-                padding: 5px 10px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #45475a;
-            }
-        """)
+        
         self.paste_btn.clicked.connect(self._on_paste_context)
         header_layout.addWidget(self.paste_btn)
 
@@ -152,16 +109,7 @@ class HUDWindow(QWidget):
         # Output Area (hidden by default until submission)
         self.output_area = QTextEdit()
         self.output_area.setReadOnly(True)
-        self.output_area.setStyleSheet("""
-            QTextEdit {
-                background-color: #181825;
-                color: #a6adc8;
-                border: 1px solid #313244;
-                border-radius: 6px;
-                padding: 10px;
-                font-size: 14px;
-            }
-        """)
+        
         self.output_area.hide()
         container_layout.addWidget(self.output_area)
         
@@ -200,12 +148,12 @@ class HUDWindow(QWidget):
         if not self._is_recording:
             self._is_recording = True
             self.dictate_btn.setText("🔴 Recording...")
-            self.dictate_btn.setStyleSheet("QPushButton { background-color: #f38ba8; color: #11111b; border-radius: 6px; padding: 5px 10px; font-weight: bold; }")
+            self.dictate_btn.setProperty("status", "danger"); self.dictate_btn.style().unpolish(self.dictate_btn); self.dictate_btn.style().polish(self.dictate_btn)
             self._voice_engine.start_recording()
         else:
             self._is_recording = False
             self.dictate_btn.setText("⏳ Processing...")
-            self.dictate_btn.setStyleSheet("QPushButton { background-color: #f9e2af; color: #11111b; border-radius: 6px; padding: 5px 10px; font-weight: bold; }")
+            self.dictate_btn.setProperty("status", "warning"); self.dictate_btn.style().unpolish(self.dictate_btn); self.dictate_btn.style().polish(self.dictate_btn)
             
             # Process in background
             def process():
@@ -224,19 +172,7 @@ class HUDWindow(QWidget):
     @Slot(str)
     def _on_dictate_finished(self, text: str):
         self.dictate_btn.setText("🎙️ Dictate")
-        self.dictate_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #313244;
-                color: #cdd6f4;
-                border: none;
-                border-radius: 6px;
-                padding: 5px 10px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #45475a;
-            }
-        """)
+        
         if text:
             current = self.input_field.text()
             self.input_field.setText(f"{current} {text}".strip())

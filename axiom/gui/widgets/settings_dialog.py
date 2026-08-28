@@ -27,6 +27,21 @@ class SettingsDialog(QDialog):
         self.model_combo.addItems(["qwen2.5:1.5b", "qwen3:8b"])
         self.layout.addWidget(self.model_combo)
         
+        from PySide6.QtWidgets import QCheckBox
+        from axiom.config import get_config
+        config = get_config()
+        
+        self.plugins_checkbox = QCheckBox("Enable Third-Party Plugins")
+        self.plugins_checkbox.setStyleSheet("QCheckBox { font-size: 14px; font-weight: bold; color: white; }")
+        self.plugins_checkbox.setChecked(getattr(config, 'allow_third_party_plugins', False))
+        
+        self.plugins_warning = QLabel("DANGER: Allowing third-party plugins executes unverified Python code on your machine.")
+        self.plugins_warning.setStyleSheet("color: #F28FAD; font-size: 12px; font-weight: bold;")
+        self.plugins_warning.setWordWrap(True)
+        
+        self.layout.addWidget(self.plugins_checkbox)
+        self.layout.addWidget(self.plugins_warning)
+        
         self.layout.addStretch(1)
         
         # Button Box
@@ -37,3 +52,10 @@ class SettingsDialog(QDialog):
         self.button_box.rejected.connect(self.reject)
         
         self.layout.addWidget(self.button_box)
+        
+    def accept(self):
+        from axiom.config import get_config
+        config = get_config()
+        config.allow_third_party_plugins = self.plugins_checkbox.isChecked()
+        config.save()
+        super().accept()

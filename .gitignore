@@ -144,3 +144,4 @@ INFINITE POWER/
 tests/
 *.AppImage
 trace.txt
+appimagetool*

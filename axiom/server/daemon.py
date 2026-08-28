@@ -21,27 +21,76 @@ class AxiomDaemonServer:
         self.cli = CLI()
         self.event_bus = self.cli.engine.event_bus
         
-        # Start background services that used to run in GUI
-        self.scheduler_service = BackgroundSchedulerService(event_bus=self.event_bus)
-        self.scheduler_service.start()
-        
-        from axiom.core.telemetry import TelemetryDaemon
-        from axiom.core.governor import ThermalGovernor
-        from axiom.core.swarm_router import SwarmRouter
-        
-        self.telemetry = TelemetryDaemon(event_bus=self.event_bus)
-        self.governor = ThermalGovernor.instance(event_bus=self.event_bus)
-        self.swarm_router = SwarmRouter.instance(event_bus=self.event_bus)
-        
-        self.sys_watchdog = SystemHealthWatchdog(submit_task_callback=self._submit_task)
-        
-        self.governor_service = GovernorService.instance(event_bus=self.event_bus)
-        
-        self.indexer_service = IndexerService(event_bus=self.event_bus)
-        self.indexer_service.start()
+        self.scheduler_service = None
+        self.telemetry = None
+        self.governor = None
+        self.swarm_router = None
+        self.sys_watchdog = None
+        self.governor_service = None
+        self.indexer_service = None
         
         self.dir_watchdog = DirectoryWatchdog()
-        # The loop isn't running yet, we will start it in run()
+        self.clients = set()
+        self.event_bus.subscribe("*", self._on_bus_event)
+
+    async def initialize_background(self):
+        from axiom.core.lifecycle import LifecycleState
+        from axiom.core.events import Event
+        
+        # Helper to emit status
+        def _emit_status(service_name, state):
+            self.event_bus.publish_sync("startup.service.update", {"service": service_name, "state": state})
+
+        try:
+            self.scheduler_service = BackgroundSchedulerService(event_bus=self.event_bus)
+            self.scheduler_service.start()
+            _emit_status("scheduler", LifecycleState.READY)
+        except Exception as e:
+            logger.error(f"Failed to start scheduler: {e}")
+            _emit_status("scheduler", LifecycleState.DEGRADED)
+
+        try:
+            from axiom.core.telemetry import TelemetryDaemon
+            self.telemetry = TelemetryDaemon(event_bus=self.event_bus)
+            self.telemetry.start()
+            _emit_status("telemetry", LifecycleState.READY)
+        except Exception as e:
+            logger.error(f"Failed to start telemetry: {e}")
+            _emit_status("telemetry", LifecycleState.DEGRADED)
+
+        try:
+            from axiom.core.governor import ThermalGovernor
+            self.governor = ThermalGovernor.instance(event_bus=self.event_bus)
+            self.governor_service = GovernorService.instance(event_bus=self.event_bus)
+            _emit_status("governor", LifecycleState.READY)
+        except Exception as e:
+            logger.error(f"Failed to start governor: {e}")
+            _emit_status("governor", LifecycleState.DEGRADED)
+
+        try:
+            from axiom.core.swarm_router import SwarmRouter
+            self.swarm_router = SwarmRouter.instance(event_bus=self.event_bus)
+            _emit_status("swarm_router", LifecycleState.READY)
+        except Exception as e:
+            logger.error(f"Failed to start swarm_router: {e}")
+            _emit_status("swarm_router", LifecycleState.DEGRADED)
+
+        try:
+            self.sys_watchdog = SystemHealthWatchdog(submit_task_callback=self._submit_task)
+            _emit_status("sys_watchdog", LifecycleState.READY)
+        except Exception as e:
+            logger.error(f"Failed to start sys_watchdog: {e}")
+            _emit_status("sys_watchdog", LifecycleState.DEGRADED)
+
+        try:
+            self.indexer_service = IndexerService(event_bus=self.event_bus)
+            self.indexer_service.start()
+            _emit_status("indexer", LifecycleState.READY)
+        except Exception as e:
+            logger.error(f"Failed to start indexer: {e}")
+            _emit_status("indexer", LifecycleState.DEGRADED)
+            
+        self.event_bus.publish_sync("startup.service.ready", {"state": LifecycleState.READY})
         
         self.clients = set()
         
@@ -171,11 +220,17 @@ class AxiomDaemonServer:
         loop = asyncio.get_running_loop()
         self._loop = loop
         self.dir_watchdog.start(loop)
-        self.telemetry.start()
         
         logger.info("Starting AXIOM Daemon WebSocket server on ws://127.0.0.1:9410")
-        async with websockets.serve(self.handle_client, "127.0.0.1", 9410):
-            await asyncio.Future()  # run forever
+        
+        # We start the server in the background
+        start_server = websockets.serve(self.handle_client, "127.0.0.1", 9410)
+        await start_server
+        
+        # Now spawn the heavy loading tasks in the background
+        asyncio.create_task(self.initialize_background())
+        
+        await asyncio.Future()  # run forever
 
 def main():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')

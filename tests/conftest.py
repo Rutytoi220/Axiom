@@ -34,3 +34,11 @@ def mock_orchestrator():
 def mock_gui_bridge():
     bridge = MagicMock()
     return bridge
+
+@pytest.fixture(autouse=True)
+def teardown_qt_widgets(qapp):
+    """Teardown fixture that explicitly calls deleteLater() on top-level widgets."""
+    yield
+    for widget in qapp.topLevelWidgets():
+        widget.deleteLater()
+    qapp.processEvents()

@@ -1,98 +1,45 @@
-import os
-import sys
 import importlib.util
 import inspect
 import logging
+import sys
 from pathlib import Path
-from axiom.tools import BaseTool
+from typing import Dict
+
+from axiom.sdk.tool import AxiomTool
+from axiom.config import get_config
 
 logger = logging.getLogger(__name__)
 
+PLUGIN_DIR = Path.home() / ".config" / "ChienGPT" / "plugins"
+
 class PluginManager:
-    """Dynamically loads user-defined tools from the plugins directory."""
-
     def __init__(self):
-        self.plugins_dir = Path.home() / ".config" / "ChienGPT" / "plugins"
-        
-        # If it doesn't exist, create it and write a boilerplate template
-        if not self.plugins_dir.exists():
-            self.plugins_dir.mkdir(parents=True, exist_ok=True)
-            self._write_boilerplate()
+        self.active_tools: Dict[str, AxiomTool] = {}
 
-    def _write_boilerplate(self):
-        """Writes a heavily documented template to help users get started."""
-        boilerplate_path = self.plugins_dir / "example_tool.py.disabled"
-        boilerplate_content = '''"""
-AXIOM Custom Tool Template
-Rename this file to end with .py to enable it (e.g., example_tool.py)
-"""
-from axiom.tools import BaseTool, ToolParameter, ToolResult
+    def load_plugins(self):
+        self.active_tools.clear()
+        config = get_config()
+        if not getattr(config, 'allow_third_party_plugins', False):
+            logger.warning("Third-party plugins are disabled in config. Skipping plugin load.")
+            return
 
-class HelloWorldTool(BaseTool):
-    """A simple tool that greets the user."""
+        if not PLUGIN_DIR.exists():
+            PLUGIN_DIR.mkdir(parents=True, exist_ok=True)
 
-    def __init__(self):
-        super().__init__(
-            tool_id="hello_world",
-            name="HelloWorldTool",
-            description="Prints a greeting message to a specified name."
-        )
-        self.add_parameter(ToolParameter(
-            name="name",
-            type="string",
-            description="The name of the person to greet.",
-            required=True
-        ))
-
-    async def execute(self, name: str, **_kwargs) -> ToolResult:
-        # Perform your tool logic here
-        greeting = f"Hello, {name}! Welcome to the AXIOM Workshop."
-        
-        # Return a ToolResult (success=True/False)
-        return ToolResult(
-            success=True,
-            output=greeting
-        )
-'''
-        try:
-            boilerplate_path.write_text(boilerplate_content, encoding="utf-8")
-        except Exception as e:
-            logger.error("Failed to write plugin boilerplate: %s", e)
-
-    def load_user_tools(self) -> list[BaseTool]:
-        """Iterates through plugins dir, dynamically imports .py files, and extracts BaseTools."""
-        loaded_tools = []
-        
-        if not self.plugins_dir.exists():
-            return loaded_tools
-
-        for item in self.plugins_dir.iterdir():
-            if item.is_file() and item.suffix == ".py":
-                module_name = item.stem
-                try:
-                    # Dynamically load the module from its file path
-                    spec = importlib.util.spec_from_file_location(module_name, str(item))
-                    if spec is None or spec.loader is None:
-                        logger.warning(f"Could not load plugin spec for {item.name}")
-                        continue
-                        
+        for py_file in PLUGIN_DIR.glob("*.py"):
+            try:
+                module_name = f"axiom_plugin_{py_file.stem}"
+                spec = importlib.util.spec_from_file_location(module_name, py_file)
+                if spec and spec.loader:
                     module = importlib.util.module_from_spec(spec)
-                    # Insert it into sys.modules so it behaves like a normal import
+                    # Add to sys.modules so it can do relative imports if needed
                     sys.modules[module_name] = module
                     spec.loader.exec_module(module)
                     
-                    # Extract all classes that inherit from BaseTool
                     for name, obj in inspect.getmembers(module, inspect.isclass):
-                        if issubclass(obj, BaseTool) and obj is not BaseTool:
-                            try:
-                                tool_instance = obj()
-                                loaded_tools.append(tool_instance)
-                                logger.info(f"Loaded custom tool '{tool_instance.name}' from {item.name}")
-                            except Exception as init_err:
-                                logger.error(f"Failed to instantiate tool class {name} in {item.name}: {init_err}")
-                
-                except Exception as e:
-                    # Catch and log safely so one broken plugin doesn't nuke AXIOM
-                    logger.error(f"Failed to load plugin file {item.name}: {e}")
-
-        return loaded_tools
+                        if issubclass(obj, AxiomTool) and obj is not AxiomTool:
+                            instance = obj()
+                            self.active_tools[instance.name] = instance
+                            logger.info(f"Loaded plugin tool: {instance.name}")
+            except Exception as e:
+                logger.error(f"Failed to load plugin {py_file.name}: {e}")

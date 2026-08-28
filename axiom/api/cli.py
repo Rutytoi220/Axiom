@@ -5,17 +5,9 @@ import logging
 import os
 from pathlib import Path
 from typing import Optional
-from axiom.core import Engine, shutdown_bridge
-from axiom.memory import SyncMemoryStore
-from axiom.llm.universal_client import UniversalLLMClient
-from axiom.agents.orchestrator_agent import OrchestratorAgent
-from axiom.tool_registry import ToolRegistry
-from axiom.mcp.bridge import MCPBridgeManager
-from axiom.tools import EchoTool, ShellTool, FileReadTool, FileWriteTool, SystemInfoTool
-from axiom.legacy_wrapper import create_legacy_tools
-from axiom.plugins import NXBTPlugin, AutomationPlugin
-from axiom.plugins.visual_automation import VisualAutomationPlugin
-from axiom.memory.sleep_cycle import SleepCycleDaemon
+from pathlib import Path
+from typing import Optional
+import sys
 axiom_log_dir = Path.home() / '.axiom'
 axiom_log_dir.mkdir(exist_ok=True, parents=True)
 root_logger = logging.getLogger()
@@ -54,6 +46,13 @@ Returns:
 """
         super().__init__(*args, **kwargs)
         from axiom.config import get_config
+        from axiom.core import Engine
+        from axiom.memory import SyncMemoryStore
+        from axiom.llm.universal_client import UniversalLLMClient
+        from axiom.agents.orchestrator_agent import OrchestratorAgent
+        from axiom.tool_registry import ToolRegistry
+        from axiom.mcp.bridge import MCPBridgeManager
+        
         config = get_config()
         if 'AXIOM_MODEL' in os.environ:
             config.ollama_model = os.environ['AXIOM_MODEL']
@@ -165,6 +164,8 @@ Returns:
         from axiom.tools.clipboard_tools import ClipboardReadTool, ClipboardWriteTool
         from axiom.tools.desktop_control import DesktopAutomationTool
         from axiom.tools.vision import VisionCaptureTool
+        from axiom.tools import EchoTool, ShellTool, FileReadTool, FileWriteTool, SystemInfoTool
+        from axiom.legacy_wrapper import create_legacy_tools
         tools = [EchoTool(), ShellTool(), FileReadTool('.'), FileWriteTool('.'), SystemInfoTool(), SafeFileSearchTool(), FileOpenerTool(), AppLauncherTool(), ScreenCaptureTool(), ReadDocumentContentTool(), ClipboardReadTool(), ClipboardWriteTool(), DesktopAutomationTool(), VisionCaptureTool()]
         tools.extend(create_legacy_tools())
         for tool in tools:
@@ -181,6 +182,8 @@ Returns:
 
     def _init_plugins(self) -> None:
         """Initialize plugins."""
+        from axiom.plugins import NXBTPlugin, AutomationPlugin
+        from axiom.plugins.visual_automation import VisualAutomationPlugin
         plugins = [NXBTPlugin(), AutomationPlugin(engine=self.engine), VisualAutomationPlugin(engine=self.engine)]
         for plugin in plugins:
             if plugin.initialize():
@@ -791,6 +794,7 @@ Returns:
         self.engine.shutdown()
         self.memory.close()
         self.ollama.close()
+        from axiom.core import shutdown_bridge
         shutdown_bridge()
 
     def postloop(self) -> None:

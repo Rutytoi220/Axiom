@@ -88,17 +88,8 @@ Returns:
         # ── Dynamic Plugin Loader ──────────────────────────────────────────── #
         try:
             from axiom.core.plugin_manager import PluginManager
-            plugin_manager = PluginManager()
-            custom_tools = plugin_manager.load_user_tools()
-            if self.registry and hasattr(self.registry, 'register_tool'):
-                import logging
-                plogger = logging.getLogger("axiom.plugin_manager")
-                for tool in custom_tools:
-                    try:
-                        self.registry.register_tool(tool.tool_id, tool)
-                        plogger.info(f"Registered user tool {tool.tool_id}")
-                    except Exception as e:
-                        plogger.error(f"Failed to register user tool {tool.tool_id}: {e}")
+            self.plugin_manager = PluginManager()
+            self.plugin_manager.load_plugins()
         except Exception as _pe:
             import logging
             logging.getLogger(__name__).error(f"PluginManager failed to initialize: {_pe}")
@@ -125,18 +116,8 @@ Returns:
         logger = logging.getLogger("axiom.plugin_manager")
         logger.info("Hot-reloading plugins...")
         try:
-            from axiom.core.plugin_manager import PluginManager
-            plugin_manager = PluginManager()
-            custom_tools = plugin_manager.load_user_tools()
-            if self.registry and hasattr(self.registry, 'register_tool'):
-                existing_tools = list(self.registry.list_tools().keys()) if hasattr(self.registry, 'list_tools') else []
-                for tool in custom_tools:
-                    if tool.tool_id not in existing_tools:
-                        try:
-                            self.registry.register_tool(tool.tool_id, tool)
-                            logger.info(f"Dynamically registered new tool: {tool.tool_id}")
-                        except Exception as e:
-                            logger.error(f"Failed to hot-register {tool.tool_id}: {e}")
+            if hasattr(self, 'plugin_manager'):
+                self.plugin_manager.load_plugins()
         except Exception as e:
             logger.error(f"Error during hot-reload: {e}")
 
@@ -180,8 +161,6 @@ Returns:
                 bus.publish(Event(event_type=f'synapse.{event_type}', source='OrchestratorAgent', data=data))
             except Exception:
                 pass
-        if self.registry is not None and hasattr(self.registry, 'register_agent'):
-            self.registry.register_agent(f'agent.{agent.name}', agent)
 
     def list_agents(self) -> List[str]:
         """Auto-generated docstring.
@@ -377,16 +356,26 @@ Returns:
         except Exception as exc:
             self._log(f'LLM availability check failed, continuing: {exc}', steps)
         executed_signatures: set[str] = set()
-        MAX_STEPS = 5
-        while state != AgentState.EXIT and rounds < MAX_STEPS:
+        MAX_ITERATIONS = 10
+        while state != AgentState.EXIT and rounds < MAX_ITERATIONS:
             if deadline and time.time() > deadline:
                 final_response = 'Task processing timed out.'
                 self._log('Task timed out before completion.', steps)
-                self._emit('plan.failed', {'reason': 'timeout', 'step': rounds, 'total_steps': MAX_STEPS})
+                self._emit('plan.failed', {'reason': 'timeout', 'step': rounds, 'total_steps': MAX_ITERATIONS})
                 txn.rollback()
                 break
             rounds += 1
             round_start_time = time.perf_counter()
+            # ── Per-iteration UI status broadcast ──────────────────────────
+            # Keeps the GUI responsive with live progress indicators so
+            # the user knows AXIOM hasn't frozen during compound loops.
+            self._emit('orchestrator.iteration', {
+                'session_id': session_id,
+                'round': rounds,
+                'max_rounds': MAX_ITERATIONS,
+                'state': state.value,
+                'message': f"AXIOM is reasoning (Step {rounds}/{MAX_ITERATIONS})..."
+            })
             self._persist_step(session_id, 'state', {'state': state.value, 'plan': asdict(plan), 'round': rounds})
             if state == AgentState.THINK:
                 self._log(f'THINK round {rounds}: {plan.current()}', steps)
@@ -672,7 +661,20 @@ Returns:
                         executed_tool_ids_this_round.add(sig)
                         executed_signatures.add(dedup_sig)
                         self._emit_synapse_event('tool_call_started', {'tool': tool_name, 'args': arguments})
+                        # ── Per-tool UI status broadcast ──────────────────────
+                        self._emit('orchestrator.iteration', {
+                            'session_id': session_id,
+                            'round': rounds,
+                            'max_rounds': MAX_ITERATIONS,
+                            'state': 'ACT',
+                            'message': f"AXIOM is executing: {tool_name} (Step {rounds}/{MAX_ITERATIONS})..."
+                        })
                         result = self._execute_tool(tool_name, arguments)
+                        try:
+                            from axiom.memory.compression import ObservationCompressor
+                            result = ObservationCompressor.compress(result, tool_name)
+                        except Exception as compress_err:
+                            logger.warning(f"Failed to compress tool observation: {compress_err}")
                         self._emit_synapse_event('tool_call_completed', {'tool': tool_name, 'success': result.get('success')})
                     observations.append(result)
                     self._persist_step(session_id, 'tool_result', result)
@@ -759,8 +761,14 @@ Returns:
             logger.warning(f"Failed to log routing telemetry: {e}")
 
         if not final_response:
-            final_response = 'Task processing reached maximum rounds. Review tool results for partial progress.'
-            self._emit('plan.failed', {'reason': 'max_rounds', 'step': rounds, 'total_steps': MAX_STEPS})
+            tool_count = len([o for o in observations if isinstance(o, dict) and o.get('success')])
+            final_response = (
+                f'Task processing reached the safety limit of {MAX_ITERATIONS} iterations '
+                f'after executing {tool_count} tool(s). This safeguard prevents infinite '
+                f'autonomous loops. Review the tool results above for partial progress, '
+                f'or break your request into smaller steps.'
+            )
+            self._emit('plan.failed', {'reason': 'max_rounds', 'step': rounds, 'total_steps': MAX_ITERATIONS})
             txn.rollback()
         else:
             txn.commit()
@@ -851,12 +859,14 @@ Returns:
         except ImportError:
             pass
             
-        persona_str = (
-            f"\n\nYou are currently set to a {getattr(config, 'persona_tone', 'balanced')} tone "
-            f"with {getattr(config, 'persona_complexity', 'standard')} complexity."
-        )
-        if getattr(config, 'special_instructions', '').strip():
-            persona_str += f" Special instructions: {config.special_instructions}"
+        try:
+            from axiom.core.persona import PersonaConfig, PersonaCompiler
+            persona_cfg = PersonaConfig.from_dict(getattr(config, 'persona', {}))
+            persona_str = "\n\n" + PersonaCompiler.compile(persona_cfg)
+        except Exception as e:
+            logger.error(f"Failed to compile persona: {e}")
+            persona_str = "\n\n# PERSONA: AXIOM\n**Role:** Desktop Agent"
+        
         base_prompt += persona_str
         
         if config.behavior and config.behavior.profile in ('tech_beginner', 'casual'):
@@ -886,6 +896,15 @@ Returns:
             system_messages.append({'role': 'system', 'content': override_prompt})
         if intent != 'chat':
             task = f'[Current Task - IGNORE ALL PREVIOUS UNANSWERED OR INCOMPLETE TOPICS AND EXECUTE ONLY THIS REQUEST]: {task}'
+        # ── Cumulative observation buffer guard ────────────────────────────
+        # Each individual tool result was already compressed by the per-tool
+        # ObservationCompressor, but chaining many tools in a ReAct loop can
+        # still blow the aggregate budget.  Guard that here.
+        try:
+            from axiom.memory.compression import ObservationCompressor
+            observations = ObservationCompressor.compress_observations_buffer(observations)
+        except Exception as _buf_err:
+            logger.warning("Failed to compress observation buffer: %s", _buf_err)
         messages = self._context_manager.build_context_window(system_messages=system_messages, chat_history=self._chat_history, current_task=task, retrieved_memories=memories, observations=observations)
         budget = self._context_manager.max_tokens
         used_tokens = estimate_messages_tokens(messages)
@@ -1026,14 +1045,27 @@ Returns:
 Returns:
     Return value.
 """
-        if self.registry and hasattr(self.registry, 'get_schemas'):
-            return self.registry.get_schemas()
         schemas: List[Dict[str, Any]] = []
-        tools = self.registry.list_tools() if self.registry and hasattr(self.registry, 'list_tools') else {}
-        for tool_id, tool in tools.items():
-            tool_schema = getattr(tool, 'schema', None)
-            if isinstance(tool_schema, dict):
-                schemas.append({'type': 'function', 'function': {'name': tool_id, 'description': getattr(tool, 'description', tool_id), 'parameters': tool_schema}})
+        if self.registry and hasattr(self.registry, 'get_schemas'):
+            schemas.extend(self.registry.get_schemas())
+        else:
+            tools = self.registry.list_tools() if self.registry and hasattr(self.registry, 'list_tools') else {}
+            for tool_id, tool in tools.items():
+                tool_schema = getattr(tool, 'schema', None)
+                if isinstance(tool_schema, dict):
+                    schemas.append({'type': 'function', 'function': {'name': tool_id, 'description': getattr(tool, 'description', tool_id), 'parameters': tool_schema}})
+                    
+        # Merge dynamically loaded plugins
+        if hasattr(self, 'plugin_manager'):
+            for name, tool in self.plugin_manager.active_tools.items():
+                schemas.append({
+                    'type': 'function',
+                    'function': {
+                        'name': tool.name,
+                        'description': tool.description,
+                        'parameters': tool.parameters
+                    }
+                })
         return schemas
 
     def _execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -1081,12 +1113,24 @@ Returns:
                     'message': f"{tool_name}..."
                 })
                 
-            if self.registry and hasattr(self.registry, 'execute'):
-                tool_result = self.registry.execute(tool_name, **arguments)
-                raw_error = getattr(tool_result, 'error', None)
-                error = _scrub_jargon(raw_error) if isinstance(raw_error, str) else None
-                payload = {'output': getattr(tool_result, 'output', None), 'error': error}
-                result_dict = self._structured_tool_result(tool_name, arguments, payload, bool(getattr(tool_result, 'success', False)))
+            if hasattr(self, 'plugin_manager') and tool_name in self.plugin_manager.active_tools:
+                plugin = self.plugin_manager.active_tools[tool_name]
+                result = plugin.execute(**arguments)
+                if asyncio.iscoroutine(result):
+                    result = self._run_coro_sync(result)
+                payload = {'output': result, 'error': None}
+                result_dict = self._structured_tool_result(tool_name, arguments, payload, True)
+            elif self.registry and hasattr(self.registry, 'execute') and (hasattr(self.registry, 'has_tool') and self.registry.has_tool(tool_name) or True):
+                # Try core registry execute
+                try:
+                    tool_result = self.registry.execute(tool_name, **arguments)
+                    raw_error = getattr(tool_result, 'error', None)
+                    error = _scrub_jargon(raw_error) if isinstance(raw_error, str) else None
+                    payload = {'output': getattr(tool_result, 'output', None), 'error': error}
+                    result_dict = self._structured_tool_result(tool_name, arguments, payload, bool(getattr(tool_result, 'success', False)))
+                except KeyError:
+                    # fallback to older execute flow
+                    result_dict = self._structured_tool_result(tool_name, arguments, {'error': f'Tool not found: {tool_name}'}, False)
             else:
                 tools = self.registry.list_tools() if self.registry and hasattr(self.registry, 'list_tools') else {}
                 tool = tools.get(tool_name) or next((t for t in tools.values() if getattr(t, 'name', None) == tool_name), None)
@@ -1105,7 +1149,8 @@ Returns:
                         payload = {'output': getattr(result, 'output', result), 'error': _scrub_jargon(raw_err) if isinstance(raw_err, str) else raw_err}
                         result_dict = self._structured_tool_result(tool_name, arguments, payload, bool(getattr(result, 'success', True)))
         except Exception as exc:
-            result_dict = self._structured_tool_result(tool_name, arguments, {'error': _scrub_jargon(str(exc))}, False)
+            err_msg = _scrub_jargon(str(exc))
+            result_dict = self._structured_tool_result(tool_name, arguments, {'error': f'Tool Execution Failed: {err_msg}'}, False)
             
         out_str = result_dict.get('result', {}).get('output')
         if isinstance(out_str, str) and out_str.startswith("SCREENSHOT_BASE64:"):

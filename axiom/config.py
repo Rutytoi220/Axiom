@@ -30,6 +30,7 @@ class AxiomConfig:
     allow_cloud_fallback: bool = False
     monitor_window_focus: bool = False
     monitor_clipboard: bool = False
+    allow_third_party_plugins: bool = False
 
     def __post_init__(self):
         """Auto-generated docstring.
@@ -59,10 +60,8 @@ Returns:
     theme: str = 'minimalist'  # 'minimalist', 'cyberpunk', 'nothing'
     theme_mode: str = 'dark'  # 'system', 'dark', 'light'
     ui_profile_level: str = 'standard' # 'standard', 'advanced', 'developer'
-    persona_tone: str = 'balanced'
-    persona_complexity: str = 'standard'
-    special_instructions: str = ''
-    llm_complexity: str = 'detailed' # 'concise', 'detailed', 'academic'
+    persona: dict = field(default_factory=dict)
+    llm_complexity: str = 'detailed'
     auto_ollama_start: bool = True
     model_selection_mode: str = 'auto'  # 'auto', 'manual'
     auto_index_watchdog: bool = False
@@ -80,6 +79,15 @@ Returns:
     def from_dict(cls, config_dict: dict) -> 'AxiomConfig':
         """Create config from dictionary."""
         filtered = {k: v for k, v in config_dict.items() if k in cls.__dataclass_fields__}
+        
+        # Migrate legacy loose persona strings to new dict structure
+        if 'persona' not in filtered:
+            filtered['persona'] = {}
+            if 'persona_tone' in config_dict:
+                filtered['persona']['communication'] = {'tone': config_dict['persona_tone'], 'verbosity': config_dict.get('persona_complexity', 'standard')}
+            if 'special_instructions' in config_dict and config_dict['special_instructions']:
+                filtered['persona']['directives'] = [config_dict['special_instructions']]
+                
         if 'auth_mode' in filtered and isinstance(filtered['auth_mode'], str):
             try:
                 filtered['auth_mode'] = AuthMode(filtered['auth_mode'])
@@ -108,15 +116,14 @@ Returns:
             'allow_cloud_fallback': self.allow_cloud_fallback, 
             'monitor_window_focus': self.monitor_window_focus, 
             'monitor_clipboard': self.monitor_clipboard,
+            'allow_third_party_plugins': self.allow_third_party_plugins,
             'first_launch': self.first_launch,
             'oobe_completed': self.oobe_completed,
             'vision_model': self.vision_model,
             'theme': self.theme,
             'theme_mode': self.theme_mode,
             'ui_profile_level': self.ui_profile_level,
-            'persona_tone': self.persona_tone,
-            'persona_complexity': self.persona_complexity,
-            'special_instructions': self.special_instructions,
+            'persona': self.persona,
             'llm_complexity': self.llm_complexity,
             'auto_ollama_start': self.auto_ollama_start,
             'model_selection_mode': self.model_selection_mode,
