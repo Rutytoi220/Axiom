@@ -27,37 +27,48 @@ class AudioManager:
         self._tts = None
         self._stt = None
         self._recorder = None
+        self._tts_loaded = False
+        self._stt_loaded = False
 
+    def _load_tts_sync(self):
+        if self._tts_loaded: return
+        self._tts_loaded = True
         try:
             from axiom.audio.tts import TextToSpeechEngine
             self._tts = TextToSpeechEngine.instance()
-            logger.info("AudioManager: TTS ready")
-        except (OSError, ImportError, RuntimeError) as e:
-            self._tts = None
-            logger.warning(f"AudioManager: TTS gracefully disabled (missing system dependencies, e.g., espeak): {e}")
+            logger.info("AudioManager: TTS dynamically loaded")
         except Exception as e:
-            self._tts = None
-            logger.error(f"AudioManager: TTS init failed: {e}")
+            logger.warning(f"AudioManager: TTS loading failed: {e}")
 
+    async def prepare_tts(self) -> None:
+        if not self._tts_loaded:
+            import asyncio
+            await asyncio.to_thread(self._load_tts_sync)
+
+    def _load_stt_sync(self):
+        if self._stt_loaded: return
+        self._stt_loaded = True
         try:
             from axiom.audio.stt import WhisperTranscriber, AudioRecorder
             self._stt = WhisperTranscriber.instance()
             self._recorder = AudioRecorder()
-            logger.info("AudioManager: STT ready")
-        except (OSError, ImportError, RuntimeError) as e:
-            self._stt = None
-            self._recorder = None
-            logger.warning(f"AudioManager: STT gracefully disabled (missing system dependencies or model load failed): {e}")
+            logger.info("AudioManager: STT dynamically loaded")
         except Exception as e:
-            self._stt = None
-            self._recorder = None
-            logger.error(f"AudioManager: STT init failed: {e}")
+            logger.warning(f"AudioManager: STT loading failed: {e}")
+
+    async def prepare_stt(self) -> None:
+        if not self._stt_loaded:
+            import asyncio
+            await asyncio.to_thread(self._load_stt_sync)
 
     # ── TTS ───────────────────────────────────────────────────────────── #
 
     async def speak(self, text: str) -> None:
         """Speak text asynchronously if TTS is enabled and available."""
-        if not self.tts_enabled or not self._tts:
+        if not self.tts_enabled:
+            return
+        await self.prepare_tts()
+        if not self._tts:
             return
         await self._tts.speak(text)
 
@@ -65,10 +76,13 @@ class AudioManager:
 
     @property
     def has_stt(self) -> bool:
+        """Optimistically return True if it hasn't failed to load yet."""
+        if not self._stt_loaded:
+            return True
         return self._stt is not None and self._recorder is not None
 
-    def start_listening(self) -> None:
-        """Start audio capture (push-to-talk)."""
+    def start_listening_sync(self) -> None:
+        """Start audio capture (must call await prepare_stt() first)."""
         if self._recorder:
             self._recorder.start_recording()
 
@@ -81,6 +95,7 @@ class AudioManager:
 
     async def transcribe(self, audio_data) -> str:
         """Transcribe captured audio via faster-whisper."""
+        await self.prepare_stt()
         if not self._stt:
             return ""
         return await self._stt.transcribe(audio_data)

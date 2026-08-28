@@ -353,6 +353,11 @@ class MainWindow(QMainWindow):
         self._register_local_shortcuts()
         self._chat_display.add_bubble('assistant', 'AXIOM v11.2')
         
+        # Init startup status
+        self._startup_status = QLabel("⏳ Background services starting...")
+        self._startup_status.setStyleSheet("color: #f59e0b; font-size: 12px; font-weight: bold; padding-left: 10px;")
+        self.statusBar().addWidget(self._startup_status)
+        
         self._apply_theme()
         self._theme_manager.theme_changed.connect(self._apply_theme)
 
@@ -715,6 +720,23 @@ class MainWindow(QMainWindow):
         pass
         self._bridge.ui_widget_generated.connect(self._on_widget_generated)
         pass
+        self._bridge.startup_service_update.connect(self._on_startup_service_update)
+
+    def _on_startup_service_update(self, payload: dict) -> None:
+        service = payload.get("service")
+        state = payload.get("state")
+        if service and state:
+            if state == "READY":
+                self._startup_status.setText(f"✅ {service} Ready")
+                self._startup_status.setStyleSheet("color: #10b981; font-size: 12px; font-weight: bold; padding-left: 10px;")
+            elif state == "DEGRADED":
+                self._startup_status.setText(f"⚠️ {service} Degraded")
+                self._startup_status.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: bold; padding-left: 10px;")
+        elif state == "READY":
+            # The final startup.service.ready event has no service name
+            self._startup_status.setText("✅ System Ready")
+            self._startup_status.setStyleSheet("color: #10b981; font-size: 12px; font-weight: bold; padding-left: 10px;")
+            QTimer.singleShot(5000, lambda: self._startup_status.hide())
 
     def _on_axiomfs_status(self, status: str) -> None:
         self._status_axiomfs.setText(f'AxiomFS: {status}')
@@ -868,8 +890,27 @@ class MainWindow(QMainWindow):
             return
 
         if listening:
-            audio.start_listening()
-            self._input.setPlaceholderText('Listening...')
+            import asyncio
+            async def _start():
+                from PySide6.QtCore import QMetaObject, Qt, Q_ARG
+                QMetaObject.invokeMethod(self._input, 'setPlaceholderText', Qt.ConnectionType.QueuedConnection, Q_ARG(str, 'Loading Voice Engine...'))
+                QMetaObject.invokeMethod(mic_btn, 'setEnabled', Qt.ConnectionType.QueuedConnection, Q_ARG(bool, False))
+                
+                await audio.prepare_stt()
+                
+                QMetaObject.invokeMethod(mic_btn, 'setEnabled', Qt.ConnectionType.QueuedConnection, Q_ARG(bool, True))
+                if not audio.has_stt:
+                    mic_btn.blockSignals(True)
+                    QMetaObject.invokeMethod(mic_btn, 'setChecked', Qt.ConnectionType.QueuedConnection, Q_ARG(bool, False))
+                    mic_btn.blockSignals(False)
+                    QMetaObject.invokeMethod(self._input, 'setPlaceholderText', Qt.ConnectionType.QueuedConnection, Q_ARG(str, 'Message...'))
+                    return
+                
+                audio.start_listening_sync()
+                QMetaObject.invokeMethod(self._input, 'setPlaceholderText', Qt.ConnectionType.QueuedConnection, Q_ARG(str, 'Listening...'))
+
+            if self._bridge:
+                asyncio.run_coroutine_threadsafe(_start(), self._bridge._loop)
         else:
             self._input.setPlaceholderText('Transcribing...')
             audio_data = audio.stop_listening()
