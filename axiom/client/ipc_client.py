@@ -24,6 +24,13 @@ class AxiomDaemonClient:
             if self.on_connect:
                 self.on_connect()
             self._listen_task = asyncio.create_task(self._listen())
+            
+            # Phase 2: Send state sync handshake
+            try:
+                await self.ws.send(json.dumps({"action": "sync_state"}))
+            except Exception as e:
+                logger.error(f"Failed to send sync_state: {e}")
+                
             return True
         except Exception as e:
             logger.error(f"Failed to connect to daemon: {e}")

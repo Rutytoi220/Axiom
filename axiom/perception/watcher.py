@@ -198,103 +198,145 @@ Returns:
         self.governor.stop()  # pragma: no cover
         logger.info('Proactive OS Perception Kernel stopped.')  # pragma: no cover
 
-class OSWatcher:
-    """Autonomous background Linux watchdog for system anomalies."""
+class SystemHealthWatchdog:
+    """Autonomous background Linux watchdog for system anomalies using asyncio."""
 
     def __init__(self, event_bus: EventBus):
-        """Auto-generated docstring.
-
-Args:
-    event_bus: Argument.
-
-Returns:
-    Return value.
-"""
-        self.event_bus = event_bus  # pragma: no cover
-        self._running = False  # pragma: no cover
-        self._thread: threading.Thread | None = None  # pragma: no cover
-        self._cooldowns = {'memory': 0.0, 'disk': 0.0, 'cpu': 0.0}  # pragma: no cover
-        self._cooldown_seconds = 300.0  # pragma: no cover
-        self._cpu_history: list[float] = []  # pragma: no cover
-        self._cpu_window_seconds = 10  # pragma: no cover
+        self.event_bus = event_bus
+        self._running = False
+        self._thread: threading.Thread | None = None
+        self._cooldowns = {'memory': 0.0, 'disk': 0.0, 'logs': 0.0}
+        self._cooldown_seconds = 300.0
+        self._power_throttled = False
 
     def start(self) -> bool:
-        """Start the autonomous OS watcher."""
-        config = get_config()  # pragma: no cover
-        if not getattr(config, 'proactive_kernel', False):  # pragma: no cover
-            logger.info('OSWatcher is DISABLED by configuration.')  # pragma: no cover
-            return False  # pragma: no cover
-        if self._running:  # pragma: no cover
-            return True  # pragma: no cover
-        logger.info('Starting OSWatcher daemon...')  # pragma: no cover
-        self._running = True  # pragma: no cover
-        self._thread = threading.Thread(target=self._monitor_loop, daemon=True, name='OSWatcher')  # pragma: no cover
-        self._thread.start()  # pragma: no cover
-        return True  # pragma: no cover
+        """Start the autonomous System Health Watchdog."""
+        config = get_config()
+        if not getattr(config, 'proactive_kernel', False):
+            logger.info('SystemHealthWatchdog is DISABLED by configuration.')
+            return False
+        if self._running:
+            return True
+        logger.info('Starting SystemHealthWatchdog daemon...')
+        self._running = True
+        self._thread = threading.Thread(target=self._run_async_loop, daemon=True, name='SystemHealthWatchdog')
+        self._thread.start()
+        return True
 
     def stop(self):
-        """Auto-generated docstring.
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=2.0)
+        logger.info('SystemHealthWatchdog daemon stopped.')
 
+    def _run_async_loop(self):
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self._monitor_loop())
+        finally:
+            loop.close()
 
-Returns:
-    Return value.
-"""
-        self._running = False  # pragma: no cover
-        if self._thread:  # pragma: no cover
-            self._thread.join(timeout=2.0)  # pragma: no cover
-        logger.info('OSWatcher daemon stopped.')  # pragma: no cover
+    async def _monitor_loop(self):
+        import asyncio
+        import time
+        while self._running:
+            now = time.time()
+            
+            # 1. Memory Check
+            try:
+                import psutil
+                mem = psutil.virtual_memory()
+                mem_free_percent = mem.available / mem.total * 100
+                if mem_free_percent < 5.0 and now - self._cooldowns['memory'] > self._cooldown_seconds:
+                    details = f"Critical Memory: Only {mem_free_percent:.1f}% free RAM available."
+                    self._dispatch_anomaly('memory', details)
+                    self._cooldowns['memory'] = now
+            except ImportError:
+                logger.warning("SystemHealthWatchdog: psutil missing. Memory check degraded.")
+                self._cooldowns['memory'] = now + 3600 # delay further checks
+            except Exception as e:
+                logger.error(f"SystemHealthWatchdog: Memory check failed: {e}")
+                
+            # 2. Disk Check
+            try:
+                import psutil
+                disk = psutil.disk_usage('/')
+                disk_free_percent = disk.free / disk.total * 100
+                if disk_free_percent < 5.0 and now - self._cooldowns['disk'] > self._cooldown_seconds:
+                    details = f"Critical Disk Space: Only {disk_free_percent:.1f}% free on root partition."
+                    self._dispatch_anomaly('disk', details)
+                    self._cooldowns['disk'] = now
+            except ImportError:
+                # Already logged above
+                pass
+            except Exception as e:
+                logger.error(f"SystemHealthWatchdog: Disk check failed: {e}")
+                
+            # 2.5 Battery / Power Check
+            try:
+                import psutil
+                battery = psutil.sensors_battery()
+                if battery is not None:
+                    if not battery.power_plugged and battery.percent < 30.0:
+                        if not self._power_throttled:
+                            self._power_throttled = True
+                            self.event_bus.publish_sync('system.power.throttled', {'battery': battery.percent})
+                    elif battery.power_plugged:
+                        if self._power_throttled:
+                            self._power_throttled = False
+                            self.event_bus.publish_sync('system.power.restored', {'battery': battery.percent})
+            except Exception as e:
+                logger.debug(f"SystemHealthWatchdog: Battery check failed or unavailable: {e}")
+                
+            # 3. Log Check
+            if now - self._cooldowns['logs'] > self._cooldown_seconds:
+                try:
+                    process = await asyncio.create_subprocess_shell(
+                        'journalctl -p 3 -n 5 --since "1 minute ago"',
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    stdout, stderr = await process.communicate()
+                    
+                    if process.returncode != 0 and stderr:
+                        err = stderr.decode('utf-8')
+                        if "command not found" in err or "Access denied" in err:
+                            logger.warning(f"SystemHealthWatchdog: journalctl unavailable or permission denied. Log check degraded. Error: {err.strip()}")
+                            self._cooldowns['logs'] = now + 3600
+                            
+                    elif stdout:
+                        logs = stdout.decode('utf-8').strip()
+                        if logs and "-- No entries --" not in logs:
+                            details = f"Critical OS Logs Detected:\n{logs}"
+                            self._dispatch_anomaly('logs', details)
+                            self._cooldowns['logs'] = now
+                except Exception as e:
+                    logger.error(f"SystemHealthWatchdog: Log check failed: {e}")
+                    self._cooldowns['logs'] = now + 3600
+            
+            # 4. REM Sleep Trigger (Deep Memory Consolidation during idle hours)
+            from datetime import datetime
+            current_hour = datetime.now().hour
+            # Trigger REM sleep at 3 AM if we haven't already fired it today
+            if current_hour == 3 and (now - self._cooldowns.get('rem_sleep', 0.0) > 43200):
+                logger.info("SystemHealthWatchdog: Triggering REM Sleep Deep Consolidation (3:00 AM Idle).")
+                from axiom.core.events import Event
+                self.event_bus.publish(Event(event_type="system.idle.rem_sleep", source="SystemHealthWatchdog", data={}))
+                self._cooldowns['rem_sleep'] = now
 
-    def _monitor_loop(self):
-        """Auto-generated docstring.
-
-
-Returns:
-    Return value.
-"""
-        psutil.cpu_percent(interval=None)  # pragma: no cover
-        while self._running:  # pragma: no cover
-            time.sleep(1.0)  # pragma: no cover
-            now = time.time()  # pragma: no cover
-            mem = psutil.virtual_memory()  # pragma: no cover
-            mem_percent = mem.percent  # pragma: no cover
-            mem_free_percent = mem.available / mem.total * 100  # pragma: no cover
-            if (mem_percent > 85.0 or mem_free_percent < 15.0) and now - self._cooldowns['memory'] > self._cooldown_seconds:  # pragma: no cover
-                total_gb = mem.total / 1024 ** 3  # pragma: no cover
-                used_gb = (mem.total - mem.available) / 1024 ** 3  # pragma: no cover
-                details = f'RAM at {mem_percent:.1f}% ({used_gb:.1f}/{total_gb:.1f} GB)'  # pragma: no cover
-                self._dispatch_anomaly('high_memory', details)  # pragma: no cover
-                self._cooldowns['memory'] = now  # pragma: no cover
-            try:  # pragma: no cover
-                disk = psutil.disk_usage('/')  # pragma: no cover
-                free_gb = disk.free / 1024 ** 3  # pragma: no cover
-                if free_gb < 5.0 and now - self._cooldowns['disk'] > self._cooldown_seconds:  # pragma: no cover
-                    details = f'Disk space on / is critically low: {free_gb:.1f} GB remaining.'  # pragma: no cover
-                    self._dispatch_anomaly('low_disk', details)  # pragma: no cover
-                    self._cooldowns['disk'] = now  # pragma: no cover
-            except Exception as e:  # pragma: no cover
-                logger.debug(f'Failed to check disk usage: {e}')  # pragma: no cover
-            cpu = psutil.cpu_percent(interval=None)  # pragma: no cover
-            self._cpu_history.append(cpu)  # pragma: no cover
-            if len(self._cpu_history) > self._cpu_window_seconds:  # pragma: no cover
-                self._cpu_history.pop(0)  # pragma: no cover
-            if len(self._cpu_history) == self._cpu_window_seconds:  # pragma: no cover
-                avg_cpu = sum(self._cpu_history) / len(self._cpu_history)  # pragma: no cover
-                if avg_cpu > 90.0 and now - self._cooldowns['cpu'] > self._cooldown_seconds:  # pragma: no cover
-                    details = f'CPU usage sustained at {avg_cpu:.1f}% over the last 10 seconds.'  # pragma: no cover
-                    self._dispatch_anomaly('high_cpu', details)  # pragma: no cover
-                    self._cooldowns['cpu'] = now  # pragma: no cover
+            # Sleep 60 seconds, checking self._running every second
+            for _ in range(60):
+                if not self._running:
+                    break
+                await asyncio.sleep(1.0)
 
     def _dispatch_anomaly(self, anomaly_type: str, details: str):
-        """Auto-generated docstring.
+        from axiom.core.events import Event
+        logger.warning(f'SystemHealthWatchdog detected anomaly [{anomaly_type}]: {details}')
+        event = Event(event_type='system.anomaly.detected', source='SystemHealthWatchdog', data={'type': anomaly_type, 'details': details})
+        self.event_bus.publish(event)
 
-Args:
-    anomaly_type: Argument.
-    details: Argument.
-
-Returns:
-    Return value.
-"""
-        from axiom.core.events import Event  # pragma: no cover
-        logger.warning(f'OSWatcher detected anomaly [{anomaly_type}]: {details}')  # pragma: no cover
-        event = Event(event_type='system.anomaly', source='OSWatcher', data={'type': anomaly_type, 'details': details})  # pragma: no cover
-        self.event_bus.publish(event)  # pragma: no cover
+# Legacy Compatibility Shim
+OSWatcher = SystemHealthWatchdog

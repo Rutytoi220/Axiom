@@ -27,8 +27,8 @@ def tts_loop(tts_queue: Queue):  # pragma: no cover
         import pyttsx3  # pragma: no cover
         engine = pyttsx3.init()  # pragma: no cover
         engine.setProperty('rate', 170)  # pragma: no cover
-        has_tts = True  # pragma: no cover
-        logger.info("TTS Engine initialized (pyttsx3).")  # pragma: no cover
+        has_tts = False  # TEMPORARILY MUTED PER USER REQUEST
+        logger.info("TTS Engine initialized (pyttsx3) but MUTED.")  # pragma: no cover
     except ImportError:  # pragma: no cover
         logger.warning("pyttsx3 not installed. TTS will just consume the queue silently.")  # pragma: no cover
         has_tts = False  # pragma: no cover

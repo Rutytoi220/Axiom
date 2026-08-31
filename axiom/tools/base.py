@@ -1,5 +1,5 @@
 from typing import Any, Dict
-from axiom.tools import BaseTool, ToolResult
+from axiom.tools.core import BaseTool, ToolResult
 
 class AxiomPlugin(BaseTool):
     """Base class for user-defined dynamic plugins."""

@@ -76,7 +76,7 @@ class AxiomFS(Operations):
             # Synthesize markdown content dynamically
             query = parts[1]
             content = f"# AXIOM Synthesized Context: {query}\n\n"
-            content += f"This is a dynamically generated view into the AXIOM GraphRAG for `{query}`.\n"
+            content += f"This is a dynamically generated view into the AXIOM Relational Index for `{query}`.\n"
             content += "## Historical Logs\n"
             content += "- No critical failures recorded.\n"
             content += "## Dependencies\n"

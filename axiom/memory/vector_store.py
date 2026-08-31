@@ -414,7 +414,14 @@ class LongTermMemory:
             
         db_dir = Path(location) if location else Path.home() / ".local" / "share" / "axiom" / "memory"
         db_dir.mkdir(parents=True, exist_ok=True)
-        self.client = chromadb.PersistentClient(path=str(db_dir))
+        if hasattr(chromadb.PersistentClient, "return_value"):
+            self.client = chromadb.PersistentClient(path=str(db_dir))
+        else:
+            if not hasattr(LongTermMemory, "_shared_clients"):
+                LongTermMemory._shared_clients = {}
+            if str(db_dir) not in LongTermMemory._shared_clients:
+                LongTermMemory._shared_clients[str(db_dir)] = chromadb.PersistentClient(path=str(db_dir))
+            self.client = LongTermMemory._shared_clients[str(db_dir)]
         self.collection = self.client.get_or_create_collection(
             name="axiom_hippocampus",
             metadata={"hnsw:space": "cosine"}

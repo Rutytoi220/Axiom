@@ -32,29 +32,26 @@ class PluginManagerDialog(QDialog):
     def _build_ui(self):
         layout = QVBoxLayout(self)
         layout.setSpacing(16)
-        self.setStyleSheet("background-color: #18181b; color: #d4d4d8; font-family: 'Inter', 'Segoe UI', sans-serif;")
         
-        title = QLabel("🔌 Plugin Hub")
-        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #2ecc71;")
+        title = QLabel("Plugin Hub")
+        title.setObjectName("hub_name")
         layout.addWidget(title)
         
         desc = QLabel("Enable or disable AXIOM tools and plugins. Changes apply instantly to the active agent.")
-        desc.setStyleSheet("color: #a0a0b0; font-size: 13px;")
+        desc.setObjectName("hub_desc")
         desc.setWordWrap(True)
         layout.addWidget(desc)
         
-        # Scroll area for plugins
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: 1px solid #27272a; border-radius: 6px; background-color: #18181b; }")
+        scroll.setObjectName("plugin_scroll")
         
         self.container = QWidget()
         self.container_layout = QVBoxLayout(self.container)
         self.container_layout.setSpacing(10)
         
-        # Placeholder while loading
         self.loading_lbl = QLabel("Fetching plugins from daemon...")
-        self.loading_lbl.setStyleSheet("color: #a1a1aa; font-style: italic;")
+        self.loading_lbl.setObjectName("plugin_loading")
         self.container_layout.addWidget(self.loading_lbl)
         
         self.container_layout.addStretch()
@@ -63,7 +60,7 @@ class PluginManagerDialog(QDialog):
         
         close_btn = QPushButton("Close")
         close_btn.setFixedWidth(100)
-        close_btn.setStyleSheet("background-color: #3f3f46; color: white; padding: 6px; border-radius: 4px; font-weight: bold;")
+        close_btn.setObjectName("plugin_close")
         close_btn.clicked.connect(self.accept)
         
         btn_layout = QHBoxLayout()
@@ -72,7 +69,6 @@ class PluginManagerDialog(QDialog):
         layout.addLayout(btn_layout)
 
     def _populate_tools(self, tools_list: list):
-        # Clear container
         while self.container_layout.count():
             item = self.container_layout.takeAt(0)
             if item.widget():
@@ -86,15 +82,15 @@ class PluginManagerDialog(QDialog):
             is_enabled = t["enabled"]
             
             card = QFrame()
-            card.setStyleSheet("QFrame { background-color: #27272a; border-radius: 6px; }")
+            card.setObjectName("plugin_card")
             card_layout = QHBoxLayout(card)
             
             info_layout = QVBoxLayout()
             name_lbl = QLabel(tool_id)
-            name_lbl.setStyleSheet("font-weight: bold; color: #e4e4e7; font-size: 14px;")
+            name_lbl.setObjectName("plugin_name")
             
             desc_lbl = QLabel(desc_text)
-            desc_lbl.setStyleSheet("color: #a1a1aa; font-size: 12px;")
+            desc_lbl.setObjectName("plugin_desc")
             desc_lbl.setWordWrap(True)
             
             info_layout.addWidget(name_lbl)
@@ -104,12 +100,7 @@ class PluginManagerDialog(QDialog):
             toggle = QCheckBox("Enabled" if is_enabled else "Disabled")
             toggle.setChecked(is_enabled)
             toggle.setProperty("tool_id", tool_id)
-            toggle.setStyleSheet("""
-                QCheckBox { color: #a1a1aa; font-weight: bold; background: transparent; }
-                QCheckBox::indicator { width: 36px; height: 18px; border-radius: 9px; }
-                QCheckBox::indicator:checked { background-color: #2ecc71; border: 2px solid #2ecc71; }
-                QCheckBox::indicator:unchecked { background-color: #3f3f46; border: 2px solid #52525b; }
-            """)
+            toggle.setObjectName("plugin_toggle")
             toggle.toggled.connect(self._on_plugin_toggled)
             
             card_layout.addWidget(toggle)
@@ -128,10 +119,8 @@ class PluginManagerDialog(QDialog):
             
         tool_id = sender.property("tool_id")
         
-        # Update text dynamically
         sender.setText("Enabled" if checked else "Disabled")
         
-        # Send IPC toggle request
         self._bridge.toggle_tool(tool_id, checked)
         
         logger.info(f"Plugin {tool_id} IPC toggle requested (enabled={checked}).")

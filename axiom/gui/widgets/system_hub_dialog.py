@@ -105,7 +105,7 @@ class SystemHubDialog(QDialog):
             ("🛡️ eBPF Firewall", "#f38ba8", self.main_window._open_firewall_dialog if hasattr(self.main_window, '_open_firewall_dialog') else None),
             ("🛡️ Security Log", "#fab387", self.main_window._open_audit_dialog if hasattr(self.main_window, '_open_audit_dialog') else None),
             ("❤️ System Health", "#f38ba8", self.main_window._open_health_radar if hasattr(self.main_window, '_open_health_radar') else None),
-            ("🕸️ Knowledge Graph", "#cba6f7", self.main_window._open_graph_dialog if hasattr(self.main_window, '_open_graph_dialog') else None),
+            ("🕸️ Entity Graph", "#cba6f7", self.main_window._open_graph_dialog if hasattr(self.main_window, '_open_graph_dialog') else None),
             ("⏱️ Recall Timeline", "#89b4fa", self.main_window._open_recall_dialog if hasattr(self.main_window, '_open_recall_dialog') else None),
             ("🛡️ Cyber Audit", "#fab387", self.main_window._open_security_dialog if hasattr(self.main_window, '_open_security_dialog') else None),
             ("🧩 Skill Library", "#a6e3a1", self.main_window._open_skill_dialog if hasattr(self.main_window, '_open_skill_dialog') else None),

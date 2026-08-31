@@ -18,7 +18,6 @@ Welcome! We are thrilled that you want to help evolve AXIOM into the most powerf
 3. **Core Dependencies**:
    - **Ollama**: Ensure Ollama is running locally (`ollama serve`).
    - **Bubblewrap**: Required for standard sandboxing (`sudo apt install bubblewrap`).
-   - **QEMU**: Required for VM isolation (`sudo apt install qemu-kvm`).
    - **FUSE**: Required for AxiomFS (`sudo apt install fuse3`).
 
 ---

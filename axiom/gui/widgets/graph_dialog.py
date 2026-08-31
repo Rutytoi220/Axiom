@@ -2,11 +2,11 @@ from PySide6.QtWidgets import QDialog, QVBoxLayout, QTableWidget, QTableWidgetIt
 from axiom.engine.graph_memory import GraphMemoryEngine
 
 class GraphDialog(QDialog):
-    """UI for exploring the Knowledge Graph (GraphRAG)."""
+    """UI for exploring the Entity Graph (Relational Index)."""
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("🕸️ AXIOM Knowledge Graph")
+        self.setWindowTitle("🕸️ AXIOM Entity Graph")
         self.setMinimumSize(800, 500)
         
         self.graph = GraphMemoryEngine()

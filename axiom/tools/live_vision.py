@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 import time
 from typing import Dict, Any
-from axiom.tools import BaseTool
+from axiom.tools.core import BaseTool
 
 logger = logging.getLogger(__name__)
 

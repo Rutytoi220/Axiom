@@ -37,7 +37,7 @@ class CLI(cmd.Cmd):
     intro = "\n    ╔═══════════════════════════════════════════════════════════════╗\n    ║                    AXIOM - AI Orchestration                   ║\n    ║              Local-First LLM Framework for Linux              ║\n    ║                    Type '/help' for commands                  ║\n    ╚═══════════════════════════════════════════════════════════════╝\n    "
     prompt = 'axiom> '
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, bus=None, *args, **kwargs):
         """Auto-generated docstring.
 
 
@@ -65,14 +65,18 @@ Returns:
         db_path = str(axiom_dir / 'axiom.db')
         self.memory = SyncMemoryStore(db_path, embedding_provider=self.ollama)
         self.memory_store = self.memory
-        self.engine = Engine(memory=self.memory)
+        self.engine = Engine(memory=self.memory, bus=bus)
         self.tool_registry = ToolRegistry(self.engine.registry)
         
         # V8.4 Dynamic Plugin Loader
         from axiom.tools.plugin_loader import load_plugins
         load_plugins(self.tool_registry)
-        self.mcp_hub = MCPBridgeManager(self.engine.registry)
-        self.mcp_hub.start()
+        
+        from axiom.mcp.manager import MCPManager
+        from axiom.core.async_bridge import run_sync
+        self.mcp_hub = MCPManager(self.engine.registry, event_bus=self.engine.event_bus)
+        run_sync(self.mcp_hub.start_all())
+        
         self.orchestrator = OrchestratorAgent(self.tool_registry, self.engine.event_bus, self.memory_store, llm=self.ollama)
         self._event_log = []
         self._closed = False
@@ -164,9 +168,9 @@ Returns:
         from axiom.tools.clipboard_tools import ClipboardReadTool, ClipboardWriteTool
         from axiom.tools.desktop_control import DesktopAutomationTool
         from axiom.tools.vision import VisionCaptureTool
-        from axiom.tools import EchoTool, ShellTool, FileReadTool, FileWriteTool, SystemInfoTool
+        from axiom.tools import EchoTool, ShellTool, FileReadTool, FileWriteTool, SystemInfoTool, FileTeleportTool, TaskSchedulerTool
         from axiom.legacy_wrapper import create_legacy_tools
-        tools = [EchoTool(), ShellTool(), FileReadTool('.'), FileWriteTool('.'), SystemInfoTool(), SafeFileSearchTool(), FileOpenerTool(), AppLauncherTool(), ScreenCaptureTool(), ReadDocumentContentTool(), ClipboardReadTool(), ClipboardWriteTool(), DesktopAutomationTool(), VisionCaptureTool()]
+        tools = [EchoTool(), ShellTool(), FileReadTool('.'), FileWriteTool('.'), SystemInfoTool(), SafeFileSearchTool(), FileOpenerTool(), AppLauncherTool(), ScreenCaptureTool(), ReadDocumentContentTool(), ClipboardReadTool(), ClipboardWriteTool(), DesktopAutomationTool(), VisionCaptureTool(), FileTeleportTool(), TaskSchedulerTool()]
         tools.extend(create_legacy_tools())
         for tool in tools:
             self.engine.registry.register_tool(tool.tool_id, tool)
@@ -550,7 +554,8 @@ Returns:
             is_url = command.startswith('http://') or command.startswith('https://')
             target_type = 'URL' if is_url else 'command'
             print(f"Adding MCP server '{name}' via {target_type} '{command}'...")
-            success = self.mcp_hub.add_server(name, command, args)
+            from axiom.core.async_bridge import run_sync
+            success = run_sync(self.mcp_hub.start_server(name, command, args))
             if success:
                 print(f"[✓] MCP Server '{name}' added successfully.")
             else:
@@ -791,6 +796,15 @@ Returns:
         self._closed = True
         if self.sleep_daemon:
             self.sleep_daemon.stop()
+        if self.pruner_daemon:
+            self.pruner_daemon.stop()
+        if self.routine_engine:
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self.routine_engine.stop())
+            except RuntimeError:
+                pass # No running loop, task will die anyway
         self.engine.shutdown()
         self.memory.close()
         self.ollama.close()
@@ -1184,8 +1198,16 @@ def main():
     ask_parser.add_argument('prompt', type=str, help="The prompt to execute")
     ask_parser.add_argument('--verbose', action='store_true', help="Show tool execution details")
     
+    # Debrief subcommand
+    debrief_parser = subparsers.add_parser('debrief', help="Generate an 8-hour shift summary and resolve pending actions")
+    debrief_parser.add_argument('--hours', type=float, default=8.0, help="Hours to look back (default: 8.0)")
+    
     # Chat subcommand
-    subparsers.add_parser('chat', help="Launch the interactive REPL")
+    chat_parser = subparsers.add_parser('chat', help="Enter the interactive REPL")
+
+    # Package subcommand
+    package_parser = subparsers.add_parser('package', help="Package AXIOM into distribution formats")
+    package_parser.add_argument('--target', choices=['deb', 'appimage', 'rpm', 'all'], required=True, help="Target format")
     
     # HUD subcommand
     subparsers.add_parser('hud', help="Launch the AXIOM PySide6 desktop HUD")
@@ -1264,6 +1286,53 @@ def main():
         finally:
             cli.close()
             
+    elif args.command == 'debrief':
+        import asyncio
+        from rich.console import Console
+        from rich.panel import Panel
+        from rich.prompt import Confirm
+        from axiom.core.shift_manager import ShiftManager
+        from axiom.core.governor import ApprovalQueue
+        
+        async def run_debrief():
+            console = Console()
+            console.print(f"[bold cyan]Generating Shift Debrief for the last {args.hours} hours...[/bold cyan]")
+            manager = ShiftManager()
+            try:
+                with console.status("[bold yellow]LLM is reading logs and summarizing...[/bold yellow]", spinner="dots"):
+                    summary = await manager.generate_debrief(args.hours)
+                console.print(Panel(summary, title="[bold green]Shift Debrief[/bold green]", border_style="green"))
+            except Exception as e:
+                console.print(f"[bold red]Failed to generate debrief: {e}[/bold red]")
+                
+            queue = ApprovalQueue()
+            pending = await queue.list_pending()
+            if not pending:
+                console.print("[green]No actions pending approval in the queue.[/green]")
+                return
+                
+            console.print(f"\n[bold yellow]Found {len(pending)} pending action(s) requiring your approval:[/bold yellow]")
+            for p in pending:
+                console.print(f"\n[bold white]Action ID:[/bold white] {p['id']}")
+                console.print(f"[bold white]Tool:[/bold white] [cyan]{p['tool_name']}[/cyan]")
+                console.print(f"[bold white]Arguments:[/bold white] {p['arguments']}")
+                
+                approved = Confirm.ask("Approve this action?", default=False)
+                await queue.resolve(p['id'], approved)
+                if approved:
+                    console.print("[green]Action approved. The daemon will pick this up on its next cycle.[/green]")
+                else:
+                    console.print("[red]Action denied.[/red]")
+                    
+        try:
+            asyncio.run(run_debrief())
+        except KeyboardInterrupt:
+            print("\nDebrief cancelled.")
+            
+    elif args.command == 'package':
+        from axiom.core.packager import build
+        build(args.target)
+        
     elif args.command == 'chat':
         run_cli()
         

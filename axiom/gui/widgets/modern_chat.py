@@ -5,6 +5,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QSize, Signal
 from axiom.gui.styles.theme_manager import ThemeManager
 import markdown
+from typing import Optional
+import re
 
 class AutoExpandTextEdit(QTextEdit):
     return_pressed = Signal()
@@ -212,6 +214,25 @@ class ModernChatDisplay(QWidget):
         if self.watermark.isVisible():
             self.watermark.hide()
 
+        # Parse for JIT Generative UI widget block
+        jit_match = re.search(r"<gui_widget>\s*(.*?)\s*</gui_widget>", text, re.DOTALL)
+        if jit_match:
+            compiler = None
+            code = jit_match.group(1)
+            try:
+                widget = compiler.compile_widget(code)
+                if widget:
+                    # Render the widget instead of the text
+                    return self.add_dynamic_widget(widget, title="Generated Interface")
+            except JITSecurityException as e:
+                # Render error instead
+                text = text.replace(jit_match.group(0), f"**[SECURITY BLOCKED]** JIT Compilation stopped: {str(e)}")
+            except Exception as e:
+                text = text.replace(jit_match.group(0), f"**[GUI ERROR]** JIT Compilation failed: {str(e)}")
+
+        # Clean up any leftover tags just in case
+        text = re.sub(r"<gui_widget>.*?</gui_widget>", "", text, flags=re.DOTALL)
+
         bubble = ModernChatBubble(role, text, self.theme_manager)
 
         wrapper = QHBoxLayout()
@@ -226,3 +247,56 @@ class ModernChatDisplay(QWidget):
         self.scroll_layout.insertLayout(self.scroll_layout.count() - 1, wrapper)
         self._scroll_to_bottom()
         return bubble
+
+    def add_dynamic_widget(self, widget: QWidget, title: Optional[str] = None):
+        """Embeds a compiled PySide6 widget directly into the chat flow."""
+        if self.watermark.isVisible():
+            self.watermark.hide()
+            
+        frame = QFrame()
+        frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        frame.setObjectName("dynamic_widget_frame")
+        
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+        
+        if title:
+            title_lbl = QLabel(title)
+            title_lbl.setObjectName("dynamic_widget_title")
+            # Apply some bold styling or a specific font if we want, but objectName is enough
+            font = title_lbl.font()
+            font.setBold(True)
+            title_lbl.setFont(font)
+            layout.addWidget(title_lbl)
+            
+        layout.addWidget(widget)
+        
+        wrapper = QHBoxLayout()
+        wrapper.addWidget(frame)
+        wrapper.addStretch() # Align left like AI bubbles
+        
+        self.scroll_layout.insertLayout(self.scroll_layout.count() - 1, wrapper)
+        self._scroll_to_bottom()
+        return frame
+
+    def set_status(self, action_text: str):
+        if not hasattr(self, 'status_pill'):
+            self.status_pill = QLabel()
+            self.status_pill.setObjectName("chat_status_pill")
+            self.status_pill.setProperty("status", "muted")
+            self.status_pill.style().unpolish(self.status_pill)
+            self.status_pill.style().polish(self.status_pill)
+            self.status_pill_wrapper = QHBoxLayout()
+            self.status_pill_wrapper.addWidget(self.status_pill)
+            self.status_pill_wrapper.addStretch()
+            # Insert before the stretch at the end
+            self.scroll_layout.insertLayout(self.scroll_layout.count() - 1, self.status_pill_wrapper)
+            
+        self.status_pill.setText(f"<i>[{action_text}]</i>")
+        self.status_pill.show()
+        self._scroll_to_bottom()
+
+    def clear_status(self):
+        if hasattr(self, 'status_pill') and self.status_pill:
+            self.status_pill.hide()

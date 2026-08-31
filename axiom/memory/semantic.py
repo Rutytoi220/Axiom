@@ -46,17 +46,15 @@ class SemanticIndex:
     otherwise falls back to SQLite + NumPy array computations.
     """
 
-    def __init__(self, provider: Optional[EmbeddingProvider]=None):
-        """Auto-generated docstring.
-
-Args:
-    provider: Argument.
-
-Returns:
-    Return value.
-"""
+    def __init__(self, provider: Optional[EmbeddingProvider]=None, event_bus=None):
+        """Initialize semantic index."""
+        import collections
         self._provider = provider
+        self._event_bus = event_bus
         self._vector_store = None
+        self._embedding_cache = collections.OrderedDict()
+        self._cache_max_size = 5000
+        
         try:
             from axiom.memory.vector_store import QdrantLocalStore
             import sys
@@ -83,12 +81,6 @@ Returns:
 
     @property
     def has_provider(self) -> bool:
-        """Auto-generated docstring.
-
-
-Returns:
-    Return value.
-"""
         return self._provider is not None
 
     async def store(self, db: Any, owner_id: str, owner_type: str, embedding: List[float], model: str='') -> None:
@@ -101,18 +93,89 @@ Returns:
             except Exception as e:
                 logger.error('Failed to asynchronously upsert to Qdrant: %s', e)
 
+    def _get_cached_embedding(self, text: str) -> Optional[List[float]]:
+        import hashlib
+        h = hashlib.sha256(text.encode('utf-8')).hexdigest()
+        if h in self._embedding_cache:
+            self._embedding_cache.move_to_end(h)
+            return self._embedding_cache[h]
+        return None
+
+    def _cache_embedding(self, text: str, embedding: List[float]) -> None:
+        import hashlib
+        h = hashlib.sha256(text.encode('utf-8')).hexdigest()
+        self._embedding_cache[h] = embedding
+        if len(self._embedding_cache) > self._cache_max_size:
+            self._embedding_cache.popitem(last=False)
+
+    def _emit_error(self, message: str):
+        if self._event_bus:
+            from axiom.core.events import Event
+            try:
+                self._event_bus.publish(Event(event_type="system.alert", source="SemanticIndex", data={"message": message, "level": "warning"}))
+            except Exception:
+                pass
+
     async def store_text(self, db: Any, owner_id: str, owner_type: str, text: str, model: Optional[str]=None) -> bool:
         """Generate embedding from text via provider, then store. Returns False if no provider."""
         if not self._provider:
             return False
+            
+        cached = self._get_cached_embedding(text)
+        if cached:
+            await self.store(db, owner_id, owner_type, cached, model=model or '')
+            return True
+            
         try:
             embedding = await asyncio.to_thread(self._provider.embed, text, model)
         except Exception as e:
             logger.error('Failed to generate embedding: %s', e)
+            self._emit_error(f"Embedding failed: {e}. Falling back to lexical search.")
             return False
-        if not embedding:
+            
+        if not embedding or not isinstance(embedding, list) or not isinstance(embedding[0], float):
             return False
+            
+        self._cache_embedding(text, embedding)
         await self.store(db, owner_id, owner_type, embedding, model=model or '')
+        return True
+
+    async def store_texts_batch(self, db: Any, items: List[Dict[str, Any]], model: Optional[str]=None) -> bool:
+        """Process a batch of texts for embeddings."""
+        if not self._provider or not items:
+            return False
+            
+        texts_to_embed = []
+        indices_to_embed = []
+        
+        # Check cache first
+        for i, item in enumerate(items):
+            cached = self._get_cached_embedding(item['text'])
+            if cached:
+                item['embedding'] = cached
+            else:
+                texts_to_embed.append(item['text'])
+                indices_to_embed.append(i)
+                
+        if texts_to_embed:
+            try:
+                # Use UniversalLLMClient's batch embed
+                embeddings = await asyncio.to_thread(self._provider.embed, texts_to_embed, model)
+                if embeddings and isinstance(embeddings, list) and isinstance(embeddings[0], list):
+                    for idx, emb in zip(indices_to_embed, embeddings):
+                        if emb:
+                            items[idx]['embedding'] = emb
+                            self._cache_embedding(items[idx]['text'], emb)
+            except Exception as e:
+                logger.error('Failed to generate batch embeddings: %s', e)
+                self._emit_error(f"Batch embedding failed: {e}. Falling back to lexical search.")
+                return False
+                
+        # Store all successful ones
+        for item in items:
+            if 'embedding' in item and item['embedding']:
+                await self.store(db, item['owner_id'], item['owner_type'], item['embedding'], model=model or '')
+                
         return True
 
     def _apply_decay(self, base_sim: float, row: dict, now: float) -> dict:

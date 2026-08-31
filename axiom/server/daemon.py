@@ -4,22 +4,17 @@ import logging
 import os
 import sys
 from pathlib import Path
-import websockets
 
-from axiom.api.cli import CLI
-from axiom.services.watchdog_service import DirectoryWatchdog
-from axiom.services.scheduler_service import BackgroundSchedulerService
-from axiom.services.sys_watchdog import SystemHealthWatchdog
-from axiom.services.governor import GovernorService
-from axiom.memory.indexer import IndexerService
 from axiom.core.events import Event
 
 logger = logging.getLogger(__name__)
 
 class AxiomDaemonServer:
     def __init__(self):
-        self.cli = CLI()
-        self.event_bus = self.cli.engine.event_bus
+        from axiom.core.events import EventBus
+        self.event_bus = EventBus()
+        self.lifecycle = None
+        self.cli = None
         
         self.scheduler_service = None
         self.telemetry = None
@@ -29,70 +24,131 @@ class AxiomDaemonServer:
         self.governor_service = None
         self.indexer_service = None
         
-        self.dir_watchdog = DirectoryWatchdog()
         self.clients = set()
         self.event_bus.subscribe("*", self._on_bus_event)
 
     async def initialize_background(self):
-        from axiom.core.lifecycle import LifecycleState
-        from axiom.core.events import Event
-        
-        # Helper to emit status
-        def _emit_status(service_name, state):
-            self.event_bus.publish_sync("startup.service.update", {"service": service_name, "state": state})
+        from axiom.core.lifecycle import AppLifecycleState, LifecycleManager
+
+        self.lifecycle = LifecycleManager(self.event_bus)
+        self.lifecycle.transition(AppLifecycleState.CORE_INITIALIZING)
+
+        def _emit_status(service_name: str, state: AppLifecycleState) -> None:
+            self.event_bus.publish_sync("startup.service.update", {"service": service_name, "state": state.value})
+
+        # DirectoryWatchdog — lightweight, safe to instantiate eagerly
+        try:
+            from axiom.services.watchdog_service import DirectoryWatchdog
+            self.dir_watchdog = DirectoryWatchdog()
+            self.dir_watchdog.start(asyncio.get_running_loop())
+            _emit_status("dir_watchdog", AppLifecycleState.READY)
+        except Exception as e:
+            logger.error("Failed to start dir_watchdog: %s", e)
+            _emit_status("dir_watchdog", AppLifecycleState.DEGRADED)
+
+        # Heavy CLI Init in a separate thread so we don't block the daemon's WS server
+        try:
+            from axiom.api.cli import CLI
+
+            def _build_cli():
+                return CLI(bus=self.event_bus)
+            
+            self.cli = await asyncio.to_thread(_build_cli)
+            _emit_status("core", AppLifecycleState.READY)
+        except Exception as e:
+            logger.error("Failed to initialize CLI: %s", e)
+            _emit_status("core", AppLifecycleState.DEGRADED)
 
         try:
+            from axiom.services.scheduler_service import BackgroundSchedulerService
             self.scheduler_service = BackgroundSchedulerService(event_bus=self.event_bus)
             self.scheduler_service.start()
-            _emit_status("scheduler", LifecycleState.READY)
+            _emit_status("scheduler", AppLifecycleState.READY)
         except Exception as e:
-            logger.error(f"Failed to start scheduler: {e}")
-            _emit_status("scheduler", LifecycleState.DEGRADED)
+            logger.error("Failed to start scheduler: %s", e)
+            _emit_status("scheduler", AppLifecycleState.DEGRADED)
 
         try:
-            from axiom.core.telemetry import TelemetryDaemon
-            self.telemetry = TelemetryDaemon(event_bus=self.event_bus)
+            from axiom.services.telemetry_service import TelemetryService
+            self.telemetry = TelemetryService(event_bus=self.event_bus)
             self.telemetry.start()
-            _emit_status("telemetry", LifecycleState.READY)
+            _emit_status("telemetry", AppLifecycleState.READY)
         except Exception as e:
-            logger.error(f"Failed to start telemetry: {e}")
-            _emit_status("telemetry", LifecycleState.DEGRADED)
+            logger.error("Failed to start telemetry: %s", e)
+            _emit_status("telemetry", AppLifecycleState.DEGRADED)
 
         try:
             from axiom.core.governor import ThermalGovernor
+            from axiom.services.governor import GovernorService
             self.governor = ThermalGovernor.instance(event_bus=self.event_bus)
             self.governor_service = GovernorService.instance(event_bus=self.event_bus)
-            _emit_status("governor", LifecycleState.READY)
+            _emit_status("governor", AppLifecycleState.READY)
         except Exception as e:
-            logger.error(f"Failed to start governor: {e}")
-            _emit_status("governor", LifecycleState.DEGRADED)
+            logger.error("Failed to start governor: %s", e)
+            _emit_status("governor", AppLifecycleState.DEGRADED)
 
         try:
             from axiom.core.swarm_router import SwarmRouter
             self.swarm_router = SwarmRouter.instance(event_bus=self.event_bus)
-            _emit_status("swarm_router", LifecycleState.READY)
+            _emit_status("swarm_router", AppLifecycleState.READY)
         except Exception as e:
-            logger.error(f"Failed to start swarm_router: {e}")
-            _emit_status("swarm_router", LifecycleState.DEGRADED)
+            logger.error("Failed to start swarm_router: %s", e)
+            _emit_status("swarm_router", AppLifecycleState.DEGRADED)
 
         try:
+            from axiom.services.sys_watchdog import SystemHealthWatchdog
             self.sys_watchdog = SystemHealthWatchdog(submit_task_callback=self._submit_task)
-            _emit_status("sys_watchdog", LifecycleState.READY)
+            _emit_status("sys_watchdog", AppLifecycleState.READY)
         except Exception as e:
-            logger.error(f"Failed to start sys_watchdog: {e}")
-            _emit_status("sys_watchdog", LifecycleState.DEGRADED)
+            logger.error("Failed to start sys_watchdog: %s", e)
+            _emit_status("sys_watchdog", AppLifecycleState.DEGRADED)
 
         try:
+            from axiom.memory.indexer import IndexerService
             self.indexer_service = IndexerService(event_bus=self.event_bus)
             self.indexer_service.start()
-            _emit_status("indexer", LifecycleState.READY)
+            _emit_status("indexer", AppLifecycleState.READY)
         except Exception as e:
-            logger.error(f"Failed to start indexer: {e}")
-            _emit_status("indexer", LifecycleState.DEGRADED)
+            logger.error("Failed to start indexer: %s", e)
+            _emit_status("indexer", AppLifecycleState.DEGRADED)
+
+        try:
+            from axiom.services.cron_service import CronService
+            self.cron_service = CronService(event_bus=self.event_bus)
+            asyncio.create_task(self.cron_service.start())
+            _emit_status("cron", AppLifecycleState.READY)
+        except Exception as e:
+            logger.error("Failed to start CronService: %s", e)
+            _emit_status("cron", AppLifecycleState.DEGRADED)
+
+        try:
+            from axiom.core.wake_word import WakeWordService
+            from axiom.core.audio import AudioManager
+            self.wake_word_service = WakeWordService(event_bus=self.event_bus)
             
-        self.event_bus.publish_sync("startup.service.ready", {"state": LifecycleState.READY})
-        
-        self.clients = set()
+            from axiom.config import get_config
+            if getattr(get_config(), "wake_word_enabled", False):
+                self.wake_word_service.start()
+                
+            # Init AudioManager for the daemon with bus
+            AudioManager.instance(event_bus=self.event_bus)
+            _emit_status("wake_word", AppLifecycleState.READY)
+        except Exception as e:
+            logger.error("Failed to start WakeWordService: %s", e)
+            _emit_status("wake_word", AppLifecycleState.DEGRADED)
+
+        # Determine final state: at least one service degraded => overall degraded
+        degraded_services = []
+        for svc in (
+            self.cli, self.scheduler_service, self.telemetry,
+            self.governor, self.swarm_router, self.sys_watchdog, self.indexer_service,
+        ):
+            if svc is None:
+                degraded_services.append(type(svc).__name__ if svc else "unknown")
+
+        final_state = AppLifecycleState.DEGRADED if degraded_services else AppLifecycleState.READY
+        self.lifecycle.transition(final_state)
+        self.event_bus.publish_sync("startup.service.ready", {"state": final_state.value})
         
         # Subscribe to EventBus to broadcast to websockets
         self.event_bus.subscribe("*", self._on_bus_event)
@@ -109,7 +165,7 @@ class AxiomDaemonServer:
         payload = getattr(event, 'payload', getattr(event, 'data', None))
         
         # Only broadcast relevant events to frontend to save bandwidth
-        if not name.startswith(("llm.", "tool.", "swarm.", "telemetry.", "orchestrator.")):
+        if not name.startswith(("llm.", "tool.", "swarm.", "telemetry.", "orchestrator.", "lifecycle.", "startup.")):
             return
             
         msg = {
@@ -150,13 +206,36 @@ class AxiomDaemonServer:
 
     async def handle_client(self, websocket):
         self.clients.add(websocket)
-        logger.info(f"Client connected. Total clients: {len(self.clients)}")
+        logger.info("Client connected. Total clients: %d", len(self.clients))
         try:
             async for message in websocket:
                 try:
                     data = json.loads(message)
                     action = data.get("action")
-                    if action == "submit_task":
+                    if not self.cli:
+                        if action == "get_tools":
+                            await websocket.send(json.dumps({"type": "response", "action": "get_tools", "data": []}))
+                        elif action == "sync_state":
+                            state_val = self.lifecycle.state.value if self.lifecycle else "BOOTING"
+                            await websocket.send(json.dumps({
+                                "type": "event",
+                                "event_type": "lifecycle.state_changed",
+                                "payload": {"new_state": state_val}
+                            }))
+                        else:
+                            await websocket.send(json.dumps({"type": "event", "event_type": "system.alert", "payload": {"level": "warning", "message": "AXIOM core is still initializing... please wait."}}))
+                        continue
+                        
+
+                    action = data.get("action")
+                    if action == "sync_state":
+                        state_val = self.lifecycle.state.value if self.lifecycle else "BOOTING"
+                        await websocket.send(json.dumps({
+                            "type": "event",
+                            "event_type": "lifecycle.state_changed",
+                            "payload": {"new_state": state_val}
+                        }))
+                    elif action == "submit_task":
                         prompt = data.get("prompt")
                         if prompt:
                             # Run in executor to avoid blocking the websocket loop.
@@ -167,6 +246,13 @@ class AxiomDaemonServer:
                         logger.info("Hot-reloading plugins triggered via IPC...")
                         self.cli.orchestrator.reload_plugins()
                         await websocket.send(json.dumps({"type": "response", "action": "reload_plugins", "success": True}))
+                    elif action == "config_updated":
+                        logger.info("Config update triggered via IPC. Reloading...")
+                        from axiom.config import set_config, AxiomConfig
+                        set_config(AxiomConfig.load())
+                        if self.event_bus:
+                            self.event_bus.publish_sync("config.updated", {})
+                        await websocket.send(json.dumps({"type": "response", "action": "config_updated", "success": True}))
                     elif action == "get_tools":
                         tools = self.cli.orchestrator._tool_registry._core_registry.list_tools()
                         from axiom.config import get_config
@@ -208,10 +294,23 @@ class AxiomDaemonServer:
                             "action": "toggle_tool",
                             "success": True
                         }))
+                    elif action == "add_mcp_server":
+                        name = data.get("name")
+                        cmd = data.get("command")
+                        args = data.get("args", [])
+                        if name and cmd and hasattr(self.cli, "mcp_hub"):
+                            await self.cli.mcp_hub.add_server_config(name, cmd, args)
+                    elif action == "remove_mcp_server":
+                        name = data.get("name")
+                        if name and hasattr(self.cli, "mcp_hub"):
+                            await self.cli.mcp_hub.remove_server_config(name)
+                    elif action == "get_mcp_status":
+                        if hasattr(self.cli, "mcp_hub"):
+                            await self.cli.mcp_hub.broadcast_status()
                 except Exception as e:
-                    logger.error(f"[Daemon] Error handling client message: {e}", exc_info=True)
+                    logger.error("[Daemon] Error handling client message: %s", e, exc_info=True)
         except Exception as we:
-            logger.error(f"[Daemon] Client connection error: {we}")
+            logger.error("[Daemon] Client connection error: %s", we)
         finally:
             self.clients.discard(websocket)
             logger.info("Client disconnected.")
@@ -219,7 +318,6 @@ class AxiomDaemonServer:
     async def run(self):
         loop = asyncio.get_running_loop()
         self._loop = loop
-        self.dir_watchdog.start(loop)
         
         logger.info("Starting AXIOM Daemon WebSocket server on ws://127.0.0.1:9410")
         
@@ -233,13 +331,15 @@ class AxiomDaemonServer:
         await asyncio.Future()  # run forever
 
 def main():
+    import websockets
     logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
     daemon = AxiomDaemonServer()
     try:
         asyncio.run(daemon.run())
     except KeyboardInterrupt:
         logger.info("Daemon shutting down.")
-        daemon.cli.close()
+        if daemon.cli:
+            daemon.cli.close()
 
 if __name__ == "__main__":
     main()

@@ -8,9 +8,9 @@ logger = logging.getLogger(__name__)
 # To prevent circular imports, we will import BaseTool and ToolResult locally
 # or assume they are injected / we can just use typing tricks.
 # Actually, we can import them from axiom.tools at runtime or just import from axiom.tools!
-# Since we moved the import to the bottom of __init__.py, `from axiom.tools import BaseTool, ToolResult` will work!
+# Since we moved the import to the bottom of __init__.py, `from axiom.tools.core import BaseTool, ToolResult` will work!
 
-from axiom.tools import BaseTool, ToolResult
+from axiom.tools.core import BaseTool, ToolResult
 
 class ClipboardReadTool(BaseTool):
     """Tool for reading text from the system clipboard."""

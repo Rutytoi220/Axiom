@@ -152,7 +152,7 @@ class DownloadThemeThread(QThread):
                 with urllib.request.urlopen(req, timeout=5.0) as response:
                     content = response.read().decode('utf-8')
                     
-            theme_path.write_text(content, encoding="utf-8")
+            theme_path.write_text(content, encoding='utf-8')
             
             # Validate via ThemeRegistry
             from axiom.gui.styles.theme_registry import ThemeRegistry, ThemeValidationError
@@ -172,22 +172,44 @@ class DownloadThemeThread(QThread):
             self.finished.emit(self.item.get('id', 'unknown'), f"Error: {str(e)}")
 
 class AxiomHubDialog(QDialog):
+    def closeEvent(self, event):
+        """Ensure threads are gracefully terminated to prevent C++ SIGABRT on teardown."""
+        if hasattr(self, 'fetch_thread') and self.fetch_thread.isRunning():
+            self.fetch_thread.quit()
+            self.fetch_thread.wait(100)
+            
+        if hasattr(self, 'fetch_themes_thread') and self.fetch_themes_thread.isRunning():
+            self.fetch_themes_thread.quit()
+            self.fetch_themes_thread.wait(100)
+            
+        for thread_list_name in ['_install_threads', '_install_theme_threads']:
+            if hasattr(self, thread_list_name):
+                threads = getattr(self, thread_list_name)
+                for thread in threads:
+                    if thread.isRunning():
+                        thread.quit()
+                        thread.wait(100)
+        super().closeEvent(event)
+
     tool_installed = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("AXIOM Hub")
         self.setMinimumSize(650, 500)
-        self.setStyleSheet("QDialog { background-color: #1E1E2E; color: white; }")
         
         self.layout = QVBoxLayout(self)
         
         self.tabs = QTabWidget()
         self.tools_tab = QWidget()
         self.themes_tab = QWidget()
+        self.mcp_tab = QWidget()
+        self.swarm_tab = QWidget()
         
         self.tabs.addTab(self.tools_tab, "Tools")
         self.tabs.addTab(self.themes_tab, "Themes")
+        self.tabs.addTab(self.mcp_tab, "🔌 MCP Servers")
+        self.tabs.addTab(self.swarm_tab, "💻 Swarm Sync")
         
         self.layout.addWidget(self.tabs)
         
@@ -204,6 +226,145 @@ class AxiomHubDialog(QDialog):
         
         self._fetch_manifest()
         self._fetch_themes_manifest()
+        self._init_mcp_tab()
+        self._init_swarm_tab()
+
+    def _init_mcp_tab(self):
+        self.mcp_layout = QVBoxLayout(self.mcp_tab)
+        
+        # Header actions
+        header_layout = QHBoxLayout()
+        header_lbl = QLabel("Manage dynamic Model Context Protocol (MCP) servers.")
+        header_lbl.setStyleSheet("color: @text_secondary@;")
+        header_layout.addWidget(header_lbl)
+        header_layout.addStretch()
+        
+        self.add_mcp_btn = QPushButton("+ Add Server")
+        self.add_mcp_btn.clicked.connect(self._on_add_mcp_server)
+        header_layout.addWidget(self.add_mcp_btn)
+        self.mcp_layout.addLayout(header_layout)
+        
+        # List area
+        self.mcp_scroll = QScrollArea()
+        self.mcp_scroll.setWidgetResizable(True)
+        self.mcp_scroll_content = QWidget()
+        self.mcp_list_layout = QVBoxLayout(self.mcp_scroll_content)
+        self.mcp_list_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.mcp_list_layout.setSpacing(8)
+        
+        self.mcp_scroll.setWidget(self.mcp_scroll_content)
+        self.mcp_layout.addWidget(self.mcp_scroll)
+        
+        # Connect bridge signals
+        try:
+            bridge = self.parent()._bridge
+            bridge.mcp_servers_updated.connect(self._on_mcp_servers_updated)
+            # Ask for initial status
+            bridge.send_get_mcp_status()
+        except AttributeError:
+            pass
+
+    def _on_add_mcp_server(self):
+        from PySide6.QtWidgets import QDialog, QFormLayout, QLineEdit, QDialogButtonBox
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Add MCP Server")
+        dlg.setMinimumWidth(400)
+        
+        layout = QFormLayout(dlg)
+        name_input = QLineEdit()
+        name_input.setPlaceholderText("e.g. github")
+        cmd_input = QLineEdit()
+        cmd_input.setPlaceholderText("e.g. npx")
+        args_input = QLineEdit()
+        args_input.setPlaceholderText("e.g. -y @modelcontextprotocol/server-github")
+        
+        layout.addRow("Server Name:", name_input)
+        layout.addRow("Command:", cmd_input)
+        layout.addRow("Arguments:", args_input)
+        
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        layout.addWidget(btns)
+        
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            name = name_input.text().strip()
+            cmd = cmd_input.text().strip()
+            args_raw = args_input.text().strip()
+            args = []
+            
+            import shlex
+            if args_raw:
+                try:
+                    args = shlex.split(args_raw)
+                except ValueError:
+                    args = args_raw.split()
+                    
+            if name and cmd:
+                try:
+                    self.parent()._bridge.send_add_mcp_server(name, cmd, args)
+                except AttributeError:
+                    pass
+
+    def _on_mcp_servers_updated(self, payload: dict):
+        # Clear existing
+        while self.mcp_list_layout.count():
+            child = self.mcp_list_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+                
+        servers = payload.get("connected_servers", [])
+        if not servers:
+            empty_lbl = QLabel("No MCP servers configured.")
+            empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty_lbl.setStyleSheet("color: @text_secondary@;")
+            self.mcp_list_layout.addWidget(empty_lbl)
+            return
+            
+        for srv in servers:
+            card = QFrame()
+            card.setObjectName("hub_card")
+            card_layout = QHBoxLayout(card)
+            
+            # Left: Info
+            info_layout = QVBoxLayout()
+            name_lbl = QLabel(srv.get("name", "Unknown"))
+            name_lbl.setStyleSheet("font-weight: bold; font-size: 14px;")
+            
+            cmd = srv.get("command", "")
+            args = " ".join(srv.get("args", []))
+            cmd_lbl = QLabel(f"{cmd} {args}")
+            cmd_lbl.setStyleSheet("color: @text_secondary@; font-family: monospace; font-size: 11px;")
+            
+            status = srv.get("status", "OFFLINE")
+            color = "#00cc66" if status == "ONLINE" else "#ff4444"
+            status_lbl = QLabel(f"● {status} ({srv.get('tools_count', 0)} tools)")
+            status_lbl.setStyleSheet(f"color: {color}; font-size: 11px; font-weight: bold;")
+            
+            info_layout.addWidget(name_lbl)
+            info_layout.addWidget(cmd_lbl)
+            info_layout.addWidget(status_lbl)
+            
+            card_layout.addLayout(info_layout)
+            card_layout.addStretch()
+            
+            # Right: Actions
+            delete_btn = QPushButton("Remove")
+            delete_btn.setProperty("status", "danger")
+            delete_btn.clicked.connect(lambda _, n=srv.get("name"): self._remove_mcp_server(n))
+            card_layout.addWidget(delete_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
+            
+            self.mcp_list_layout.addWidget(card)
+
+    def _remove_mcp_server(self, name: str):
+        from PySide6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(self, "Confirm Remove", f"Remove MCP server '{name}'?",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self.parent()._bridge.send_remove_mcp_server(name)
+            except AttributeError:
+                pass
 
     def _fetch_manifest(self):
         self.fetch_thread = FetchManifestThread()
@@ -215,10 +376,10 @@ class AxiomHubDialog(QDialog):
         
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
+        scroll.setObjectName("hub_scroll")
         
         scroll_content = QWidget()
-        scroll_content.setStyleSheet("QWidget { background-color: transparent; }")
+        scroll_content.setObjectName("hub_scroll_content")
         self.scroll_layout = QVBoxLayout(scroll_content)
         self.scroll_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.scroll_layout.setSpacing(12)
@@ -232,50 +393,46 @@ class AxiomHubDialog(QDialog):
 
     def _create_tool_card(self, item: dict) -> QFrame:
         card = QFrame()
-        card.setStyleSheet("QFrame { background-color: #2D2B3D; border-radius: 8px; padding: 12px; }")
+        card.setObjectName("hub_card")
         
         layout = QHBoxLayout(card)
         
         text_layout = QVBoxLayout()
         text_layout.setSpacing(4)
         
-        # Top line: Name + Author + Version
         header_layout = QHBoxLayout()
         
         name_label = QLabel(item.get("name", "Unknown Tool"))
-        name_label.setStyleSheet("font-weight: bold; font-size: 16px; color: white;")
+        name_label.setObjectName("hub_name")
         header_layout.addWidget(name_label)
         
         if "author" in item:
             author_label = QLabel(f"by @{item['author']}")
-            author_label.setStyleSheet("color: #89B4FA; font-size: 13px; font-weight: 500;")
+            author_label.setObjectName("hub_author")
             header_layout.addWidget(author_label)
             
         if "version" in item:
             version_label = QLabel(f"v{item['version']}")
-            version_label.setStyleSheet("background-color: #181825; color: #A6E3A1; padding: 2px 6px; border-radius: 4px; font-size: 12px; font-weight: bold;")
+            version_label.setObjectName("hub_version")
             header_layout.addWidget(version_label)
             
         header_layout.addStretch()
         text_layout.addLayout(header_layout)
         
-        # Tags line
         if "tags" in item and item["tags"]:
             tags_str = " ".join(item["tags"])
             tags_label = QLabel(tags_str)
-            tags_label.setStyleSheet("color: #F9E2AF; font-size: 12px;")
+            tags_label.setObjectName("hub_tags")
             text_layout.addWidget(tags_label)
             
-        # Description
         desc_label = QLabel(item.get("desc", ""))
-        desc_label.setStyleSheet("color: #A0A0B0; font-size: 14px;")
+        desc_label.setObjectName("hub_desc")
         desc_label.setWordWrap(True)
         text_layout.addWidget(desc_label)
         
         layout.addLayout(text_layout)
         layout.addStretch()
         
-        # Install Button
         install_btn = QPushButton()
         self._update_btn_state(install_btn, item["id"])
         install_btn.clicked.connect(lambda _, btn=install_btn, i=item: self._install_tool(i, btn))
@@ -289,18 +446,21 @@ class AxiomHubDialog(QDialog):
         
         if file_path.exists():
             btn.setText("Installed")
-            btn.setStyleSheet("QPushButton { background-color: #10B981; color: white; font-weight: bold; padding: 8px 16px; border-radius: 6px; }")
+            btn.setProperty("status", "success")
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
             btn.setEnabled(False)
         else:
             btn.setText("1-Click Install")
-            btn.setStyleSheet("QPushButton { background-color: #3B82F6; color: white; font-weight: bold; padding: 8px 16px; border-radius: 6px; } QPushButton:hover { background-color: #2563EB; }")
+            btn.setProperty("status", "info")
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
             btn.setEnabled(True)
 
     def _install_tool(self, item: dict, btn: QPushButton):
         btn.setText("Installing...")
         btn.setEnabled(False)
         
-        # Keep a strong reference to the thread so it doesn't get garbage collected
         if not hasattr(self, '_install_threads'):
             self._install_threads = []
             
@@ -315,7 +475,9 @@ class AxiomHubDialog(QDialog):
             self.tool_installed.emit(tool_id)
         else:
             btn.setText("Failed")
-            btn.setStyleSheet("QPushButton { background-color: #F28FAD; color: white; font-weight: bold; padding: 8px 16px; border-radius: 6px; }")
+            btn.setProperty("status", "danger")
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
             btn.setEnabled(False)
             
         if thread in self._install_threads:
@@ -331,10 +493,10 @@ class AxiomHubDialog(QDialog):
         
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
+        scroll.setObjectName("hub_scroll")
         
         scroll_content = QWidget()
-        scroll_content.setStyleSheet("QWidget { background-color: transparent; }")
+        scroll_content.setObjectName("hub_scroll_content")
         self.themes_scroll_layout = QVBoxLayout(scroll_content)
         self.themes_scroll_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.themes_scroll_layout.setSpacing(12)
@@ -348,7 +510,7 @@ class AxiomHubDialog(QDialog):
 
     def _create_theme_card(self, item: dict) -> QFrame:
         card = QFrame()
-        card.setStyleSheet("QFrame { background-color: #2D2B3D; border-radius: 8px; padding: 12px; }")
+        card.setObjectName("hub_card")
         
         layout = QHBoxLayout(card)
         text_layout = QVBoxLayout()
@@ -356,24 +518,24 @@ class AxiomHubDialog(QDialog):
         
         header_layout = QHBoxLayout()
         name_label = QLabel(item.get("name", "Unknown Theme"))
-        name_label.setStyleSheet("font-weight: bold; font-size: 16px; color: white;")
+        name_label.setObjectName("hub_name")
         header_layout.addWidget(name_label)
         
         if "author" in item:
             author_label = QLabel(f"by @{item['author']}")
-            author_label.setStyleSheet("color: #89B4FA; font-size: 13px; font-weight: 500;")
+            author_label.setObjectName("hub_author")
             header_layout.addWidget(author_label)
             
         if "version" in item:
             version_label = QLabel(f"v{item['version']}")
-            version_label.setStyleSheet("background-color: #181825; color: #A6E3A1; padding: 2px 6px; border-radius: 4px; font-size: 12px; font-weight: bold;")
+            version_label.setObjectName("hub_version")
             header_layout.addWidget(version_label)
             
         header_layout.addStretch()
         text_layout.addLayout(header_layout)
         
         desc_label = QLabel(item.get("desc", ""))
-        desc_label.setStyleSheet("color: #A0A0B0; font-size: 14px;")
+        desc_label.setObjectName("hub_desc")
         desc_label.setWordWrap(True)
         text_layout.addWidget(desc_label)
         
@@ -393,11 +555,15 @@ class AxiomHubDialog(QDialog):
         
         if file_path.exists():
             btn.setText("Applied")
-            btn.setStyleSheet("QPushButton { background-color: #10B981; color: white; font-weight: bold; padding: 8px 16px; border-radius: 6px; }")
+            btn.setProperty("status", "success")
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
             btn.setEnabled(False)
         else:
             btn.setText("Install")
-            btn.setStyleSheet("QPushButton { background-color: #3B82F6; color: white; font-weight: bold; padding: 8px 16px; border-radius: 6px; } QPushButton:hover { background-color: #2563EB; }")
+            btn.setProperty("status", "info")
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
             btn.setEnabled(True)
 
     def _install_theme(self, item: dict, btn: QPushButton):
@@ -424,10 +590,106 @@ class AxiomHubDialog(QDialog):
             mgr.apply_theme(app, theme_id)
         else:
             btn.setText("Failed")
-            btn.setStyleSheet("QPushButton { background-color: #F28FAD; color: white; font-weight: bold; padding: 8px 16px; border-radius: 6px; }")
+            btn.setProperty("status", "danger")
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
             btn.setEnabled(False)
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Theme Installation Failed", f"Validation failed for theme '{theme_id}':\n{status}")
             
         if thread in self._install_theme_threads:
             self._install_theme_threads.remove(thread)
+
+    def _init_swarm_tab(self):
+        from PySide6.QtWidgets import QInputDialog, QMessageBox
+        import httpx
+        import asyncio
+        from axiom.network.p2p_sync import get_receiver_protocol, set_receiver_pin, P2PSyncProtocol
+        
+        layout = QVBoxLayout(self.swarm_tab)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        
+        info_label = QLabel(
+            "Synchronize your AXIOM settings, themes, and personas securely across the LAN "
+            "or Tailscale mesh. Connections are end-to-end encrypted using AES-GCM and ECDH."
+        )
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+        
+        self.pin_label = QLabel("Not in pairing mode.")
+        self.pin_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.pin_label.setStyleSheet("font-size: 24px; font-weight: bold; margin: 20px;")
+        layout.addWidget(self.pin_label)
+        
+        btn_layout = QHBoxLayout()
+        
+        gen_btn = QPushButton("Generate Pairing Code (Receive)")
+        gen_btn.clicked.connect(self._generate_pin)
+        btn_layout.addWidget(gen_btn)
+        
+        link_btn = QPushButton("Link to Device (Send)")
+        link_btn.clicked.connect(self._link_device)
+        btn_layout.addWidget(link_btn)
+        
+        layout.addLayout(btn_layout)
+
+    def _generate_pin(self):
+        from axiom.network.p2p_sync import set_receiver_pin, P2PSyncProtocol
+        pin = P2PSyncProtocol.generate_pin()
+        set_receiver_pin(pin)
+        self.pin_label.setText(f"PIN: {pin[:3]}-{pin[3:]}\nWaiting for connection...")
+        
+    def _link_device(self):
+        from PySide6.QtWidgets import QInputDialog, QMessageBox
+        from axiom.network.p2p_sync import P2PSyncProtocol
+        import httpx
+        
+        ip, ok = QInputDialog.getText(self, "Link Device", "Enter Target IP (e.g., 100.x.x.x):")
+        if not ok or not ip:
+            return
+            
+        pin, ok = QInputDialog.getText(self, "Enter PIN", "Enter 6-digit PIN from target device:")
+        if not ok or not pin:
+            return
+            
+        pin = pin.replace("-", "").strip()
+        
+        def on_result(success, msg):
+            if success:
+                QMessageBox.information(self, "Success", msg)
+            else:
+                QMessageBox.critical(self, "Sync Failed", msg)
+                
+        self._sync_thread = SyncDeviceThread(ip, pin)
+        self._sync_thread.finished.connect(on_result)
+        self._sync_thread.start()
+
+class SyncDeviceThread(QThread):
+    finished = Signal(bool, str)
+    
+    def __init__(self, ip, pin):
+        super().__init__()
+        self.ip = ip
+        self.pin = pin
+        
+    def run(self):
+        import httpx
+        from axiom.network.p2p_sync import P2PSyncProtocol
+        try:
+            protocol = P2PSyncProtocol()
+            pub_pem = protocol.get_public_key_pem()
+            r1 = httpx.post(f"http://{self.ip}:11435/sync/pair", json={"public_key": pub_pem}, timeout=10.0)
+            if r1.status_code != 200:
+                raise Exception(f"Pairing rejected: {r1.text}")
+                
+            target_pub = r1.json()["public_key"]
+            protocol.derive_shared_key(target_pub, self.pin)
+            
+            payload = protocol.export_state()
+            r2 = httpx.post(f"http://{self.ip}:11435/sync/commit", json=payload, timeout=10.0)
+            if r2.status_code != 200:
+                raise Exception(f"Commit rejected: {r2.text}")
+                
+            self.finished.emit(True, "Synchronized successfully.")
+        except Exception as e:
+            self.finished.emit(False, str(e))

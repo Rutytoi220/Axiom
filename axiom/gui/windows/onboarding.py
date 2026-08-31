@@ -819,6 +819,7 @@ class OOBEWindow(QDialog):
     def _handoff(self) -> None:
         self.initialization_complete.emit()
         self.accept()
+        self.accept()
 
     # ------------------------------------------------------------------ #
     #  Safety guards

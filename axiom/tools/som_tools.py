@@ -27,13 +27,13 @@ from functools import partial
 from pathlib import Path
 from typing import Optional
 
-from axiom.tools import BaseTool, ToolParameter, ToolResult
+from axiom.tools.core import BaseTool, ToolParameter, ToolResult
 from axiom.vision.som_manager import SoMManager
 from axiom.services.os_controller.factory import get_os_controller
 
 logger = logging.getLogger(__name__)
 
-os_driver = get_os_controller()
+# os_driver removed in favor of dynamic loading
 
 # ── Singleton SoMManager ──────────────────────────────────────────────────────
 # Shared between both tools so click_tag always sees the tags from the most
@@ -281,9 +281,16 @@ class SomClickTool(BaseTool):
 
         x, y = coord
 
+        controller = get_os_controller()
+        if not controller.can_click:
+            return ToolResult(
+                success=False,
+                error="Error: Mouse automation is not supported on this specific Wayland compositor. Do not attempt to click again.",
+            )
+
         # ── Perform the click ─────────────────────────────────────────────────
         try:
-            os_driver.click(x, y, button, clicks)
+            controller.click(x, y, button, clicks)
         except Exception as exc:
             logger.error("SomClickTool: click failed at (%d, %d): %s", x, y, exc)
             return ToolResult(
@@ -328,8 +335,15 @@ class SomTypeTool(BaseTool):
         ))
 
     async def execute(self, text: str, **_kwargs) -> ToolResult:  # type: ignore[override]
+        controller = get_os_controller()
+        if not controller.can_type:
+            return ToolResult(
+                success=False,
+                error="Error: Keyboard automation is not supported on this specific Wayland compositor. Do not attempt to type again."
+            )
+            
         try:
-            os_driver.type_text(text)
+            controller.type_text(text)
             return ToolResult(
                 success=True,
                 output=f"Successfully typed: '{text}'"
@@ -363,8 +377,15 @@ class SomKeyTool(BaseTool):
         ))
 
     async def execute(self, key: str, **_kwargs) -> ToolResult:  # type: ignore[override]
+        controller = get_os_controller()
+        if not controller.can_type:
+            return ToolResult(
+                success=False,
+                error="Error: Keyboard automation is not supported on this specific Wayland compositor. Do not attempt to press keys again."
+            )
+            
         try:
-            os_driver.press_key(key)
+            controller.press_key(key)
             return ToolResult(
                 success=True,
                 output=f"Successfully pressed key: '{key}'"

@@ -9,7 +9,7 @@ Swarm Nodes.
 import asyncio
 import logging
 from functools import partial
-from axiom.tools import BaseTool, ToolParameter, ToolResult
+from axiom.tools.core import BaseTool, ToolParameter, ToolResult
 
 logger = logging.getLogger(__name__)
 

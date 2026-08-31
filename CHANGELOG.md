@@ -1,18 +1,16 @@
 # Changelog
 
-## [1.0.0] - 2026-07-23
+## [v11.3.0] - Production Hardening & CI/CD
+This release hardens the build system, wires in OTA capabilities, and eliminates UI teardown aborts for a pristine out-of-the-box experience.
 
 ### Added
-- **MCP Server Federation**: Added Server-Sent Events (SSE) transport layer for remote MCP server connections.
-- **Desktop Automation Macro Recorder**: Added visual dashboard for macro recording and live replay states over WebSocket EventBus.
-- **Autonomous SWE-Bench Benchmark Engine**: Integrated `swe_harness.py` with multi-agent consensus loop.
-- **Visual GUI Automation Loop**: Bridged Set-of-Mark vision pipeline with desktop automation engine.
-- **Type Hardening**: Comprehensive strict type annotations across the `axiom/` core library.
-- **System Hardening**: Graceful degradation under heavy load, robust Qdrant initialization lock management, and concurrent task isolation.
+- **Declarative Theme Engine:** Dynamic JSON-based theme registry loaded effortlessly into PySide6 `QSS` layouts without hardcoded hex colors.
+- **OTA Updater:** Implemented GitHub Release polling in `axiom/network/updater.py` to prompt users when a newer `AppImage` tag drops.
+- **OOBE Wizard:** Full Out-Of-Box Experience (`axiom/gui/widgets/oobe_wizard.py`) providing a guided setup for Local LLMs on first boot.
+- **Automated CI/CD:** GitHub Actions `release.yml` now runs headless PySide6 test suites (`QT_QPA_PLATFORM=offscreen`) and automatically builds/attaches the AppImage for tagged releases.
 
-### Changed
-- Refactored `axiom/perception/vision_pipeline.py` to use `mss` as a fallback on Linux if `pygetwindow` fails.
-- Fixed IO deadlocks by isolating daemon imports from the `CLI` entrypoint.
+### Fixed
+- **Headless PySide6 Test Architecture:** Resolved fatal C++ `SIGABRT` crashes on PyInstaller teardown by systematically yielding and `quit()`ing `QThread` instances within `AxiomHubDialog`.
+- **AppImage Build Resilience:** Fortified `scripts/build_appimage.sh` with correct `usr/share/applications` AppDir directory structure and explicit `set -e` failure trapping.
+- **Circuit Breakers:** `SystemHealthWatchdog` now survives nested permission errors silently rather than stalling the central EventBus.
 
-### Removed
-- Unused eager imports in `axiom/__init__.py`.

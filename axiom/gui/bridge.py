@@ -43,8 +43,10 @@ class AxiomBridge(QObject):
     token_received: Signal = Signal(str)
     tool_status_changed: Signal = Signal(str, str)
     telemetry_updated: Signal = Signal(dict)
+    telemetry_tick_received: Signal = Signal(dict)
     response_finished: Signal = Signal(str)
     error_occurred: Signal = Signal(str)
+    system_alert: Signal = Signal(str, str)
     request_gui_auth: Signal = Signal(str, str, dict)
     
     # Swarm Signals
@@ -59,6 +61,10 @@ class AxiomBridge(QObject):
     governor_approval_requested: Signal = Signal(str, dict)
     ui_widget_generated: Signal = Signal(dict)
     startup_service_update: Signal = Signal(dict)
+    lifecycle_state_changed: Signal = Signal(dict)
+    agent_loop_status: Signal = Signal(dict)
+    mcp_servers_updated: Signal = Signal(dict)
+    power_mode_changed: Signal = Signal(bool, str)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -217,12 +223,43 @@ class AxiomBridge(QObject):
         import json, asyncio
         asyncio.run_coroutine_threadsafe(self._client.websocket.send(json.dumps(event)), self._loop)
 
-    def send_reload_plugins(self) -> None:
-        if self._loop is None or not self._client.is_connected:
-            return
-        event = {"action": "reload_plugins"}
-        import json, asyncio
-        asyncio.run_coroutine_threadsafe(self._client.websocket.send(json.dumps(event)), self._loop)
+    def send_reload_plugins(self):
+        if self._loop and self._client:
+            asyncio.run_coroutine_threadsafe(
+                self._client.ws.send(json.dumps({"action": "reload_plugins"})), 
+                self._loop
+            )
+
+    def send_config_updated(self):
+        if self._loop and self._client and self._client.ws:
+            asyncio.run_coroutine_threadsafe(
+                self._client.ws.send(json.dumps({"action": "config_updated"})), 
+                self._loop
+            )
+
+    def send_add_mcp_server(self, name: str, command: str, args: list) -> None:
+        if self._loop and self._client and self._client.ws:
+            payload = {"action": "add_mcp_server", "name": name, "command": command, "args": args}
+            asyncio.run_coroutine_threadsafe(
+                self._client.ws.send(json.dumps(payload)), 
+                self._loop
+            )
+
+    def send_remove_mcp_server(self, name: str) -> None:
+        if self._loop and self._client and self._client.ws:
+            payload = {"action": "remove_mcp_server", "name": name}
+            asyncio.run_coroutine_threadsafe(
+                self._client.ws.send(json.dumps(payload)), 
+                self._loop
+            )
+
+    def send_get_mcp_status(self) -> None:
+        if self._loop and self._client and self._client.ws:
+            payload = {"action": "get_mcp_status"}
+            asyncio.run_coroutine_threadsafe(
+                self._client.ws.send(json.dumps(payload)), 
+                self._loop
+            )
 
     def set_strict_mode(self, enabled: bool) -> None:
         if self._loop is None or not self._client.is_connected:
@@ -258,6 +295,8 @@ class AxiomBridge(QObject):
                 self.tool_status_changed.emit(tool_id, f"{tool_id} completed.")
         elif event_type == "telemetry.update":
             self.telemetry_updated.emit(payload)
+        elif event_type == "system.telemetry.tick":
+            self.telemetry_tick_received.emit(payload)
         elif event_type == "orchestrator.finished":
             resp = payload.get("response", "")
             if self.session_id and resp and self._loop:
@@ -270,6 +309,8 @@ class AxiomBridge(QObject):
                     self.event_type = t
                     self.data = d
             self.synapse_event.emit(_Evt(event_type, payload))
+        elif event_type == "system.alert":
+            self.system_alert.emit(payload.get("level", "info"), payload.get("message", ""))
         elif event_type == "ui.widget_generated":
             self.ui_widget_generated.emit(payload)
         elif event_type == "governor.approval_requested":
@@ -278,6 +319,18 @@ class AxiomBridge(QObject):
             self.axiomfs_status.emit(payload.get("status", "Unknown"))
         elif event_type == "startup.service.update" or event_type == "startup.service.ready":
             self.startup_service_update.emit(payload)
+        elif event_type == "lifecycle.state_changed":
+            self.lifecycle_state_changed.emit(payload)
+        elif event_type == "agent.loop.status":
+            self.agent_loop_status.emit(payload)
+        elif event_type == "mcp.servers.updated":
+            self.mcp_servers_updated.emit(payload)
+        elif event_type == "system.power.throttled":
+            msg = "⚠️ **[POWER SAVING MODE ENABLED]:** Battery below 30%. AXIOM has autonomously downshifted to a lightweight cognitive model to preserve system power."
+            self.power_mode_changed.emit(True, msg)
+        elif event_type == "system.power.restored":
+            msg = "🔋 **[POWER RESTORED]:** Charger connected. AXIOM is reverting to the primary cognitive model."
+            self.power_mode_changed.emit(False, msg)
         elif event_type.startswith("swarm."):
             self._on_swarm_event(event_type, payload)
 

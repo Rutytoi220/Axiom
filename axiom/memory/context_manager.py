@@ -91,6 +91,18 @@ Returns:
         """Available tokens for input messages (max_tokens minus reserve)."""
         return self.max_tokens - self.reserve_tokens
 
+    def build_system_prompt(self, task: str, tool_schemas: List[Dict[str, Any]], intent: str) -> List[Dict[str, Any]]:
+        import json
+        from axiom.agents.prompts import _build_react_prompt, _build_tool_guidelines
+        
+        prompt = _build_react_prompt(intent)
+        prompt += "\n\n" + _build_tool_guidelines()
+        
+        if tool_schemas:
+            prompt += "\n\nAvailable Tools:\n" + json.dumps(tool_schemas, indent=2)
+            
+        return [{"role": "system", "content": prompt}]
+
     def build_context_window(self, system_messages: List[Dict[str, Any]], chat_history: List[Dict[str, Any]], current_task: str, retrieved_memories: Optional[List[Dict[str, Any]]]=None, observations: Optional[List[Dict[str, Any]]]=None) -> List[Dict[str, Any]]:
         """Assemble a prompt list that fits within the token budget.
 

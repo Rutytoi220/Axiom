@@ -21,12 +21,6 @@ from axiom.gui.styles.theme_manager import get_theme_manager
 from axiom.gui.widgets.swarm_pill import SwarmPill
 from axiom.gui.widgets.settings_dialog import SettingsDialog
 from axiom.gui.widgets.hub_dialog import AxiomHubDialog
-from axiom.gui.widgets.scheduler_ui import TemporalSchedulerDialog
-from axiom.services.scheduler import TemporalService
-from axiom.services.sys_watchdog import SystemHealthWatchdog
-from axiom.gui.widgets.synapse_graph import SynapseGraph
-from axiom.memory.projects import ProjectManager
-from axiom.gui.windows.project_dialog import ProjectDialog
 if TYPE_CHECKING:
     from axiom.gui.bridge import AxiomBridge
 logger = logging.getLogger(__name__)
@@ -330,7 +324,8 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(800, 600)
         self.resize(1000, 750)
         self._theme_manager = get_theme_manager()
-        
+
+        from axiom.memory.projects import ProjectManager
         self._project_manager = ProjectManager()
         self._current_project_id = "general"
         self._current_chat_id = None
@@ -372,9 +367,21 @@ class MainWindow(QMainWindow):
         
         main_layout.addWidget(self.splitter, 1)
         
+        from axiom.gui.widgets.health_radar import HealthRadarWidget
+        self.health_radar = HealthRadarWidget(self)
+        self.health_radar.setFixedWidth(280)
+        self.health_radar.hide()
+        main_layout.addWidget(self.health_radar)
+        
         self.settings_drawer = SettingsDrawer(self)
         main_layout.addWidget(self.settings_drawer)
         self._chat_display.settings_btn.clicked.connect(self.settings_drawer.toggle)
+        
+        # Add toggle for Health Radar
+        self.radar_btn = QPushButton("📡 Radar")
+        self.radar_btn.setCheckable(True)
+        self.radar_btn.clicked.connect(self.health_radar.setVisible)
+        self.sidebar.layout.addWidget(self.radar_btn)
 
         # ── Swarm Client ──────────────────────────────────────────────── #
         from axiom.gui.swarm_client import SwarmClient
@@ -402,7 +409,7 @@ class MainWindow(QMainWindow):
         self._connect_bridge()
         self._init_audio()
         self._init_tray()
-        self._init_hotkey()
+        QTimer.singleShot(0, self._init_hotkey)
         self._register_local_shortcuts()
         self._chat_display.add_bubble('assistant', 'AXIOM v11.2')
         
@@ -410,7 +417,7 @@ class MainWindow(QMainWindow):
         self._startup_status = QLabel("⏳ Background services starting...")
         self._startup_status.setProperty("status", "warning"); self._startup_status.setStyleSheet("font-size: 12px; font-weight: bold; padding-left: 10px;")
         self.statusBar().addWidget(self._startup_status)
-        
+
         self._apply_theme()
         self._theme_manager.theme_changed.connect(self._apply_theme)
 
@@ -419,7 +426,9 @@ class MainWindow(QMainWindow):
                 
     def _show_settings(self):
         dialog = SettingsDialog(self)
-        dialog.exec()
+        if dialog.exec():
+            if self._bridge and hasattr(self._bridge, 'send_config_updated'):
+                self._bridge.send_config_updated()
 
     def _show_hub(self):
         dialog = AxiomHubDialog(self)
@@ -507,8 +516,22 @@ class MainWindow(QMainWindow):
         super().showEvent(event)
         if hasattr(self, '_temporal_service'):
             self._temporal_service.start()
+        else:
+            try:
+                from axiom.services.scheduler import TemporalService
+                self._temporal_service = TemporalService()
+                self._temporal_service.start()
+            except Exception:
+                pass
         if hasattr(self, '_sys_watchdog'):
             self._sys_watchdog.start()
+        else:
+            try:
+                from axiom.services.sys_watchdog import SystemHealthWatchdog
+                self._sys_watchdog = SystemHealthWatchdog()
+                self._sys_watchdog.start()
+            except Exception:
+                pass
 
     def closeEvent(self, event) -> None:
         """Handle window close."""
@@ -761,6 +784,16 @@ class MainWindow(QMainWindow):
         self._bridge.response_finished.connect(self._on_response_finished)
         self._bridge.telemetry_updated.connect(self._on_telemetry)
         self._bridge.error_occurred.connect(self._on_error)
+        self._bridge.system_alert.connect(self._on_system_alert)
+        
+        # Health Radar Hooks
+        if hasattr(self._bridge, 'telemetry_tick_received'):
+            self._bridge.telemetry_tick_received.connect(self.health_radar.update_telemetry)
+        if hasattr(self._bridge, 'lifecycle_state_changed'):
+            self._bridge.lifecycle_state_changed.connect(self.health_radar.update_lifecycle)
+        if hasattr(self._bridge, 'startup_service_update'):
+            self._bridge.startup_service_update.connect(self.health_radar.update_service_status)
+            
         self._bridge.request_gui_auth.connect(self._on_request_gui_auth)
         self._bridge.swarm_status_changed.connect(self._on_swarm_status_changed)
         self._bridge.swarm_agent_started.connect(self._on_swarm_started)
@@ -774,6 +807,9 @@ class MainWindow(QMainWindow):
         self._bridge.ui_widget_generated.connect(self._on_widget_generated)
         pass
         self._bridge.startup_service_update.connect(self._on_startup_service_update)
+        self._bridge.lifecycle_state_changed.connect(self._on_lifecycle_state_changed)
+        self._bridge.agent_loop_status.connect(self._on_agent_loop_status)
+        self._bridge.power_mode_changed.connect(self._on_power_mode_changed)
 
     def _on_startup_service_update(self, payload: dict) -> None:
         service = payload.get("service")
@@ -796,6 +832,25 @@ class MainWindow(QMainWindow):
             self._startup_status.style().unpolish(self._startup_status)
             self._startup_status.style().polish(self._startup_status)
             QTimer.singleShot(5000, lambda: self._startup_status.hide())
+
+    def _on_lifecycle_state_changed(self, payload: dict) -> None:
+        new_state = payload.get("new_state", "")
+        if new_state == "READY":
+            self._startup_status.setText("✅ System Ready")
+            self._startup_status.setProperty("status", "success")
+            self._startup_status.style().unpolish(self._startup_status)
+            self._startup_status.style().polish(self._startup_status)
+            QTimer.singleShot(5000, lambda: self._startup_status.hide())
+        elif new_state == "DEGRADED":
+            self._startup_status.setText("⚠️ System Degraded")
+            self._startup_status.setProperty("status", "danger")
+            self._startup_status.style().unpolish(self._startup_status)
+            self._startup_status.style().polish(self._startup_status)
+        elif new_state == "GUI_READY":
+            self._startup_status.setText("⏳ Core initializing...")
+            self._startup_status.setProperty("status", "warning")
+            self._startup_status.style().unpolish(self._startup_status)
+            self._startup_status.style().polish(self._startup_status)
 
     def _on_axiomfs_status(self, status: str) -> None:
         self._status_axiomfs.setText(f'AxiomFS: {status}')
@@ -1023,6 +1078,23 @@ class MainWindow(QMainWindow):
             self._streaming_bubble = self._chat_display.add_bubble('assistant', self._streaming_text)
         self._chat_display._scroll_to_bottom()
 
+    @Slot(dict)
+    def _on_agent_loop_status(self, payload: dict) -> None:
+        if hasattr(self, '_chat_display'):
+            action = payload.get('action', f"AXIOM is reasoning (Step {payload.get('iteration', '?')})...")
+            self._chat_display.set_status(action)
+            
+    @Slot(bool, str)
+    def _on_power_mode_changed(self, throttled: bool, msg: str) -> None:
+        if hasattr(self, '_chat_display'):
+            bubble = self._chat_display.add_bubble('system', msg)
+            if bubble:
+                # Optional: Make the bubble visually distinct
+                if throttled:
+                    bubble.setStyleSheet("QFrame { background-color: #3b3010; border-left: 4px solid #ffcc00; }")
+                else:
+                    bubble.setStyleSheet("QFrame { background-color: #1a3320; border-left: 4px solid #00cc66; }")
+
     def _on_swarm_started(self, agent_name: str, task: str) -> None:
         if hasattr(self, '_swarm_hud'):
             self._chat_display.swarm_hud.add_pill(agent_name, task)
@@ -1047,7 +1119,9 @@ class MainWindow(QMainWindow):
             self._streaming_bubble.set_text(text)
         self._streaming_bubble = None
         self._streaming_text = ''
-        self._chat_display._scroll_to_bottom()
+        if hasattr(self, '_chat_display'):
+            self._chat_display.clear_status()
+            self._chat_display._scroll_to_bottom()
         
         # Save to JSON backend
         if hasattr(self, '_project_manager') and self._current_chat_id:
@@ -1068,6 +1142,12 @@ class MainWindow(QMainWindow):
             self._streaming_bubble = None
             self._streaming_text = ''
         self._chat_display.add_bubble('tool', f'⚠️ {message}')
+        self._chat_display._scroll_to_bottom()
+
+    @Slot(str, str)
+    def _on_system_alert(self, level: str, message: str) -> None:
+        icon = "🚨" if level == "danger" else "⚠️"
+        self._chat_display.add_bubble('assistant', f'{icon} **{message}**')
         self._chat_display._scroll_to_bottom()
 
     @Slot(bool, float)

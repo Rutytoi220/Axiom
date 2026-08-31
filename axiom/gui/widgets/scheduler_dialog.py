@@ -44,7 +44,7 @@ class SchedulerDialog(QDialog):
         layout.addWidget(desc)
 
         # Trigger List
-        self._add_toggle_row(layout, "🌌 Nightly REM Sleep", "Compacts GraphRAG memory at 03:00 AM.", "rem_sleep", True)
+        self._add_toggle_row(layout, "🌌 Nightly REM Sleep", "Compacts Relational Index memory at 03:00 AM.", "rem_sleep", True)
         self._add_toggle_row(layout, "🔋 Power Governor", "Dynamically throttles AI models when on battery power.", "power_gov", True)
         self._add_toggle_row(layout, "🔌 Hardware Interceptor", "Zero-trust sandbox for incoming USB/BLE mounts.", "hw_intercept", True)
         self._add_toggle_row(layout, "📂 Directory Watchdog", "Pre-computes responses based on file system events.", "watchdog", False)

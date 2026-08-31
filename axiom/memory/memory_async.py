@@ -81,9 +81,9 @@ Returns:
             await self._init_db_connection()
 
     async def _init_db_connection(self) -> None:
-        """Initialize database connection using AxiomDatabaseManager."""
-        from axiom.core.database import AxiomDatabaseManager
-        self._db_mgr = AxiomDatabaseManager(self.db_path)
+        """Initialize database connection using MemoryDatabaseManager."""
+        from axiom.memory.db import MemoryDatabaseManager
+        self._db_mgr = await MemoryDatabaseManager.get_instance(self.db_path)
         self._db = await self._db_mgr.get_connection()
         
         async with self._db.execute('PRAGMA user_version') as cursor:
@@ -91,15 +91,15 @@ Returns:
             current_version = row[0] if row else 0
         if current_version == 0:
             await self._db.executescript(_SCHEMA)
-            await self._db.execute('PRAGMA user_version = 2')
+            async with self._db.execute('PRAGMA user_version = 2'): pass
             await self._db.commit()
         elif current_version == 1:
             try:
-                await self._db.execute('ALTER TABLE memories ADD COLUMN retrieval_count INTEGER DEFAULT 0')
-                await self._db.execute('ALTER TABLE memories ADD COLUMN confidence_weight REAL DEFAULT 1.0')
-            except sqlite3.OperationalError:
+                async with self._db.execute('ALTER TABLE memories ADD COLUMN retrieval_count INTEGER DEFAULT 0'): pass
+                async with self._db.execute('ALTER TABLE memories ADD COLUMN confidence_weight REAL DEFAULT 1.0'): pass
+            except Exception:
                 pass
-            await self._db.execute('PRAGMA user_version = 2')
+            async with self._db.execute('PRAGMA user_version = 2'): pass
             await self._db.commit()
         if current_version > 2:
             raise sqlite3.DatabaseError(f'Database version {current_version} is higher than supported version 2. Please upgrade AXIOM.')
@@ -118,31 +118,28 @@ Returns:
             if count > 0:
                 return
             db = self._conn()
-            cursor = await db.execute('SELECT id, owner_id, owner_type, embedding_json, model FROM embeddings')
-            rows = await cursor.fetchall()
-            if not rows:
-                return
-            logger.info(f'Starting migration of {len(list(rows))} legacy semantic embeddings to Qdrant...')
-            for row in rows:
-                try:
-                    embedding = json.loads(row['embedding_json'])
-                    await asyncio.to_thread(vector_store.upsert, row['owner_id'], row['owner_type'], embedding, {'model': row['model']})
-                except Exception as e:
-                    logger.warning(f"Failed to migrate embedding {row['id']}: {e}")
-            logger.info('Successfully completed semantic embedding migration.')
+            async with db.execute('SELECT id, owner_id, owner_type, embedding_json, model FROM embeddings') as cursor:
+                rows = await cursor.fetchall()
+                if not rows:
+                    return
+                logger.info(f'Starting migration of {len(list(rows))} legacy semantic embeddings to Qdrant...')
+                for row in rows:
+                    try:
+                        embedding = json.loads(row['embedding_json'])
+                        await asyncio.to_thread(vector_store.upsert, row['owner_id'], row['owner_type'], embedding, {'model': row['model']})
+                    except Exception as e:
+                        logger.warning(f"Failed to migrate embedding {row['id']}: {e}")
+                logger.info('Successfully completed semantic embedding migration.')
         except Exception as e:
             logger.error(f'Migration to Qdrant failed: {e}')
 
     async def close(self) -> None:
-        """Auto-generated docstring.
-
-
-Returns:
-    Return value.
-"""
-        if self._db:
+        """Close database connection safely."""
+        if hasattr(self, '_db_mgr') and self._db_mgr:
+            await self._db_mgr.close()
+        elif self._db:
             await self._db.close()
-            self._db = None
+        self._db = None
         self._initialized = False
         import asyncio
         self._lock = asyncio.Lock()
@@ -174,11 +171,11 @@ Returns:
         now = time.time()
         tags_json = json.dumps(tags or [])
         value_json = json.dumps(value)
-        cursor = await db.execute('SELECT created_at FROM memories WHERE key = ?', (key,))
-        row = await cursor.fetchone()
-        created_at = float(row['created_at']) if row else now
-        await db.execute('INSERT OR REPLACE INTO memories\n            (key, value_json, tags_json, created_at, updated_at, ttl_seconds)\n            VALUES (?, ?, ?, ?, ?, ?)', (key, value_json, tags_json, created_at, now, ttl))
-        await db.commit()
+        async with db.execute('SELECT created_at FROM memories WHERE key = ?', (key,)) as cursor:
+            row = await cursor.fetchone()
+            created_at = float(row['created_at']) if row else now
+            async with db.execute('INSERT OR REPLACE INTO memories\n            (key, value_json, tags_json, created_at, updated_at, ttl_seconds)\n            VALUES (?, ?, ?, ?, ?, ?)', (key, value_json, tags_json, created_at, now, ttl)): pass
+            await db.commit()
 
     async def get(self, key: str) -> Any | None:
         """Auto-generated docstring.
@@ -191,13 +188,13 @@ Returns:
 """
         db = self._conn()
         now = time.time()
-        cursor = await db.execute('SELECT value_json FROM memories\n            WHERE key = ? AND (ttl_seconds IS NULL OR created_at + ttl_seconds > ?)', (key, now))
-        row = await cursor.fetchone()
-        if row is None:
-            return None
-        await db.execute('UPDATE memories SET retrieval_count = retrieval_count + 1 WHERE key = ?', (key,))
-        await db.commit()
-        return json.loads(row['value_json'])
+        async with db.execute('SELECT value_json FROM memories\n            WHERE key = ? AND (ttl_seconds IS NULL OR created_at + ttl_seconds > ?)', (key, now)) as cursor:
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            async with db.execute('UPDATE memories SET retrieval_count = retrieval_count + 1 WHERE key = ?', (key,)): pass
+            await db.commit()
+            return json.loads(row['value_json'])
 
     async def delete(self, key: str) -> bool:
         """Auto-generated docstring.
@@ -209,9 +206,9 @@ Returns:
     Return value.
 """
         db = self._conn()
-        cursor = await db.execute('DELETE FROM memories WHERE key = ?', (key,))
-        await db.commit()
-        return cursor.rowcount > 0
+        async with db.execute('DELETE FROM memories WHERE key = ?', (key,)) as cursor:
+            await db.commit()
+            return cursor.rowcount > 0
 
     async def search(self, tags: List[str]) -> List[Dict[str, Any]]:
         """Auto-generated docstring.
@@ -226,14 +223,14 @@ Returns:
             return []
         db = self._conn()
         now = time.time()
-        cursor = await db.execute('SELECT key, value_json, tags_json, created_at, updated_at\n            FROM memories WHERE ttl_seconds IS NULL OR created_at + ttl_seconds > ?', (now,))
-        rows = await cursor.fetchall()
-        results: List[Dict[str, Any]] = []
-        for row in rows:
-            stored_tags = json.loads(row['tags_json'])
-            if all((tag in stored_tags for tag in tags)):
-                results.append({'key': row['key'], 'value': json.loads(row['value_json']), 'tags': stored_tags, 'created_at': row['created_at'], 'updated_at': row['updated_at']})
-        return results
+        async with db.execute('SELECT key, value_json, tags_json, created_at, updated_at\n            FROM memories WHERE ttl_seconds IS NULL OR created_at + ttl_seconds > ?', (now,)) as cursor:
+            rows = await cursor.fetchall()
+            results: List[Dict[str, Any]] = []
+            for row in rows:
+                stored_tags = json.loads(row['tags_json'])
+                if all((tag in stored_tags for tag in tags)):
+                    results.append({'key': row['key'], 'value': json.loads(row['value_json']), 'tags': stored_tags, 'created_at': row['created_at'], 'updated_at': row['updated_at']})
+            return results
 
     async def search_by_tags(self, tags: List[str]) -> List[Dict[str, Any]]:
         """Auto-generated docstring.
@@ -255,9 +252,9 @@ Returns:
 """
         db = self._conn()
         now = time.time()
-        cursor = await db.execute('DELETE FROM memories WHERE ttl_seconds IS NOT NULL AND created_at + ttl_seconds < ?', (now,))
-        await db.commit()
-        return cursor.rowcount
+        async with db.execute('DELETE FROM memories WHERE ttl_seconds IS NOT NULL AND created_at + ttl_seconds < ?', (now,)) as cursor:
+            await db.commit()
+            return cursor.rowcount
 
     async def create_conversation(self, title: str='') -> str:
         """Auto-generated docstring.
@@ -270,7 +267,8 @@ Returns:
 """
         db = self._conn()
         conv_id = uuid.uuid4().hex
-        await db.execute('INSERT INTO conversations (id, title, updated_at) VALUES (?, ?, ?)', (conv_id, title, time.time()))
+        async with db.execute('INSERT INTO conversations (id, title, updated_at) VALUES (?, ?, ?)', (conv_id, title, time.time())):
+            pass
         await db.commit()
         return conv_id
 
@@ -288,8 +286,10 @@ Returns:
 """
         db = self._conn()
         msg_id = uuid.uuid4().hex
-        await db.execute('INSERT INTO messages (id, conversation_id, role, content, metadata_json)\n            VALUES (?, ?, ?, ?, ?)', (msg_id, conversation_id, role, content, json.dumps(metadata) if metadata else None))
-        await db.execute('UPDATE conversations SET updated_at = ? WHERE id = ?', (time.time(), conversation_id))
+        async with db.execute('INSERT INTO messages (id, conversation_id, role, content, metadata_json)\n            VALUES (?, ?, ?, ?, ?)', (msg_id, conversation_id, role, content, json.dumps(metadata) if metadata else None)):
+            pass
+        async with db.execute('UPDATE conversations SET updated_at = ? WHERE id = ?', (time.time(), conversation_id)):
+            pass
         await db.commit()
         return msg_id
 
@@ -304,9 +304,9 @@ Returns:
     Return value.
 """
         db = self._conn()
-        cursor = await db.execute('SELECT id, role, content, timestamp, metadata_json\n            FROM messages WHERE conversation_id = ?\n            ORDER BY rowid ASC LIMIT ?', (conversation_id, limit))
-        rows = await cursor.fetchall()
-        return [{'id': row['id'], 'role': row['role'], 'content': row['content'], 'timestamp': row['timestamp'], 'metadata': json.loads(row['metadata_json']) if row['metadata_json'] else None} for row in rows]
+        async with db.execute('SELECT id, role, content, timestamp, metadata_json\n            FROM messages WHERE conversation_id = ?\n            ORDER BY rowid ASC LIMIT ?', (conversation_id, limit)) as cursor:
+            rows = await cursor.fetchall()
+            return [{'id': row['id'], 'role': row['role'], 'content': row['content'], 'timestamp': row['timestamp'], 'metadata': json.loads(row['metadata_json']) if row['metadata_json'] else None} for row in rows]
 
     async def list_conversations(self, limit: int=50) -> List[Dict[str, Any]]:
         """Auto-generated docstring.
@@ -318,9 +318,9 @@ Returns:
     Return value.
 """
         db = self._conn()
-        cursor = await db.execute('SELECT id, title, created_at, updated_at FROM conversations ORDER BY updated_at DESC LIMIT ?', (limit,))
-        rows = await cursor.fetchall()
-        return [{'id': row['id'], 'title': row['title'], 'created_at': row['created_at'], 'updated_at': row['updated_at']} for row in rows]
+        async with db.execute('SELECT id, title, created_at, updated_at FROM conversations ORDER BY updated_at DESC LIMIT ?', (limit,)) as cursor:
+            rows = await cursor.fetchall()
+            return [{'id': row['id'], 'title': row['title'], 'created_at': row['created_at'], 'updated_at': row['updated_at']} for row in rows]
 
     async def save_summary(self, conversation_id: str, summary: str, msg_start: int, msg_end: int) -> None:
         """Auto-generated docstring.
@@ -335,7 +335,8 @@ Returns:
     Return value.
 """
         db = self._conn()
-        await db.execute('INSERT INTO summaries (conversation_id, summary, msg_start, msg_end)\n            VALUES (?, ?, ?, ?)', (conversation_id, summary, msg_start, msg_end))
+        async with db.execute('INSERT INTO summaries (conversation_id, summary, msg_start, msg_end)\n            VALUES (?, ?, ?, ?)', (conversation_id, summary, msg_start, msg_end)):
+            pass
         await db.commit()
 
     async def get_summaries(self, conversation_id: str) -> List[Dict[str, Any]]:
@@ -348,9 +349,9 @@ Returns:
     Return value.
 """
         db = self._conn()
-        cursor = await db.execute('SELECT id, summary, msg_start, msg_end, created_at\n            FROM summaries WHERE conversation_id = ?\n            ORDER BY msg_start ASC', (conversation_id,))
-        rows = await cursor.fetchall()
-        return [{'id': row['id'], 'summary': row['summary'], 'msg_start': row['msg_start'], 'msg_end': row['msg_end'], 'created_at': row['created_at']} for row in rows]
+        async with db.execute('SELECT id, summary, msg_start, msg_end, created_at\n            FROM summaries WHERE conversation_id = ?\n            ORDER BY msg_start ASC', (conversation_id,)) as cursor:
+            rows = await cursor.fetchall()
+            return [{'id': row['id'], 'summary': row['summary'], 'msg_start': row['msg_start'], 'msg_end': row['msg_end'], 'created_at': row['created_at']} for row in rows]
 
     async def store_embedding(self, owner_id: str, owner_type: str, embedding: List[float], model: str='') -> None:
         """Auto-generated docstring.
@@ -391,9 +392,9 @@ Returns:
     Return value.
 """
         db = self._conn()
-        cursor = await db.execute('INSERT INTO events (event_name, payload_json, source, timestamp) VALUES (?, ?, ?, ?)', (event_name, json.dumps(payload) if payload is not None else None, source, time.time()))
-        await db.commit()
-        return int(cursor.lastrowid) if cursor.lastrowid is not None else 0
+        async with db.execute('INSERT INTO events (event_name, payload_json, source, timestamp) VALUES (?, ?, ?, ?)', (event_name, json.dumps(payload) if payload is not None else None, source, time.time())) as cursor:
+            await db.commit()
+            return int(cursor.lastrowid) if cursor.lastrowid is not None else 0
 
     async def get_events(self, event_name: Optional[str]=None, source: Optional[str]=None, limit: int=100) -> List[Dict[str, Any]]:
         """Auto-generated docstring.
@@ -417,9 +418,9 @@ Returns:
             params.append(source)
         query += ' ORDER BY timestamp DESC LIMIT ?'
         params.append(limit)
-        cursor = await db.execute(query, tuple(params))
-        rows = await cursor.fetchall()
-        return [{'id': row['id'], 'event_name': row['event_name'], 'payload': json.loads(row['payload_json']) if row['payload_json'] else None, 'source': row['source'], 'timestamp': row['timestamp']} for row in rows]
+        async with db.execute(query, tuple(params)) as cursor:
+            rows = await cursor.fetchall()
+            return [{'id': row['id'], 'event_name': row['event_name'], 'payload': json.loads(row['payload_json']) if row['payload_json'] else None, 'source': row['source'], 'timestamp': row['timestamp']} for row in rows]
 
     async def create_agent_session(self, agent_name: str, task: str) -> int:
         """Auto-generated docstring.
@@ -432,9 +433,9 @@ Returns:
     Return value.
 """
         db = self._conn()
-        cursor = await db.execute("INSERT INTO agent_sessions (agent_name, task, started_at, status) VALUES (?, ?, ?, 'running')", (agent_name, task, time.time()))
-        await db.commit()
-        return int(cursor.lastrowid) if cursor.lastrowid is not None else 0
+        async with db.execute("INSERT INTO agent_sessions (agent_name, task, started_at, status) VALUES (?, ?, ?, 'running')", (agent_name, task, time.time())) as cursor:
+            await db.commit()
+            return int(cursor.lastrowid) if cursor.lastrowid is not None else 0
 
     async def log_tool_call(self, session_id: int, tool_name: str, params: Any, result: Any, duration_ms: int, success: bool, error_message: Optional[str]=None) -> int:
         """Auto-generated docstring.
@@ -452,9 +453,9 @@ Returns:
     Return value.
 """
         db = self._conn()
-        cursor = await db.execute('INSERT INTO tool_calls\n            (session_id, tool_name, params_json, result_json,\n             duration_ms, success, error_message, timestamp)\n            VALUES (?, ?, ?, ?, ?, ?, ?, ?)', (session_id, tool_name, json.dumps(params), json.dumps(result), duration_ms, success, error_message, time.time()))
-        await db.commit()
-        return int(cursor.lastrowid) if cursor.lastrowid is not None else 0
+        async with db.execute('INSERT INTO tool_calls\n            (session_id, tool_name, params_json, result_json,\n             duration_ms, success, error_message, timestamp)\n            VALUES (?, ?, ?, ?, ?, ?, ?, ?)', (session_id, tool_name, json.dumps(params), json.dumps(result), duration_ms, success, error_message, time.time())) as cursor:
+            await db.commit()
+            return int(cursor.lastrowid) if cursor.lastrowid is not None else 0
 
     async def get_session_tool_calls(self, session_id: int) -> List[Dict[str, Any]]:
         """Auto-generated docstring.
@@ -466,9 +467,9 @@ Returns:
     Return value.
 """
         db = self._conn()
-        cursor = await db.execute('SELECT tool_name, params_json, result_json, duration_ms, success, error_message\n            FROM tool_calls WHERE session_id = ? ORDER BY timestamp', (session_id,))
-        rows = await cursor.fetchall()
-        return [{'tool_name': row['tool_name'], 'params': json.loads(row['params_json']) if row['params_json'] else {}, 'result': json.loads(row['result_json']) if row['result_json'] else None, 'duration_ms': row['duration_ms'], 'success': bool(row['success']), 'error_message': row['error_message']} for row in rows]
+        async with db.execute('SELECT tool_name, params_json, result_json, duration_ms, success, error_message\n            FROM tool_calls WHERE session_id = ? ORDER BY timestamp', (session_id,)) as cursor:
+            rows = await cursor.fetchall()
+            return [{'tool_name': row['tool_name'], 'params': json.loads(row['params_json']) if row['params_json'] else {}, 'result': json.loads(row['result_json']) if row['result_json'] else None, 'duration_ms': row['duration_ms'], 'success': bool(row['success']), 'error_message': row['error_message']} for row in rows]
 
     async def complete_agent_session(self, session_id: int, result: Any, success: bool=True) -> None:
         """Auto-generated docstring.
@@ -483,5 +484,6 @@ Returns:
 """
         db = self._conn()
         status = 'completed' if success else 'failed'
-        await db.execute('UPDATE agent_sessions SET completed_at = ?, result_json = ?, status = ? WHERE id = ?', (time.time(), json.dumps(result), status, session_id))
+        async with db.execute('UPDATE agent_sessions SET completed_at = ?, result_json = ?, status = ? WHERE id = ?', (time.time(), json.dumps(result), status, session_id)):
+            pass
         await db.commit()

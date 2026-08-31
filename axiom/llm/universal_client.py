@@ -1,6 +1,6 @@
 import logging
 import json
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 import litellm
 from axiom.engine.inference_scheduler import get_scheduler
 from axiom.llm.federation_client import HybridFederationClient
@@ -291,12 +291,15 @@ Returns:
         """Stub for backward compatibility with OllamaClient."""
         pass
 
-    def embed(self, text: str, model: str = "ollama/nomic-embed-text") -> List[float]:
-        """Compute embeddings for a string."""
+    def embed(self, text: Union[str, List[str]], model: str = "ollama/nomic-embed-text") -> Union[List[float], List[List[float]]]:
+        """Compute embeddings for a string or list of strings in batch."""
         try:
             api_base = 'http://localhost:11434' if model.startswith('ollama/') else None
-            response = litellm.embedding(model=model, input=[text], api_base=api_base)
-            return response.data[0]["embedding"]
+            inputs = [text] if isinstance(text, str) else text
+            response = litellm.embedding(model=model, input=inputs, api_base=api_base)
+            if isinstance(text, str):
+                return response.data[0]["embedding"]
+            return [item["embedding"] for item in response.data]
         except Exception as e:
             logger.error(f'Embedding failed: {e}')
-            return []
+            return [] if isinstance(text, str) else [[] for _ in text]

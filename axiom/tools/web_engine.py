@@ -2,7 +2,7 @@ import logging
 import asyncio
 from typing import Any, Dict, Optional
 from pydantic import BaseModel, Field
-from axiom.tools import BaseTool
+from axiom.tools.core import BaseTool
 
 logger = logging.getLogger(__name__)
 

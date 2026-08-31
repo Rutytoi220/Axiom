@@ -8,7 +8,7 @@ from axiom.core.registry import Registry
 from axiom.core.context import ExecutionContext
 from axiom.core.recorder import FlightRecorder
 import os
-from axiom.perception.watcher import ProactiveWatcher, OSWatcher
+from axiom.perception.watcher import ProactiveWatcher, SystemHealthWatchdog
 from axiom.perception.audio_queue import AudioDaemon
 
 logger = logging.getLogger(__name__)
@@ -50,7 +50,7 @@ class Engine:
         # Proactive Kernel
         workspaces = [os.getcwd()]
         self.proactive_watcher = ProactiveWatcher(self.event_bus, workspaces)
-        self.os_watcher = OSWatcher(self.event_bus)
+        self.os_watcher = SystemHealthWatchdog(self.event_bus)
         
         # Audio Daemon
         self.audio_daemon = AudioDaemon()
@@ -65,6 +65,7 @@ class Engine:
         self.event_bus.subscribe("system.shutdown", self._handle_shutdown)
         self.event_bus.subscribe("llm.response.completed", self._handle_llm_response)
         self.event_bus.subscribe("system.anomaly", self._handle_system_anomaly)
+        self.event_bus.subscribe("system.idle.rem_sleep", self._handle_rem_sleep)
 
     def _update_activity(self, event: Event) -> None:
         """Update last activity timestamp."""
@@ -110,9 +111,53 @@ class Engine:
             
             if response:
                 logger.warning(f"OSWatcher Fix Recommended: {response}")
-                self.audio_daemon.send_tts(response)
+                self._log_and_notify("system.anomaly.handled", {"status": "success", "response": response})
+            
         except Exception as e:
-            logger.error(f"Failed to process system anomaly: {e}")
+            logger.error(f"Failed to handle system anomaly: {e}")
+            
+    def _handle_rem_sleep(self, event: Event) -> None:
+        """Trigger Deep Memory Consolidation."""
+        if getattr(self.orchestrator, '_power_throttled', False):
+            logger.info("DeepMemoryConsolidation paused due to power throttling.")
+            return
+        try:
+            from axiom.memory.rem_sleep import DeepMemoryConsolidation
+            import asyncio
+            
+            consolidation = DeepMemoryConsolidation(self.event_bus)
+            
+            graph_nodes = []
+            keys = []
+            if hasattr(self.memory, 'list_keys') and hasattr(self.memory, 'get'):
+                keys = self.memory.list_keys()
+                for k in keys:
+                    v = self.memory.get(k)
+                    if isinstance(v, dict):
+                        v['id'] = k
+                        graph_nodes.append(v)
+            else:
+                graph_nodes = [{"id": "mock_1", "text": "Duplicate string A", "created_at": time.time() - 86400 * 40},
+                               {"id": "mock_2", "text": "DUPLICATE string a", "created_at": time.time()}]
+                
+            async def run_rem():
+                consolidated = await consolidation.trigger_rem_sleep(graph_nodes)
+                if hasattr(self.memory, 'set'):
+                    for node in consolidated:
+                        self.memory.set(node['id'], node)
+                if hasattr(self.memory, 'delete'):
+                    surviving_ids = {n['id'] for n in consolidated}
+                    for k in keys:
+                        if k not in surviving_ids:
+                            self.memory.delete(k)
+                            
+            try:
+                loop = asyncio.get_running_loop()
+                asyncio.run_coroutine_threadsafe(run_rem(), loop)
+            except RuntimeError:
+                asyncio.run(run_rem())
+        except Exception as e:
+            logger.error(f"Failed to run REM Sleep consolidation: {e}")
 
     def _handle_llm_response(self, event: Event) -> None:
         """Push LLM responses to TTS queue."""

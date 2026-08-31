@@ -5,7 +5,7 @@ Provide a clear description of the changes introduced by this PR. Link any relev
 - [ ] Kernel / Self-Patcher
 - [ ] AxiomFS (FUSE)
 - [ ] Multimodal HUD (GUI)
-- [ ] Security / Sandbox (bwrap/QEMU)
+- [ ] Security / Sandbox
 - [ ] Swarm / Networking
 - [ ] MCP Server
 - [ ] Other

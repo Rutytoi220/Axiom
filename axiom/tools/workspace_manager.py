@@ -3,7 +3,7 @@ import json
 import shutil
 import logging
 from typing import Dict, Any
-from axiom.tools import BaseTool
+from axiom.tools.core import BaseTool
 
 logger = logging.getLogger(__name__)
 

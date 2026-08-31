@@ -108,7 +108,7 @@ class TransactionalMemoryManager:
         return merged[:top_k]
 
     def _extract_and_inject_graph(self, text: str):
-        """Tier 1 basic regex extraction for GraphRAG."""
+        """Tier 1 basic regex extraction for Relational Index."""
         # Simple extraction for demo: look for "service" failing and dependencies
         # Example pattern: "nginx.service failed due to port 80 conflict"
         

@@ -185,6 +185,30 @@ def run_gui() -> None:
             window.update_model_label(config.ollama_model)
         tray = _build_tray(app, window)
         window.show()
+        # Emit GUI_READY lifecycle event
+        from axiom.core.lifecycle import AppLifecycleState
+        try:
+            loop.call_soon(
+                lambda: bridge._client and None  # ensure loop is alive
+            )
+        except Exception:
+            pass
+        # Publish lifecycle GUI_READY on daemon-side if connected
+        import json
+        if bridge._client and hasattr(bridge._client, 'websocket'):
+            try:
+                asyncio.ensure_future(
+                    bridge._client.websocket.send(json.dumps({
+                        "type": "publish",
+                        "event": {
+                            "event_type": "lifecycle.state_changed",
+                            "source": "gui",
+                            "data": {"new_state": AppLifecycleState.GUI_READY.value}
+                        }
+                    }))
+                )
+            except Exception:
+                pass
 
     # Check first launch via new unified config
     if not config.oobe_completed:

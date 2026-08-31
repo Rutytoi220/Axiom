@@ -85,3 +85,156 @@ class ThermalGovernor:
                     logger.info(f"ThermalGovernor: Operating parameters nominal (CPU Avg: {cpu_temp:.1f}C). Throttling disengaged.")
                     self.is_throttled = False
                     self.bus.publish_sync("system.throttle", {"active": False, "reasons": []})
+
+import json
+import time
+import uuid
+import asyncio
+import aiosqlite
+from pathlib import Path
+
+class ApprovalQueue:
+    """SQLite-backed queue for pending high-risk tool actions."""
+    
+    def __init__(self, db_path: str = None):
+        if not db_path:
+            db_path = str(Path.home() / ".axiom" / "approval_queue.db")
+        self.db_path = db_path
+        self._db_initialized = False
+        self._use_fallback = False
+        self._fallback_queue = {}
+
+    async def _ensure_init(self):
+        if self._use_fallback or self._db_initialized:
+            return
+        try:
+            await self._init_db()
+            self._db_initialized = True
+        except Exception as e:
+            logger.error(f"ApprovalQueue initialization failed: {e}. Falling back to memory.")
+            self._use_fallback = True
+
+    async def _init_db(self):
+        async with aiosqlite.connect(self.db_path, timeout=5.0) as db:
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS pending_actions (
+                    id TEXT PRIMARY KEY,
+                    tool_name TEXT,
+                    arguments TEXT,
+                    status TEXT,
+                    timestamp REAL
+                )
+            ''')
+            await db.commit()
+
+    async def _execute_with_retry(self, operation):
+        if self._use_fallback:
+            return None
+        
+        last_exception = None
+        for attempt in range(3):
+            try:
+                return await operation()
+            except Exception as e:
+                last_exception = e
+                await asyncio.sleep(0.1 * (2 ** attempt))
+                
+        logger.error(f"SQLite operation failed after 3 retries: {last_exception}. Switching to memory fallback.")
+        self._use_fallback = True
+        return None
+
+    async def enqueue(self, tool_name: str, arguments: dict) -> str:
+        await self._ensure_init()
+        action_id = str(uuid.uuid4())
+        
+        if self._use_fallback:
+            self._fallback_queue[action_id] = {
+                "id": action_id, "tool_name": tool_name, 
+                "arguments": arguments, "status": "pending", 
+                "timestamp": time.time()
+            }
+            return action_id
+
+        async def _do_insert():
+            async with aiosqlite.connect(self.db_path, timeout=5.0) as db:
+                await db.execute(
+                    "INSERT INTO pending_actions (id, tool_name, arguments, status, timestamp) VALUES (?, ?, ?, ?, ?)",
+                    (action_id, tool_name, json.dumps(arguments), "pending", time.time())
+                )
+                await db.commit()
+                return action_id
+
+        result = await self._execute_with_retry(_do_insert)
+        if result is None and self._use_fallback:
+            # retry failed and fell back
+            self._fallback_queue[action_id] = {
+                "id": action_id, "tool_name": tool_name, 
+                "arguments": arguments, "status": "pending", 
+                "timestamp": time.time()
+            }
+            return action_id
+        return result
+
+    async def list_pending(self) -> list:
+        await self._ensure_init()
+        if self._use_fallback:
+            return [v for v in self._fallback_queue.values() if v["status"] == "pending"]
+
+        async def _do_list():
+            async with aiosqlite.connect(self.db_path, timeout=5.0) as db:
+                async with db.execute("SELECT id, tool_name, arguments, timestamp FROM pending_actions WHERE status = 'pending'") as cursor:
+                    rows = await cursor.fetchall()
+                    return [{"id": r[0], "tool_name": r[1], "arguments": json.loads(r[2]), "timestamp": r[3]} for r in rows]
+                    
+        result = await self._execute_with_retry(_do_list)
+        if result is None and self._use_fallback:
+            return [v for v in self._fallback_queue.values() if v["status"] == "pending"]
+        return result or []
+
+    async def resolve(self, action_id: str, approved: bool):
+        await self._ensure_init()
+        status = "approved" if approved else "denied"
+        
+        if self._use_fallback:
+            if action_id in self._fallback_queue:
+                self._fallback_queue[action_id]["status"] = status
+            return
+
+        async def _do_resolve():
+            async with aiosqlite.connect(self.db_path, timeout=5.0) as db:
+                await db.execute("UPDATE pending_actions SET status = ? WHERE id = ?", (status, action_id))
+                await db.commit()
+                return True
+
+        await self._execute_with_retry(_do_resolve)
+
+class ActionGovernor:
+    """Evaluates whether an action requires explicit user approval."""
+    
+    HIGH_RISK_TOOLS = {"shell", "bash", "execute_command", "file_write", "desktop_automation", "system_reboot"}
+
+    def __init__(self, queue: ApprovalQueue = None):
+        self.queue = queue or ApprovalQueue()
+
+    async def check_action(self, tool_name: str, arguments: dict, auth_mode: str, user_present: bool = False) -> tuple[bool, str]:
+        """
+        Check if an action can proceed immediately.
+        Returns (is_approved, action_id_if_queued_or_reason).
+        """
+        if auth_mode == "AUTOPILOT":
+            return True, "Auto-approved by policy"
+            
+        is_high_risk = tool_name in self.HIGH_RISK_TOOLS
+        
+        if auth_mode == "STRICT" or is_high_risk:
+            if user_present:
+                # We assume the caller handles synchronous GUI/CLI prompts if user_present is True
+                # Allow it to proceed to the actual tool execution where GUI prompting happens
+                return True, "Delegating to interactive tool prompt"
+            else:
+                # User is away. Do not hang. Queue it and yield.
+                action_id = await self.queue.enqueue(tool_name, arguments)
+                return False, f"Queued for approval (ID: {action_id})"
+                
+        # BASIC mode + non-high-risk tool -> allow
+        return True, "Allowed by policy"

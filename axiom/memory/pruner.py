@@ -3,127 +3,157 @@
 Runs a daily sweep to summarize and compress old messages, and run VACUUM on the database.
 """
 import time
-import threading
 import logging
 import asyncio
 import json
 import uuid
 from typing import Any, Optional
-from axiom.core.async_bridge import run_sync
 
 logger = logging.getLogger(__name__)
 
 class MemoryPrunerDaemon:
-    """Runs a daily check to prune, summarize, and vacuum the memory database."""
+    """Runs an hourly check to prune, summarize, and vacuum the memory database based on quota limits."""
 
-    def __init__(self, memory_store: Any, llm: Optional[Any] = None, interval_days: float = 1.0, retain_days: float = 30.0):
+    def __init__(self, memory_store: Any, llm: Optional[Any] = None):
         self._memory_store = memory_store
         self._llm = llm
-        self._interval_seconds = interval_days * 24 * 3600
-        self._retain_seconds = retain_days * 24 * 3600
+        self._task = None
         self._is_running = False
-        self._thread = None
 
     def start(self) -> None:
         if self._is_running:
             return
         self._is_running = True
-        self._thread = threading.Thread(target=self._monitor_loop, daemon=True, name="MemoryPrunerDaemon")
-        self._thread.start()
-        logger.info(f"MemoryPrunerDaemon started (interval: {self._interval_seconds}s, retain: {self._retain_seconds}s)")
+        try:
+            loop = asyncio.get_running_loop()
+            self._task = loop.create_task(self._monitor_loop())
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self._task = loop.create_task(self._monitor_loop())
+        logger.info("MemoryPrunerDaemon started (interval: 3600s)")
 
     def stop(self) -> None:
         self._is_running = False
-        if self._thread:
-            self._thread.join(timeout=1.0)
+        if self._task:
+            self._task.cancel()
 
-    def _monitor_loop(self) -> None:
-        time.sleep(60)
+    async def _monitor_loop(self) -> None:
+        await asyncio.sleep(5)  # initial delay
         while self._is_running:
-            logger.info("MemoryPrunerDaemon: Running daily prune sweep...")
+            logger.info("MemoryPrunerDaemon: Running prune sweep...")
             try:
-                run_sync(self._prune_and_vacuum())
+                await self._prune_and_vacuum()
+            except asyncio.CancelledError:
+                break
             except Exception as e:
                 logger.error(f"MemoryPrunerDaemon failed during prune cycle: {e}", exc_info=True)
             
-            elapsed = 0.0
-            while elapsed < self._interval_seconds and self._is_running:
-                time.sleep(60)
-                elapsed += 60
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                break
 
     async def _prune_and_vacuum(self) -> None:
-        cutoff_time = time.time() - self._retain_seconds
-        db = self._memory_store.store._conn() if hasattr(self._memory_store, "store") else self._memory_store._conn()
+        from axiom.config import get_config
+        config = get_config()
+        quota = getattr(config, 'max_vector_memories', 5000)
+
+        # Get the database path dynamically from the store
+        db_path = self._memory_store.store.db_path if hasattr(self._memory_store, "store") else self._memory_store.db_path
+        from axiom.memory.db import MemoryDatabaseManager
+        db_mgr = await MemoryDatabaseManager.get_instance(db_path)
+        db = await db_mgr.get_connection()
         
-        cursor = await db.execute(
-            "SELECT id, conversation_id, role, content FROM messages WHERE timestamp < ? ORDER BY conversation_id, timestamp ASC",
-            (cutoff_time,)
-        )
-        rows = await cursor.fetchall()
+        # 1. Count current memories
+        async with db.execute("SELECT COUNT(id) FROM messages") as cursor:
+            row = await cursor.fetchone()
+            total_memories = row[0] if row else 0
+
+        if total_memories <= quota:
+            logger.info(f"MemoryPrunerDaemon: Usage ({total_memories}) is under quota ({quota}).")
+            return
+
+        excess = total_memories - quota
+        to_prune = max(1000, excess)
+        logger.warning(f"MemoryPrunerDaemon: Quota exceeded! ({total_memories} > {quota}). Pruning {to_prune} oldest memories.")
+
+        import aiosqlite
+        db.row_factory = aiosqlite.Row
+
+        # 2. Identify oldest episodic memories
+        async with db.execute(
+            "SELECT id, conversation_id, role, content, timestamp FROM messages ORDER BY timestamp ASC LIMIT ?",
+            (to_prune,)
+        ) as cursor:
+            rows = await cursor.fetchall()
         
         if not rows:
-            logger.info("MemoryPrunerDaemon: No old messages to prune.")
-        else:
-            conversations = {}
-            for row in rows:
-                c_id = row["conversation_id"]
-                if c_id not in conversations:
-                    conversations[c_id] = []
-                conversations[c_id].append(row)
-            
-            for c_id, msgs in conversations.items():
-                if len(msgs) < 2:
-                    continue
+            return
 
-                logger.info(f"MemoryPrunerDaemon: Pruning {len(msgs)} old messages from conversation {c_id}")
-                
-                transcript = []
-                msg_ids_to_delete = []
-                for m in msgs:
-                    role = m["role"].upper() if m["role"] else "UNKNOWN"
-                    content = m["content"] or ""
-                    transcript.append(f"{role}: {content}")
-                    msg_ids_to_delete.append(m["id"])
-                
-                summary = "[Archived Context: No LLM available to summarize]"
-                if self._llm:
-                    prompt = (
-                        "Summarize the following old chat messages into a single dense context block. "
-                        "Focus on key facts, decisions, and important information. Keep it concise.\n\n" +
-                        "\n".join(transcript)
-                    )
-                    messages = [{"role": "user", "content": prompt}]
-                    response = None
-                    try:
-                        if hasattr(self._llm, "chat_with_tools"):
-                            response_msg = await asyncio.to_thread(self._llm.chat_with_tools, messages, [], 60.0)
-                            response = response_msg.get("content", "") if isinstance(response_msg, dict) else str(response_msg)
-                        elif hasattr(self._llm, "chat"):
-                            response = await asyncio.to_thread(self._llm.chat, messages, 60.0)
-                        
-                        if response:
-                            summary = response.strip()
-                    except Exception as e:
-                        logger.error(f"MemoryPrunerDaemon: LLM summarization failed: {e}")
-                
-                sys_msg_id = uuid.uuid4().hex
-                formatted_date = time.strftime("%Y-%m-%d", time.localtime(cutoff_time))
-                sys_content = f"[Archived Context before {formatted_date}]\n{summary}"
-                await db.execute(
-                    "INSERT INTO messages (id, conversation_id, role, content, metadata_json, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
-                    (sys_msg_id, c_id, "system", sys_content, json.dumps({"pruned_messages": len(msgs)}), cutoff_time)
+        conversations = {}
+        for row in rows:
+            c_id = row["conversation_id"]
+            if c_id not in conversations:
+                conversations[c_id] = []
+            conversations[c_id].append(row)
+        
+        for c_id, msgs in conversations.items():
+            transcript = []
+            msg_ids_to_delete = []
+            for m in msgs:
+                role = m["role"].upper() if m["role"] else "UNKNOWN"
+                content = m["content"] or ""
+                transcript.append(f"{role}: {content}")
+                msg_ids_to_delete.append(m["id"])
+            
+            summary = "[Archived Context: Dense Summary generated by Pruner]"
+            if self._llm:
+                prompt = (
+                    "Summarize the following old chat messages into a single dense context block. "
+                    "Focus on key facts, decisions, and important information. Keep it concise.\n\n" +
+                    "\n".join(transcript)
                 )
-                
-                for chunk in [msg_ids_to_delete[i:i + 100] for i in range(0, len(msg_ids_to_delete), 100)]:
-                    placeholders = ",".join("?" * len(chunk))
-                    await db.execute(f"DELETE FROM messages WHERE id IN ({placeholders})", chunk)
-                
-                await db.commit()
-                logger.info(f"MemoryPrunerDaemon: Condensed {len(msgs)} messages into 1 for conversation {c_id}")
+                messages = [{"role": "user", "content": prompt}]
+                response = None
+                try:
+                    if hasattr(self._llm, "chat_with_tools"):
+                        response_msg = await asyncio.to_thread(self._llm.chat_with_tools, messages, [], 60.0)
+                        response = response_msg.get("content", "") if isinstance(response_msg, dict) else str(response_msg)
+                    elif hasattr(self._llm, "chat"):
+                        response = await asyncio.to_thread(self._llm.chat, messages, 60.0)
+                    
+                    if response:
+                        summary = response.strip()
+                except Exception as e:
+                    logger.error(f"MemoryPrunerDaemon: LLM summarization failed: {e}")
+            
+            # 3. Purge and Replace
+            sys_msg_id = uuid.uuid4().hex
+            cutoff_time = msgs[-1]["timestamp"]
+            formatted_date = time.strftime("%Y-%m-%d", time.localtime(cutoff_time))
+            sys_content = f"[Archived Context before {formatted_date}]\n{summary}"
+            
+            # Safe Context Managers for Execution
+            async with db.execute(
+                "INSERT INTO messages (id, conversation_id, role, content, metadata_json, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+                (sys_msg_id, c_id, "system", sys_content, json.dumps({"pruned_messages": len(msgs)}), cutoff_time)
+            ) as _:
+                pass
+            
+            for chunk in [msg_ids_to_delete[i:i + 100] for i in range(0, len(msg_ids_to_delete), 100)]:
+                placeholders = ",".join("?" * len(chunk))
+                async with db.execute(f"DELETE FROM messages WHERE id IN ({placeholders})", chunk) as _:
+                    pass
+            
+        await db.commit()
+        logger.info("MemoryPrunerDaemon: Purge complete.")
         
         logger.info("MemoryPrunerDaemon: Running VACUUM on database...")
         try:
-            await db.execute("VACUUM")
+            async with db.execute("VACUUM") as _:
+                pass
             logger.info("MemoryPrunerDaemon: VACUUM completed successfully.")
         except Exception as e:
             logger.error(f"MemoryPrunerDaemon: VACUUM failed: {e}")
+

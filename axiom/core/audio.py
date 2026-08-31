@@ -17,18 +17,71 @@ class AudioManager:
     _instance: AudioManager | None = None
 
     @classmethod
-    def instance(cls) -> "AudioManager":
+    def instance(cls, event_bus=None) -> "AudioManager":
         if cls._instance is None:
-            cls._instance = cls()
+            cls._instance = cls(event_bus)
         return cls._instance
 
-    def __init__(self) -> None:
+    def __init__(self, event_bus=None) -> None:
         self.tts_enabled: bool = True   # toggled by the speaker button
         self._tts = None
         self._stt = None
         self._recorder = None
         self._tts_loaded = False
         self._stt_loaded = False
+        self._bus = event_bus
+        
+        if self._bus:
+            self._bus.subscribe("audio.wakeword.detected", self._on_wakeword_detected)
+            self._bus.subscribe("orchestrator.completed", self._on_orchestrator_completed)
+            self._bus.subscribe("orchestrator.failed", self._on_orchestrator_completed)
+
+    def _on_wakeword_detected(self, event):
+        import asyncio
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.create_task(self._handle_wakeword_workflow())
+
+    def _on_orchestrator_completed(self, event):
+        if self._bus:
+            self._bus.publish_sync("audio.wakeword.resume", {})
+
+    async def _handle_wakeword_workflow(self):
+        try:
+            # 1. Beep
+            import sounddevice as sd
+            import numpy as np
+            fs = 44100
+            t = np.linspace(0, 0.2, int(fs * 0.2), False)
+            note = np.sin(2 * np.pi * 440 * t)
+            sd.play(note, fs)
+            
+            # 2. Start listening
+            await self.prepare_stt()
+            self.start_listening_sync()
+            
+            # 3. Record for 5 seconds
+            import asyncio
+            await asyncio.sleep(5.0)
+            
+            # 4. Stop listening
+            audio_data = self.stop_listening()
+            
+            # 5. Transcribe
+            text = await self.transcribe(audio_data)
+            logger.info(f"WakeWord transcribed: {text}")
+            
+            # 6. Send to orchestrator
+            if text and self._bus:
+                self._bus.publish_sync("orchestrator.trigger", {"prompt": text, "source": "voice"})
+            else:
+                if self._bus:
+                    self._bus.publish_sync("audio.wakeword.resume", {})
+                    
+        except Exception as e:
+            logger.error(f"WakeWord workflow failed: {e}")
+            if self._bus:
+                self._bus.publish_sync("audio.wakeword.resume", {})
 
     def _load_tts_sync(self):
         if self._tts_loaded: return

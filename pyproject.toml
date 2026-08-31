@@ -25,7 +25,7 @@ dependencies = [
     "aiosqlite>=0.20.0",
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",
-    "psutil>=5.9.0",
+    "psutil>=5.6.6",
     "watchdog>=3.0.0",
     "structlog>=24.0.0",
     "opencv-python-headless>=4.8.0"
@@ -71,10 +71,16 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-norecursedirs = ["tests/fixtures"]
-addopts = "--ignore=tests/fixtures -m 'not e2e'"
+testpaths = ["tests"]
+norecursedirs = ["tests/fixtures", "dist", "build", "node_modules", ".venv"]
+addopts = "--ignore=tests/fixtures -m 'not e2e and not requires_wayland and not hardware'"
 markers = [
-    "e2e: marks tests as e2e",
-    "integration: marks tests as integration",
-    "gui: marks tests as gui",
+    "unit: purely isolated unit tests",
+    "integration: tests combining multiple systems",
+    "e2e: full end-to-end user flows",
+    "gui: marks tests testing Qt components",
+    "requires_bwrap: tests needing bubblewrap capability",
+    "requires_ollama: tests hitting local ollama inferencing",
+    "requires_wayland: tests requiring a live Wayland compositor",
+    "hardware: Tests requiring physical audio or peripheral devices",
 ]

@@ -66,42 +66,56 @@ class ObservationCompressor:
         return result
 
     @classmethod
-    def compress_observations_buffer(cls, observations: list, max_total_chars: int = 30000) -> list:
+    def compress_observations_buffer(cls, observations: list, max_total_chars: int = 30000, iterations: int = 0) -> list:
         """Guard the cumulative observation buffer before context assembly.
 
-        When a compound ReAct loop chains many tools, each individual result
-        might pass the per-tool threshold but the *aggregate* can still
-        overflow the LLM context window.  This method walks the buffer
-        back-to-front (newest observations are most valuable) and truncates
-        older entries to stay within ``max_total_chars``.
-
-        Args:
-            observations: The full list of structured observation dicts.
-            max_total_chars: Hard cap on the total serialised character budget.
-
-        Returns:
-            The (potentially pruned) observations list.
+        Applies a semantic filter to strip heavy metadata from older logs,
+        and if still over budget, hard-prunes the oldest entries.
         """
         import json as _json
 
+        # 1. Semantic Filter Pass: Strip metadata and compress older observations
+        # We preserve the absolute latest observation fully intact.
+        if iterations > 1:
+            for idx in range(len(observations) - 1):
+                obs = observations[idx]
+                if not isinstance(obs, dict):
+                    continue
+                
+                if 'result' in obs and isinstance(obs['result'], dict):
+                    # Strip heavy metadata while preserving core facts
+                    obs['result'].pop('metadata', None)
+                    obs['result'].pop('debug_info', None)
+                    obs['result'].pop('trace', None)
+                        
+                    # Heavy compression on output for historical steps
+                    out = obs['result'].get('output')
+                    if isinstance(out, str) and len(out) > 500:
+                        obs['result']['output'] = out[:500] + "...[TRUNCATED FOR CONTEXT]"
+                        
+                if 'arguments' in obs and isinstance(obs['arguments'], dict):
+                    for k, v in list(obs['arguments'].items()):
+                        if isinstance(v, str) and len(v) > 200:
+                            obs['arguments'][k] = v[:200] + "..."
+
+        # 2. Check total budget
         total = 0
         budget_exceeded_at = -1
 
-        # Walk newest → oldest so we preserve recent context.
         for idx in range(len(observations) - 1, -1, -1):
             try:
                 entry_len = len(_json.dumps(observations[idx], default=str))
             except Exception:
-                entry_len = 500  # conservative fallback
+                entry_len = 500
             total += entry_len
             if total > max_total_chars:
                 budget_exceeded_at = idx
                 break
 
         if budget_exceeded_at < 0:
-            return observations  # within budget
+            return observations
 
-        # Replace all older entries with a compact summary.
+        # 3. Fallback to hard pruning if we're STILL over budget
         pruned_count = budget_exceeded_at + 1
         pruned_tools = []
         for obs in observations[:pruned_count]:
@@ -113,7 +127,7 @@ class ObservationCompressor:
             'success': True,
             'result': {
                 'output': (
-                    f"[SYSTEM: {pruned_count} earlier observation(s) pruned to protect "
+                    f"[SYSTEM: {pruned_count} earlier observation(s) hard-pruned to protect "
                     f"context window. Pruned tools: {', '.join(pruned_tools)}. "
                     f"Use targeted search/grep if you need data from those earlier steps.]"
                 )
@@ -121,7 +135,7 @@ class ObservationCompressor:
         }
         compressed = [summary] + observations[pruned_count:]
         logger.info(
-            "ObservationCompressor: Pruned %d old observations (%d chars over budget).",
+            "ObservationCompressor: Hard-Pruned %d old observations (%d chars over budget).",
             pruned_count, total - max_total_chars
         )
         return compressed

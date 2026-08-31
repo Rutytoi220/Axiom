@@ -1,82 +1,85 @@
-# AXIOM: Sovereign AI Operating System & Distributed Swarm (V11)
+# AXIOM Desktop
 
-AXIOM is a PySide6, local-first AI orchestrator equipped with Zero-Trust Tailscale Swarm capabilities, native desktop automation, multimodal vision, and real-time audio. Built for privacy, speed, and deep system integration, AXIOM transitions from a simple chat interface into a fully autonomous distributed AI operating system.
+![PySide6](https://img.shields.io/badge/PySide6-GUI-41CD52?style=for-the-badge&logo=qt&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![Ollama](https://img.shields.io/badge/Ollama-Local%20LLMs-FFFFFF?style=for-the-badge&logo=ollama&logoColor=black)
+![Tailscale](https://img.shields.io/badge/Tailscale-Mesh%20Network-383938?style=for-the-badge&logo=tailscale&logoColor=white)
 
-## 🏗️ Architecture
+**A Sovereign, Local-First AI Desktop OS.**
 
-> **[→ View the full interactive architecture diagram](https://rutytoi220.github.io/Axiom/AXIOM_ARCHITECTURE.html)**
+AXIOM Desktop transforms your machine into an autonomous, locally-hosted AI operating system. Designed for maximum reliability and privacy, it securely executes complex tasks, automates your desktop environment, and scales across your network without relying on cloud APIs.
 
-A complete map of the data flow: PySide6 GUI → AxiomBridge → IPC → Engine/EventBus → OrchestratorAgent → SmartRouter → LiteLLM/Ollama, plus the Memory subsystem, Vision pipeline, Tailscale Swarm, Tool Arsenal, and MCP Bridge.
-
----
-
-## 🚀 The V11 Feature Matrix
-
-- 🌐 **The Swarm:** Headless Debian node execution over encrypted Tailscale mesh (`100.x.x.x`).
-- 👻 **Ghost in the Machine:** Native Linux desktop automation (mouse/keyboard control) via PyAutoGUI with strict failsafes.
-- 👁️ **Multimodal Vision:** 5-tier OS-level screen capture (Wayland/X11) routed to local vision models (`qwen3-vl`).
-- 🎙️ **Real-Time Audio:** Offline Push-to-Talk via `faster-whisper` and non-blocking `pyttsx3` TTS.
-- 🔌 **MCP Bridge:** Dynamically discovers and registers tools from any MCP-compatible server at boot.
-- 🧠 **Semantic Memory:** SQLite + Qdrant vector store with temporal decay scoring and `nomic-embed-text` embeddings.
+Getting started is effortless: Upon first launch, an interactive **PySide6 OOBE (Out-Of-Box-Experience) Wizard** will guide you through a seamless setup, configuring your local LLMs (Ollama) and preparing your workspace in minutes.
 
 ---
 
-## 📥 Download & Installation (End Users)
+## 📊 Architecture Status Matrix
 
-> [!IMPORTANT]
-> **Ollama Prerequisite**  
-> AXIOM is a fully local-first interface and **requires** the Ollama system daemon to be installed and running on your host machine prior to launch. Install it via:  
-> ```bash
-> curl -fsSL https://ollama.com/install.sh | sh
-> ```
+| Subsystem | Status | Notes |
+| :--- | :--- | :--- |
+| **ReAct Orchestration** | `IMPLEMENTED` | Core autonomous loop resolving complex tasks. |
+| **Theme Engine & JIT UI** | `IMPLEMENTED` | Declarative UI rendering and styling. |
+| **bwrap Execution Sandbox** | `IMPLEMENTED` | Strict native Linux namespace isolation for untrusted code. |
+| **SQLite Semantic Memory** | `IMPLEMENTED` | WAL-enabled, high-concurrency vector store . |
+| **Desktop Automation** | `PARTIAL` | Requires X11 or wlroots/Hyprland. Fails safely on GNOME/KWin Wayland. |
+| **P2P LAN Synchronization** | `PARTIAL` | Explicit IP pairing required, no mDNS discovery yet. |
+| **OTA Updater & Rollback** | `IMPLEMENTED` | Cryptographic SHA256 + Health Checks & automated rollbacks. |
+| **AppImage Distribution** | `IMPLEMENTED` | Aggressive pruning with host C-library checks. |
 
-[🚀 Download the v11.2.0 AXIOM Linux AppImage](https://github.com/Rutytoi220/Axiom/releases/tag/v11.2.0)
+## 🚀 Planned / Future Enhancements
+* **eBPF / Kernel Security**: `PLANNED` - Future kernel-level network and filesystem telemetry.
+* **QEMU Micro-VMs**: `PLANNED` - Future hypervisor integration for ultra-secure sandboxing.
+* **Universal Wayland**: `PLANNED` - Exploring broader Wayland input injection capabilities.
 
-### How to Run:
-To launch the universal Linux AppImage, simply run:
-```bash
-chmod +x AXIOM-v11.2.0-x86_64.AppImage && ./AXIOM-v11.2.0-x86_64.AppImage
-```
+## ⚔️ The Arsenal (Feature Matrix)
 
----
+AXIOM's core engines are built for extreme resilience and extensibility:
 
-## 🛠️ Advanced Users: Node Setup
+*   🌐 **The Swarm:** Headless Debian node execution over an encrypted Tailscale mesh (`100.x.x.x`). Securely push/pull payloads and command remote agents across your private network.
+*   👻 **Ghost in the Machine:** Native Linux desktop automation with strict failsafes. *(Note: Mouse and Keyboard automation currently requires X11 or a wlroots-based Wayland compositor like Hyprland).*
+*   👁️ **Multimodal Vision:** OS-level screen capture directly routed to local vision models (like `qwen3-vl`), granting the AI genuine context of your graphical interface.
+*   🎙️ **Real-Time Audio:** Hands-free JARVIS-style wake word detection (`openwakeword`), lightning-fast local transcription (`faster-whisper`), and non-blocking text-to-speech (`pyttsx3`).
 
-To run a headless node for The Swarm over your Tailscale mesh:
-```bash
-uv run python axiom-node.py
-```
-
----
-
-## 🛠️ Developer Setup (Source Installation)
-
-AXIOM is designed to be installed easily into any Python environment for development.
-
-### 1. Install via pip
-```bash
-# Clone the repository
-git clone https://github.com/Rutytoi220/Axiom.git
-cd Axiom
-
-# Install dependencies (or use pip install .)\
-pip install -r requirements.txt
-pip install .
-```
-
-### 2. Start the Daemon
-AXIOM runs its heavy inference loops, memory routing, and agent swarms in a headless daemon to keep the UI buttery smooth.
-```bash
-axiomd &
-```
-
-### 3. Launch the UI
-```bash
-axiom
-```
-
-On your first launch, AXIOM greets you with the "First Contact" Out-Of-Box Experience (OOBE) — a 4-page onboarding wizard that welcomes you, live-scans your machine for Ollama/Tailscale/Audio readiness, introduces The Arsenal (Ghost in the Machine, Sensory Engine, The Swarm), and lets you pick your default Chat and Vision models from your installed Ollama models before handing off to the main interface.
+*(Plus everything from the V10 architecture: The Dynamic Hub, Declarative Theme Engine, and autonomous ReAct scheduling loops!)*
 
 ---
 
-*AXIOM v11.2.0 — Developed by the Open-Source Community.*
+## 🚀 Installation (The AppImage)
+
+AXIOM is designed to be completely zero-config for end-users. We distribute it as an immutable, portable `.AppImage`.
+
+1. **Download:** Grab the latest `AXIOM-*.AppImage` directly from the [GitHub Releases](../../releases/latest) page.
+2. **Make it executable:**
+   ```bash
+   chmod +x AXIOM-*.AppImage
+   ```
+3. **Double-click** the file from your Linux file manager, or launch it via terminal:
+   ```bash
+   ./AXIOM-*.AppImage
+   ```
+
+That's it! The OOBE Wizard will launch automatically and take it from there.
+
+---
+
+## 💻 Headless CLI
+
+AXIOM can operate completely detached from the GUI for server deployments or Swarm nodes.
+
+```bash
+# Check daemon status
+./AXIOM-*.AppImage status
+
+# List installed tools
+./AXIOM-*.AppImage tool list
+```
+
+## 🏗️ Development & Building
+
+We use `uv` and PyInstaller for isolated, declarative builds.
+
+To compile the raw binary and generate your own AppImage locally (requires the new Universal Packager):
+```bash
+python3 -m axiom.api.cli package --target all
+```
+*(Or use the legacy script: `bash scripts/build_appimage.sh`)*

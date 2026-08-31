@@ -5,7 +5,7 @@ import json
 import re
 from typing import Any, Dict
 from pathlib import Path
-from axiom.tools import BaseTool, ToolResult
+from axiom.tools.core import BaseTool, ToolResult
 DOCUMENT_EXTRACTION_NOTICE = '[Document Extraction Notice]: Zero selectable characters found in {file_path}. This document may be encrypted, security-locked, or rendered as a flat image scan lacking a readable text layer. Please convert via OCR.'
 
 class ReadDocumentContentTool(BaseTool):

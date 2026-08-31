@@ -114,3 +114,14 @@ CREATE TABLE IF NOT EXISTS summaries (
 );
 
 CREATE INDEX IF NOT EXISTS idx_summaries_conversation_id ON summaries(conversation_id);
+
+-- Scheduled tasks for the CronService
+CREATE TABLE IF NOT EXISTS scheduled_tasks (
+    id TEXT PRIMARY KEY,
+    execution_time DATETIME NOT NULL,
+    prompt TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_execution ON scheduled_tasks(execution_time, status);

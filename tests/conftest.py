@@ -36,9 +36,85 @@ def mock_gui_bridge():
     return bridge
 
 @pytest.fixture(autouse=True)
-def teardown_qt_widgets(qapp):
-    """Teardown fixture that explicitly calls deleteLater() on top-level widgets."""
+def block_external_io(request, monkeypatch):
+    """
+    Strictly mocks external IO (network, local LLM, disk) unless the test
+    is explicitly marked 'integration', 'e2e', or 'requires_ollama'.
+    """
+    markers = [m.name for m in request.node.iter_markers()]
+    if any(m in markers for m in ["integration", "e2e", "requires_ollama"]):
+        return
+
+    # 1. Block outbound HTTPX requests
+    async def mock_httpx_post(*args, **kwargs):
+        raise RuntimeError(f"Strict Mock: Network IO is blocked for unit tests (Attempted: {args})")
+    
+    async def mock_httpx_get(*args, **kwargs):
+        raise RuntimeError(f"Strict Mock: Network IO is blocked for unit tests (Attempted: {args})")
+
+    try:
+        import httpx
+        monkeypatch.setattr(httpx, "post", mock_httpx_post)
+        monkeypatch.setattr(httpx, "get", mock_httpx_get)
+        monkeypatch.setattr(httpx.AsyncClient, "post", mock_httpx_post)
+        monkeypatch.setattr(httpx.AsyncClient, "get", mock_httpx_get)
+    except ImportError:
+        pass
+
+
+    # 4. Block Model Config Initialization to prevent CLI stall
+    try:
+        import axiom.core.config_service
+        monkeypatch.setattr(axiom.core.config_service, "initialize_model_config", lambda *args, **kwargs: None)
+    except ImportError:
+        pass
+
+    # 3. Block urllib.request
+    def mock_urlopen(*args, **kwargs):
+        raise RuntimeError("Strict Mock: Network IO is blocked via urllib.request.")
+    try:
+        import urllib.request
+        monkeypatch.setattr(urllib.request, "urlopen", mock_urlopen)
+    except ImportError:
+        pass
+
+    # 2. Block LiteLLM Completions
+    async def mock_acompletion(*args, **kwargs):
+        raise RuntimeError("Strict Mock: LiteLLM IO is blocked. Mock your LLM responses!")
+    def mock_completion(*args, **kwargs):
+        raise RuntimeError("Strict Mock: LiteLLM IO is blocked. Mock your LLM responses!")
+    
+    try:
+        import litellm
+        monkeypatch.setattr(litellm, "acompletion", mock_acompletion)
+        monkeypatch.setattr(litellm, "completion", mock_completion)
+    except ImportError:
+        pass
+
+
+
+from PySide6.QtWidgets import QApplication
+
+@pytest.fixture(autouse=True)
+def qt_lifecycle_teardown(qapp):
     yield
-    for widget in qapp.topLevelWidgets():
+    for widget in QApplication.topLevelWidgets():
+        widget.close()
         widget.deleteLater()
-    qapp.processEvents()
+    QApplication.processEvents()
+
+import sys
+from PySide6.QtWidgets import QApplication
+
+@pytest.fixture(scope="session")
+def qapp_session():
+    app = QApplication.instance()
+    if not app:
+        app = QApplication(sys.argv)
+    yield app
+    app.processEvents()
+
+@pytest.fixture
+def qapp(qapp_session):
+    yield qapp_session
+    qapp_session.processEvents()

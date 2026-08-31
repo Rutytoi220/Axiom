@@ -87,7 +87,6 @@ class SyncDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Zero-Auth P2P Device Sync")
         self.setMinimumSize(500, 300)
-        self.setStyleSheet("QDialog { background-color: #1E1E2E; color: white; }")
         
         self.host_thread = None
         
@@ -108,12 +107,12 @@ class SyncDialog(QDialog):
         sel_layout.addWidget(title)
         
         host_btn = QPushButton("Host a Sync")
-        host_btn.setStyleSheet("QPushButton { background-color: #3B82F6; color: white; font-weight: bold; padding: 12px; border-radius: 6px; font-size: 16px;}")
+        host_btn.setObjectName("sync_host")
         host_btn.clicked.connect(self.show_host_view)
         sel_layout.addWidget(host_btn)
         
         connect_btn = QPushButton("Connect to Device")
-        connect_btn.setStyleSheet("QPushButton { background-color: #10B981; color: white; font-weight: bold; padding: 12px; border-radius: 6px; font-size: 16px;}")
+        connect_btn.setObjectName("sync_connect")
         connect_btn.clicked.connect(self.show_client_view)
         sel_layout.addWidget(connect_btn)
         
@@ -125,17 +124,19 @@ class SyncDialog(QDialog):
         host_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         self.ip_label = QLabel(f"Your IP: {get_local_ip()}")
-        self.ip_label.setStyleSheet("color: #A0A0B0; font-size: 16px;")
+        self.ip_label.setProperty("status", "muted")
+        self.ip_label.style().unpolish(self.ip_label)
+        self.ip_label.style().polish(self.ip_label)
         self.ip_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         host_layout.addWidget(self.ip_label)
         
         self.pin_label = QLabel("000000")
-        self.pin_label.setStyleSheet("font-size: 32px; letter-spacing: 4px; font-weight: bold; color: #A6E3A1;")
+        self.pin_label.setObjectName("sync_pin")
         self.pin_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         host_layout.addWidget(self.pin_label)
         
         status_label = QLabel("Waiting for connection...")
-        status_label.setStyleSheet("color: #F9E2AF; font-style: italic;")
+        status_label.setObjectName("sync_status")
         status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         host_layout.addWidget(status_label)
         
@@ -148,16 +149,16 @@ class SyncDialog(QDialog):
         
         self.ip_input = QLineEdit()
         self.ip_input.setPlaceholderText("Target IP Address (e.g. 192.168.1.5)")
-        self.ip_input.setStyleSheet("padding: 8px; border-radius: 4px; background-color: #2D2B3D; color: white; font-size: 14px;")
+        self.ip_input.setObjectName("sync_input")
         client_layout.addWidget(self.ip_input)
         
         self.pin_input = QLineEdit()
         self.pin_input.setPlaceholderText("6-Digit PIN")
-        self.pin_input.setStyleSheet("padding: 8px; border-radius: 4px; background-color: #2D2B3D; color: white; font-size: 14px;")
+        self.pin_input.setObjectName("sync_input")
         client_layout.addWidget(self.pin_input)
         
         sync_btn = QPushButton("Sync Now")
-        sync_btn.setStyleSheet("QPushButton { background-color: #F5C2E7; color: #1E1E2E; font-weight: bold; padding: 10px; border-radius: 6px; font-size: 14px;}")
+        sync_btn.setObjectName("sync_action")
         sync_btn.clicked.connect(self.perform_sync)
         client_layout.addWidget(sync_btn)
         

@@ -42,8 +42,230 @@ QLabel {
     color: @text_main@;
 }
 
+/* =========================================================================
+   Semantic Status Property Selectors
+   ========================================================================= */
+QLabel[status="danger"] {
+    color: @danger@;
+    font-weight: bold;
+}
+
+QLabel[status="warning"] {
+    color: @accent@;
+}
+
+QLabel[status="success"] {
+    color: @success@;
+}
+
 QLabel[status="muted"] {
     color: @text_muted@;
+}
+
+QLabel[status="info"] {
+    color: @primary@;
+}
+
+QPushButton[status="danger"] {
+    background-color: @danger@;
+    color: @bg_base@;
+    font-weight: bold;
+}
+
+QPushButton[status="success"] {
+    background-color: @success@;
+    color: @bg_base@;
+    font-weight: bold;
+}
+
+QPushButton[status="warning"] {
+    background-color: @accent@;
+    color: @bg_base@;
+    font-weight: bold;
+}
+
+/* =========================================================================
+   Hub / Network Dialog Cards
+   ========================================================================= */
+QFrame#hub_card {
+    background-color: @bg_surface@;
+    border-radius: @radius_md@;
+    padding: @spacing_md@;
+}
+
+QLabel#hub_name {
+    font-weight: bold;
+    font-size: 16px;
+    color: @text_main@;
+}
+
+QLabel#hub_author {
+    color: @primary@;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+QLabel#hub_desc {
+    color: @text_muted@;
+    font-size: 14px;
+}
+
+QLabel#hub_tags {
+    color: @accent@;
+    font-size: 12px;
+}
+
+QFrame#hub_version {
+    background-color: @bg_base@;
+    color: @success@;
+    padding: 2px 6px;
+    border-radius: @radius_sm@;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+/* =========================================================================
+   Sync Dialog
+   ========================================================================= */
+QLabel#sync_pin {
+    font-size: 32px;
+    letter-spacing: 4px;
+    font-weight: bold;
+    color: @success@;
+}
+
+QLabel#sync_status {
+    color: @accent@;
+    font-style: italic;
+}
+
+QLineEdit#sync_input {
+    padding: 8px;
+    border-radius: @radius_sm@;
+    background-color: @bg_surface@;
+    color: @text_main@;
+    font-size: 14px;
+}
+
+QPushButton#sync_host {
+    background-color: @primary@;
+    color: @bg_base@;
+    font-weight: bold;
+    padding: 12px;
+    border-radius: @radius_md@;
+    font-size: 16px;
+}
+
+QPushButton#sync_connect {
+    background-color: @success@;
+    color: @bg_base@;
+    font-weight: bold;
+    padding: 12px;
+    border-radius: @radius_md@;
+    font-size: 16px;
+}
+
+QPushButton#sync_action {
+    background-color: @accent@;
+    color: @bg_base@;
+    font-weight: bold;
+    padding: 10px;
+    border-radius: @radius_md@;
+    font-size: 14px;
+}
+
+/* =========================================================================
+   Plugin Manager
+   ========================================================================= */
+QFrame#plugin_card {
+    background-color: @bg_surface@;
+    border-radius: @radius_md@;
+}
+
+QLabel#plugin_name {
+    font-weight: bold;
+    color: @text_main@;
+    font-size: 14px;
+}
+
+QLabel#plugin_desc {
+    color: @text_muted@;
+    font-size: 12px;
+}
+
+QLabel#plugin_loading {
+    color: @text_muted@;
+    font-style: italic;
+}
+
+QCheckBox#plugin_toggle {
+    color: @text_muted@;
+    font-weight: bold;
+    background: transparent;
+}
+
+QCheckBox#plugin_toggle::indicator {
+    width: 36px;
+    height: 18px;
+    border-radius: 9px;
+}
+
+QCheckBox#plugin_toggle::indicator:checked {
+    background-color: @success@;
+    border: 2px solid @success@;
+}
+
+QCheckBox#plugin_toggle::indicator:unchecked {
+    background-color: @bg_surface@;
+    border: 2px solid @borders@;
+}
+
+QPushButton#plugin_close {
+    background-color: @bg_surface@;
+    color: @text_main@;
+    padding: 6px;
+    border-radius: @radius_sm@;
+    font-weight: bold;
+}
+
+/* =========================================================================
+   Update Dialog
+   ========================================================================= */
+QLabel#update_header {
+    color: @success@;
+}
+
+QTextEdit#update_changelog {
+    background-color: @bg_base@;
+    color: @text_main@;
+    border-radius: @radius_md@;
+    padding: @spacing_md@;
+}
+
+QPushButton#update_install {
+    background-color: @success@;
+    color: @bg_base@;
+    font-weight: bold;
+    padding: 10px 20px;
+    border-radius: @radius_md@;
+}
+
+QPushButton#update_later {
+    background-color: @bg_surface@;
+    color: @text_main@;
+    font-weight: bold;
+    padding: 10px 20px;
+    border-radius: @radius_md@;
+}
+
+/* =========================================================================
+   Chat Status Pill
+   ========================================================================= */
+QLabel#chat_status_pill {
+    color: @text_muted@;
+    font-style: italic;
+    margin-left: 12px;
+    margin-bottom: 8px;
 }
 
 QTextEdit.code, QPlainTextEdit.code {
@@ -128,4 +350,312 @@ QFrame#chat_bubble[role="assistant"] QTextBrowser {
     color: @text_main@;
     background: transparent;
     border: none;
+}
+
+/* =========================================================================
+   System Dialogs — QGroupBox, QTableWidget, QProgressBar
+   ========================================================================= */
+QGroupBox {
+    font-weight: bold;
+    color: @text_main@;
+    border: 1px solid @borders@;
+    margin-top: 10px;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 0 6px;
+}
+
+QTableWidget {
+    background-color: @bg_base@;
+    color: @text_main@;
+    gridline-color: @borders@;
+    border: 1px solid @borders@;
+}
+
+QTableWidget QHeaderView::section {
+    background-color: @bg_surface@;
+    color: @text_muted@;
+}
+
+QProgressBar {
+    background-color: @bg_surface@;
+    border: 1px solid @borders@;
+    border-radius: @radius_sm@;
+    text-align: center;
+    color: @text_main@;
+}
+
+QProgressBar::chunk {
+    background-color: @primary@;
+}
+
+/* =========================================================================
+   Scheduler Dialog
+   ========================================================================= */
+QFrame#scheduler_task_row {
+    background-color: @bg_surface@;
+    border-radius: @radius_md@;
+    padding: 10px;
+    margin-bottom: 10px;
+}
+
+QLabel#scheduler_task_label {
+    color: @text_main@;
+    font-size: 14px;
+}
+
+QLabel#scheduler_cron_label {
+    color: @text_muted@;
+    font-size: 12px;
+}
+
+QLabel#scheduler_empty {
+    color: @text_muted@;
+    font-style: italic;
+}
+
+QPushButton#scheduler_refresh {
+    background-color: @primary@;
+    color: @bg_base@;
+    font-weight: bold;
+    border-radius: @radius_md@;
+    padding: 6px 12px;
+}
+
+QPushButton#scheduler_toggle {
+    font-weight: bold;
+    border-radius: @radius_sm@;
+    padding: 4px 8px;
+}
+
+QPushButton#scheduler_toggle[status="warning"] {
+    background-color: @accent@;
+    color: @bg_base@;
+}
+
+QPushButton#scheduler_toggle[status="success"] {
+    background-color: @success@;
+    color: @bg_base@;
+}
+
+QPushButton#scheduler_delete {
+    background-color: @danger@;
+    color: @bg_base@;
+    font-weight: bold;
+    border-radius: @radius_sm@;
+    padding: 4px 8px;
+}
+
+/* =========================================================================
+   Hardware Dialog
+   ========================================================================= */
+QLabel#hw_power_label {
+    font-size: 14px;
+    font-weight: bold;
+}
+
+QLabel#hw_power_label[status="success"] {
+    color: @success@;
+}
+
+QLabel#hw_power_label[status="danger"] {
+    color: @danger@;
+}
+
+QLabel#hw_model_label {
+    color: @text_main@;
+}
+
+QTableWidgetItem#hw_status_released {
+    color: @success@;
+    font-weight: bold;
+}
+
+QTableWidgetItem#hw_status_sandboxed {
+    color: @danger@;
+    font-weight: bold;
+}
+
+/* =========================================================================
+   Infrastructure Dialog
+   ========================================================================= */
+QProgressBar#infra_l1::chunk {
+    background-color: @danger@;
+}
+
+QProgressBar#infra_l2::chunk {
+    background-color: @accent@;
+}
+
+QProgressBar#infra_l3::chunk {
+    background-color: @success@;
+}
+
+QTableWidgetItem#infra_status_running {
+    color: @success@;
+    font-weight: bold;
+}
+
+/* =========================================================================
+   Governor Dialog
+   ========================================================================= */
+QTextEdit#governor_args {
+    background-color: @bg_base@;
+    border: 1px solid @borders@;
+    padding: 5px;
+    font-family: monospace;
+}
+
+QPushButton#governor_deny {
+    background-color: @danger@;
+    color: @bg_base@;
+    font-weight: bold;
+    padding: 8px;
+}
+
+QPushButton#governor_approve {
+    background-color: @success@;
+    color: @bg_base@;
+    font-weight: bold;
+    padding: 8px;
+}
+
+/* =========================================================================
+   Security Dialog
+   ========================================================================= */
+QLabel#security_score {
+    font-weight: bold;
+    font-size: 24px;
+}
+
+QLabel#security_score[status="success"] {
+    color: @success@;
+}
+
+QLabel#security_score[status="warning"] {
+    color: @accent@;
+}
+
+QLabel#security_score[status="danger"] {
+    color: @danger@;
+}
+
+QPushButton#security_heal {
+    color: @danger@;
+}
+
+/* =========================================================================
+   Settings Dialog
+   ========================================================================= */
+#settings_dialog {
+    background-color: @bg_surface@;
+    border: 1px solid @borders@;
+}
+
+#settings_title_label {
+    font-size: 14px;
+    font-weight: bold;
+    color: @text_main@;
+}
+
+#settings_checkbox {
+    font-size: 14px;
+    font-weight: bold;
+    color: @text_main@;
+}
+
+#danger_warning_label[status="danger"] {
+    color: @danger@;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+#danger_warning_label[status="muted"] {
+    color: @text_muted@;
+    font-size: 12px;
+    font-weight: normal;
+}
+
+/* =========================================================================
+   OOBE Wizard
+   ========================================================================= */
+#oobe_title {
+    font-size: 32px;
+    font-weight: 800;
+    color: @text_main@;
+}
+
+#oobe_subtitle {
+    font-size: 16px;
+    color: @text_muted@;
+}
+
+#oobe_primary_btn {
+    background-color: @accent@;
+    color: @bg_base@;
+    border: none;
+    border-radius: 6px;
+    padding: 10px 20px;
+    font-weight: bold;
+    font-size: 14px;
+}
+
+#oobe_primary_btn:hover {
+    background-color: @accent_hover@;
+}
+
+#oobe_preset_btn {
+    background-color: @bg_deep@;
+    color: @text_main@;
+    border: 1px solid @borders@;
+    border-radius: 6px;
+    padding: 10px 20px;
+    font-weight: bold;
+    font-size: 14px;
+}
+
+#oobe_preset_btn:hover {
+    background-color: @bg_surface@;
+}
+
+#oobe_preset_btn:checked {
+    background-color: @accent@;
+    color: @bg_base@;
+    border: 1px solid @accent@;
+}
+
+PersonaCard, ThemeCard {
+    background-color: @bg_deep@;
+    border-radius: @radius_lg@;
+    border: 2px solid transparent;
+}
+
+PersonaCard:hover, ThemeCard:hover {
+    background-color: @bg_surface@;
+}
+
+PersonaCard[selected="true"], ThemeCard[selected="true"] {
+    border: 2px solid @accent@;
+}
+
+#oobe_combo, #oobe_text_edit {
+    background-color: @bg_base@;
+    color: @text_main@;
+    border: 1px solid @borders@;
+    border-radius: 6px;
+    padding: 8px;
+}
+
+#oobe_check_box {
+    font-size: 14px;
+    font-weight: bold;
+    color: @text_main@;
+}
+
+#oobe_directives_label {
+    font-size: 12px;
+    color: @text_muted@;
 }

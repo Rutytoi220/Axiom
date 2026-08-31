@@ -102,6 +102,9 @@ Returns:
         if bus:
             self.telemetry_daemon = HardwareTelemetryDaemon(event_bus=bus)
             self.telemetry_daemon.start()
+            bus.subscribe("system.anomaly.detected", self._on_system_anomaly)
+            bus.subscribe("system.power.throttled", self._on_power_throttled)
+            bus.subscribe("system.power.restored", self._on_power_restored)
         if llm is not None:
             if getattr(llm, '_is_mock', False) or 'Mock' in type(llm).__name__:
                 self._llm = llm
@@ -235,6 +238,7 @@ Returns:
         if dropped > 0:
             self._log(f"[Schema Pruner]: Dropped {dropped} irrelevant tools. Active context: {[t.get('name') for t in tool_schemas]}", steps)
         observations: List[Dict[str, Any]] = []
+        memories: List[Dict[str, Any]] = []
         final_response = ''
         accumulated_response = ''
         rounds = 0
@@ -364,17 +368,18 @@ Returns:
                 self._emit('plan.failed', {'reason': 'timeout', 'step': rounds, 'total_steps': MAX_ITERATIONS})
                 txn.rollback()
                 break
+            time_left = max(1.0, deadline - time.time()) if deadline else 60.0
             rounds += 1
             round_start_time = time.perf_counter()
             # ── Per-iteration UI status broadcast ──────────────────────────
             # Keeps the GUI responsive with live progress indicators so
             # the user knows AXIOM hasn't frozen during compound loops.
-            self._emit('orchestrator.iteration', {
+            self._emit('agent.loop.status', {
                 'session_id': session_id,
-                'round': rounds,
+                'iteration': rounds,
                 'max_rounds': MAX_ITERATIONS,
                 'state': state.value,
-                'message': f"AXIOM is reasoning (Step {rounds}/{MAX_ITERATIONS})..."
+                'action': f"AXIOM is reasoning (Step {rounds}/{MAX_ITERATIONS})..."
             })
             self._persist_step(session_id, 'state', {'state': state.value, 'plan': asdict(plan), 'round': rounds})
             if state == AgentState.THINK:
@@ -395,36 +400,49 @@ Returns:
                 # [RAG INTERCEPT] - Inject semantic memory context on first round
                 if rounds == 1:
                     try:
-                        from axiom.memory.vector_store import VectorMemoryEngine
-                        mem_engine = VectorMemoryEngine(llm_client=self._llm)
-                        rag_results = mem_engine.query_memory_sync(task, top_k=3)
-                        
-                        valid_chunks = [r['payload'].get('text') for r in rag_results if r['score'] > 0.75 and 'text' in r['payload']]
-                        if valid_chunks:
-                            rag_context = "[Long-Term Semantic Memory / Relevant Context]:\n" + "\n".join([f"- {c}" for c in valid_chunks])
-                            if override_prompt:
-                                override_prompt = rag_context + "\n\n" + override_prompt
-                            else:
-                                override_prompt = rag_context
-                    except Exception as e:
-                        logger.debug(f"RAG Intercept failed: {e}")
-
-                messages = self._build_messages(task, plan, observations, session_id, override_prompt, intent=intent)
-                override_prompt = None
-                time_left = max(1.0, deadline - time.time()) if deadline else 60.0
-                temp_override = 0.1 if intent in ('orchestration', 'code') else None
-                current_schemas = [] if force_text_response else tool_schemas
+                        pass
+                    except Exception:
+                        pass
                 
-                vision_images = []
-                for obs in observations:
-                    if obs.get('tool') == 'screen_capture' and obs.get('success'):
-                        res_out = obs.get('result', {}).get('output', {})
-                        if isinstance(res_out, dict) and 'image_b64' in res_out:
-                            b64 = res_out['image_b64']
-                            if b64 != '[IMAGE_PAYLOAD_MOVED_TO_VISION_CONTEXT]':
-                                vision_images.append(b64)
-                                res_out['image_b64'] = '[IMAGE_PAYLOAD_MOVED_TO_VISION_CONTEXT]'
+                # Setup context window
+                try:
+                    from axiom.agents.prompts import _build_react_prompt, _build_tool_guidelines
+                except Exception:
+                    pass
 
+                system_messages = self._context_manager.build_system_prompt(task, tool_schemas, intent)
+                if override_prompt:
+                    system_messages.append({'role': 'system', 'content': override_prompt})
+                # ReAct enforces thinking block
+                # system_messages.append({'role': 'system', 'content': 'Ensure every decision includes a <think> block evaluating previous tool results.'})
+
+                # Memory protection mechanism: compress buffer aggressively if things 
+                # still blow the aggregate budget.  Guard that here.
+                try:
+                    from axiom.memory.compression import ObservationCompressor
+                    observations = ObservationCompressor.compress_observations_buffer(observations, iterations=rounds)
+                except Exception as _buf_err:
+                    logger.warning("Failed to compress observation buffer: %s", _buf_err)
+                messages = self._context_manager.build_context_window(system_messages=system_messages, chat_history=self._chat_history, current_task=task, retrieved_memories=memories, observations=observations)
+                current_schemas = tool_schemas
+                self._emit('orchestrator.thinking', {'session_id': session_id, 'rounds': rounds})
+                temp_override = 0.4 if intent in ('code', 'desktop', 'vision') else 0.7
+                vision_images = []
+                if intent == 'vision':
+                    try:
+                        from axiom.tools.desktop.capture import DesktopCapture
+                        b64 = DesktopCapture.capture_b64()
+                        if b64:
+                            vision_images.append({'url': f'data:image/png;base64,{b64}'})
+                            self._log('[Vision] Attached live desktop screenshot to model context.', steps)
+                    except Exception as err:
+                        self._log(f'[Vision] Failed to capture screenshot: {err}', steps)
+                try:
+                    self._log(f'LLM Call initiated (temperature={temp_override})...', steps)
+                    import copy
+                    current_schemas = copy.deepcopy(tool_schemas)
+                except Exception:
+                    pass
                 response_msg = self._call_llm(messages, current_schemas, timeout=time_left, temperature=temp_override, images=vision_images)
                 force_text_response = False
                 tool_calls = response_msg.get('tool_calls') or []
@@ -446,12 +464,60 @@ Returns:
                             tool_calls.append({'function': {'name': 'shell', 'arguments': {'command': cmd}}})
                             content = '' # Wipe the conversational preamble so it doesn't leak to the UI
                             response_msg['content'] = ''
-                        elif "tool_call" in content.lower():
-                            logger.info("[Anti-Laziness] Intercepted tutorial-style response in Autopilot Mode. Forcing retry.")
-                            observations.append({
-                                'error': '[System Warning]: Do not output raw markdown instructions. You are in Autopilot Mode—invoke the tool call schema directly to execute this action.'
-                            })
-                            continue
+                        
+                        lazy_python = r'```(?:python|py)\n?(.*?)\n?```'
+                        pmatch = re.search(lazy_python, content, flags=re.IGNORECASE | re.DOTALL)
+                        if (not tool_calls) and pmatch and any(s.get('function', {}).get('name') == 'python' for s in tool_schemas):
+                            script = pmatch.group(1).strip()
+                            logger.info("[Anti-Laziness] Intercepted python block. Converting to tool call.")
+                            tool_calls.append({'function': {'name': 'python', 'arguments': {'script': script}}})
+                            content = ''
+                            response_msg['content'] = ''
+                            
+                # Fallback heuristics for universal plaintext ReAct output matching
+                if not tool_calls and content and use_tools:
+                    pattern = r'<tool_call>\s*(.*?)\s*</tool_call>'
+                    match = re.search(pattern, str(content), flags=re.IGNORECASE | re.DOTALL)
+                    if match:
+                        try:
+                            args_raw = match.group(1)
+                            # Find tool name logic (heuristic)
+                            func_name = 'unknown'
+                            for schema in tool_schemas:
+                                t_name = schema.get('function', {}).get('name')
+                                if t_name and t_name in str(content):
+                                    func_name = t_name
+                                    break
+                            
+                            schema = next((s['function'] for s in tool_schemas if s['function']['name'] == func_name), None)
+                            props = schema.get('parameters', {}).get('properties', {}) if schema else {}
+
+                            if args_raw.strip().startswith('{') and args_raw.strip().endswith('}'):
+                                try:
+                                    parsed_json = json.loads(args_raw.strip())
+                                    if props:
+                                        first_key = list(props.keys())[0]
+                                        common_keys = set(parsed_json.keys()).intersection(set(props.keys()))
+                                        if first_key in parsed_json and len(parsed_json) == 1:
+                                            parsed_args = {first_key: parsed_json[first_key]}
+                                        else:
+                                            extracted_val = next((parsed_json[k] for k in common_keys if k in parsed_json), None)
+                                            if extracted_val is not None:
+                                                parsed_args = {first_key: extracted_val}
+                                            else:
+                                                parsed_args = parsed_json
+                                    else:
+                                        parsed_args = parsed_json
+                                except json.JSONDecodeError:
+                                    parsed_args = {}
+                            elif props:
+                                first_key = list(props.keys())[0]
+                                parsed_args = {first_key: args_raw}
+                            else:
+                                parsed_args = {}
+                            tool_calls.append({'function': {'name': func_name, 'arguments': parsed_args}})
+                        except Exception as e:
+                            logger.warning(f'Failed to parse XML tool call: {e}')
 
                 # [XML TOOL-CALL EXTRACTOR] ────────────────────────────────────
                 # Highest-priority fallback: parse <tool_call>{…}</tool_call>
@@ -647,14 +713,7 @@ Returns:
                         for arg_key in ('path', 'file', 'filename', 'dest', 'destination'):
                             target_path = arguments.get(arg_key)
                             if target_path:
-                                try:
-                                    txn.snapshot(target_path)
-                                except StagingCapExceeded as cap_err:
-                                    observations.append(self._structured_tool_result(tool_name, arguments, {'error': f'Transaction staging cap exceeded: {cap_err}'}, False))
-                                    self._log(f'ACT {tool_name}: staging cap exceeded, skipping tool.', steps)
-                                    break
-                                except Exception as snap_err:
-                                    logger.warning("Snapshot failed for %s arg '%s': %s", tool_name, arg_key, snap_err)
+                                txn.snapshot_file(target_path)
                     if sig in executed_tool_ids_this_round:
                         result = self._structured_tool_result(tool_name, arguments, {'error': 'Duplicate tool call skipped for this inference step.'}, False)
                     else:
@@ -662,12 +721,12 @@ Returns:
                         executed_signatures.add(dedup_sig)
                         self._emit_synapse_event('tool_call_started', {'tool': tool_name, 'args': arguments})
                         # ── Per-tool UI status broadcast ──────────────────────
-                        self._emit('orchestrator.iteration', {
+                        self._emit('agent.loop.status', {
                             'session_id': session_id,
-                            'round': rounds,
+                            'iteration': rounds,
                             'max_rounds': MAX_ITERATIONS,
                             'state': 'ACT',
-                            'message': f"AXIOM is executing: {tool_name} (Step {rounds}/{MAX_ITERATIONS})..."
+                            'action': f"AXIOM is executing: {tool_name} (Step {rounds}/{MAX_ITERATIONS})..."
                         })
                         result = self._execute_tool(tool_name, arguments)
                         try:
@@ -761,13 +820,7 @@ Returns:
             logger.warning(f"Failed to log routing telemetry: {e}")
 
         if not final_response:
-            tool_count = len([o for o in observations if isinstance(o, dict) and o.get('success')])
-            final_response = (
-                f'Task processing reached the safety limit of {MAX_ITERATIONS} iterations '
-                f'after executing {tool_count} tool(s). This safeguard prevents infinite '
-                f'autonomous loops. Review the tool results above for partial progress, '
-                f'or break your request into smaller steps.'
-            )
+            final_response = '[SYSTEM: Maximum autonomous iterations reached. Pausing for user input.]'
             self._emit('plan.failed', {'reason': 'max_rounds', 'step': rounds, 'total_steps': MAX_ITERATIONS})
             txn.rollback()
         else:
@@ -902,7 +955,7 @@ Returns:
         # still blow the aggregate budget.  Guard that here.
         try:
             from axiom.memory.compression import ObservationCompressor
-            observations = ObservationCompressor.compress_observations_buffer(observations)
+            observations = ObservationCompressor.compress_observations_buffer(observations, iterations=rounds)
         except Exception as _buf_err:
             logger.warning("Failed to compress observation buffer: %s", _buf_err)
         messages = self._context_manager.build_context_window(system_messages=system_messages, chat_history=self._chat_history, current_task=task, retrieved_memories=memories, observations=observations)
@@ -1079,6 +1132,31 @@ Returns:
     Return value.
 """
         start_time = time.perf_counter()
+        
+        # ── Approval Queue Guardrails ──────────────────────────────────────────
+        from axiom.core.governor import ActionGovernor
+        from axiom.config import get_config
+        
+        gov = ActionGovernor()
+        config = get_config()
+        
+        # We assume daemon/headless is True if we are not running a GUI or CLI prompt
+        # We can check if sys.stdin.isatty() or if we are in strict mode. 
+        # Actually, let's just assume user_present = False for the backend loop
+        user_present = False 
+        
+        is_approved, reason = self._run_coro_sync(gov.check_action(tool_name, arguments, config.auth_mode.name, user_present))
+        
+        if not is_approved:
+            self._emit('tool.queued', {'tool_name': tool_name, 'message': reason})
+            # Return a graceful tool result so the agent knows it's pending and can switch contexts
+            return self._structured_tool_result(
+                tool_name, 
+                arguments, 
+                {'output': f"[ACTION DEFERRED]: {reason}. The system will execute it when the user returns. Please yield or move to another safe task."}, 
+                True
+            )
+
 
         def _scrub_jargon(err_msg: str) -> str:
             """Auto-generated docstring.
@@ -1113,41 +1191,76 @@ Returns:
                     'message': f"{tool_name}..."
                 })
                 
+            async def _safe_execute(execute_callable, *args, **kwargs):
+                import inspect
+                import asyncio
+                if inspect.iscoroutinefunction(execute_callable):
+                    coro = execute_callable(*args, **kwargs)
+                else:
+                    coro = asyncio.to_thread(execute_callable, *args, **kwargs)
+                return await asyncio.wait_for(coro, timeout=30.0)
+
             if hasattr(self, 'plugin_manager') and tool_name in self.plugin_manager.active_tools:
                 plugin = self.plugin_manager.active_tools[tool_name]
-                result = plugin.execute(**arguments)
-                if asyncio.iscoroutine(result):
-                    result = self._run_coro_sync(result)
-                payload = {'output': result, 'error': None}
-                result_dict = self._structured_tool_result(tool_name, arguments, payload, True)
+                try:
+                    result = self._run_coro_sync(_safe_execute(plugin.execute, **arguments))
+                    payload = {'output': result, 'error': None}
+                    result_dict = self._structured_tool_result(tool_name, arguments, payload, True)
+                except asyncio.TimeoutError:
+                    msg = f"[Plugin Crash] The tool '{tool_name}' exceeded the 30-second execution limit and was forcefully terminated."
+                    logger.error(msg)
+                    if hasattr(self, 'event_bus') and self.event_bus:
+                        self.event_bus.publish_sync("system.alert", {"level": "error", "message": msg})
+                    result_dict = self._structured_tool_result(tool_name, arguments, {'error': msg}, False)
+                except Exception as e:
+                    msg = f"[Plugin Crash] The tool '{tool_name}' crashed: {e}"
+                    logger.error(msg)
+                    if hasattr(self, 'event_bus') and self.event_bus:
+                        self.event_bus.publish_sync("system.alert", {"level": "error", "message": msg})
+                    result_dict = self._structured_tool_result(tool_name, arguments, {'error': msg}, False)
             elif self.registry and hasattr(self.registry, 'execute') and (hasattr(self.registry, 'has_tool') and self.registry.has_tool(tool_name) or True):
                 # Try core registry execute
                 try:
-                    tool_result = self.registry.execute(tool_name, **arguments)
+                    tool_result = self._run_coro_sync(_safe_execute(self.registry.execute, tool_name, **arguments))
                     raw_error = getattr(tool_result, 'error', None)
                     error = _scrub_jargon(raw_error) if isinstance(raw_error, str) else None
                     payload = {'output': getattr(tool_result, 'output', None), 'error': error}
                     result_dict = self._structured_tool_result(tool_name, arguments, payload, bool(getattr(tool_result, 'success', False)))
+                except asyncio.TimeoutError:
+                    msg = f"[Tool Crash] The tool '{tool_name}' exceeded the 30-second execution limit."
+                    logger.error(msg)
+                    result_dict = self._structured_tool_result(tool_name, arguments, {'error': msg}, False)
                 except KeyError:
                     # fallback to older execute flow
                     result_dict = self._structured_tool_result(tool_name, arguments, {'error': f'Tool not found: {tool_name}'}, False)
+                except Exception as e:
+                    msg = f"[Tool Crash] The tool '{tool_name}' crashed: {e}"
+                    logger.error(msg)
+                    result_dict = self._structured_tool_result(tool_name, arguments, {'error': msg}, False)
             else:
                 tools = self.registry.list_tools() if self.registry and hasattr(self.registry, 'list_tools') else {}
                 tool = tools.get(tool_name) or next((t for t in tools.values() if getattr(t, 'name', None) == tool_name), None)
                 if not tool:
                     result_dict = self._structured_tool_result(tool_name, arguments, {'error': f'Tool not found: {tool_name}'}, False)
                 else:
-                    result = tool.execute(arguments)
-                    if asyncio.iscoroutine(result):
-                        result = self._run_coro_sync(result)
-                    if isinstance(result, dict) and {'tool', 'arguments', 'result', 'success'}.issubset(result.keys()):
-                        if 'error' in result.get('result', {}):
-                            result['result']['error'] = _scrub_jargon(result['result']['error'])
-                        result_dict = result
-                    else:
-                        raw_err = getattr(result, 'error', None)
-                        payload = {'output': getattr(result, 'output', result), 'error': _scrub_jargon(raw_err) if isinstance(raw_err, str) else raw_err}
-                        result_dict = self._structured_tool_result(tool_name, arguments, payload, bool(getattr(result, 'success', True)))
+                    try:
+                        result = self._run_coro_sync(_safe_execute(tool.execute, arguments))
+                        if isinstance(result, dict) and {'tool', 'arguments', 'result', 'success'}.issubset(result.keys()):
+                            if 'error' in result.get('result', {}):
+                                result['result']['error'] = _scrub_jargon(result['result']['error'])
+                            result_dict = result
+                        else:
+                            raw_err = getattr(result, 'error', None)
+                            payload = {'output': getattr(result, 'output', result), 'error': _scrub_jargon(raw_err) if isinstance(raw_err, str) else raw_err}
+                            result_dict = self._structured_tool_result(tool_name, arguments, payload, bool(getattr(result, 'success', True)))
+                    except asyncio.TimeoutError:
+                        msg = f"[Tool Crash] The tool '{tool_name}' exceeded the 30-second execution limit."
+                        logger.error(msg)
+                        result_dict = self._structured_tool_result(tool_name, arguments, {'error': msg}, False)
+                    except Exception as e:
+                        msg = f"[Tool Crash] The tool '{tool_name}' crashed: {e}"
+                        logger.error(msg)
+                        result_dict = self._structured_tool_result(tool_name, arguments, {'error': msg}, False)
         except Exception as exc:
             err_msg = _scrub_jargon(str(exc))
             result_dict = self._structured_tool_result(tool_name, arguments, {'error': f'Tool Execution Failed: {err_msg}'}, False)
@@ -1427,3 +1540,44 @@ Returns:
         return None
 
 
+    def _on_power_throttled(self, event) -> None:
+        self._power_throttled = True
+        from axiom.config import get_config
+        config = get_config()
+        if self._llm and hasattr(self._llm, 'config'):
+            if not hasattr(self, '_primary_model'):
+                self._primary_model = getattr(self._llm.config, 'model', config.ollama_model)
+            self._llm.config.model = config.power_saving_model
+            logger.info(f"Power throttled. Swapped model to {config.power_saving_model}")
+            
+    def _on_power_restored(self, event) -> None:
+        self._power_throttled = False
+        if self._llm and hasattr(self._llm, 'config') and hasattr(self, '_primary_model'):
+            self._llm.config.model = self._primary_model
+            logger.info(f"Power restored. Swapped model back to {self._primary_model}")
+            
+    def _on_system_anomaly(self, event) -> None:
+        """Handle proactive system anomalies from the Watchdog Kernel."""
+        details = event.data.get('details', '')
+        
+        msg = f"Watchdog Alert: {details}"
+        logger.warning(f"Orchestrator received anomaly: {msg}")
+        
+        # try:
+        #     from axiom.core.audio import AudioManager
+        #     import asyncio
+        #     try:
+        #         loop = asyncio.get_running_loop()
+        #         asyncio.run_coroutine_threadsafe(AudioManager.instance().speak(msg), loop)
+        #     except RuntimeError:
+        #         asyncio.run(AudioManager.instance().speak(msg))
+        # except Exception as e:
+        #     logger.error(f"Failed to speak anomaly: {e}")
+        
+        if hasattr(self, 'event_bus') and self.event_bus:
+            from axiom.core.events import Event
+            self.event_bus.publish(Event(
+                event_type="system.alert", 
+                source="orchestrator", 
+                data={"message": msg, "level": "danger"}
+            ))

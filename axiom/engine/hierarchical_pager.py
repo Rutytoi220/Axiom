@@ -3,7 +3,7 @@
 Manages LLM context like a Linux OS manages RAM.
 L1: Active LLM Prompt Context
 L2: Predictive In-Memory Cache (Summaries)
-L3: GraphRAG SQLite (Disk-backed)
+L3: Relational Index SQLite (Disk-backed)
 L4: Sharded LAN Peers (Network-backed)
 
 When context length exceeds limits, older tokens are dynamically compressed
@@ -34,7 +34,7 @@ class ContextPagerService:
         # Paging tables
         self._l1_cache: List[str] = []         # Active raw text
         self._l2_cache: Dict[str, MemoryPage] = {} # Summaries
-        self._l3_disk: Dict[str, MemoryPage] = {}  # Mock SQLite GraphRAG
+        self._l3_disk: Dict[str, MemoryPage] = {}  # Mock SQLite Relational Index
         self._l4_net: Dict[str, MemoryPage] = {}   # Mock LAN Peers
         
     def _estimate_tokens(self, text: str) -> int:

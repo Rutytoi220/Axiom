@@ -2,7 +2,7 @@ import subprocess
 import logging
 from typing import Any, Dict
 from pydantic import BaseModel, Field
-from axiom.tools import BaseTool
+from axiom.tools.core import BaseTool
 
 logger = logging.getLogger(__name__)
 

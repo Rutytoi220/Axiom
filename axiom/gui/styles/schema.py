@@ -11,11 +11,14 @@ class ThemeTokens(BaseModel):
     text_main: str = ""
     text_muted: str
     borders: str = ""
+    danger: str = "#ef4444"
+    success: str = "#10b981"
     
     spacing_sm: str
     spacing_md: str
     radius_sm: str
     radius_md: str
+    radius_lg: str = "12px"
     
     font_main: str
     font_mono: str

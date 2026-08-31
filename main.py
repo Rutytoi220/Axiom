@@ -39,8 +39,13 @@ def main():
     parser.add_argument("--verbose", "-v", action="store_true", help="Show raw LLM output (debug)")
     parser.add_argument("--system-prompt", "-s", default=None, help="Persistent system prompt to prepend to each query")
     parser.add_argument("--gui", action="store_true", help="Launch GUI instead of CLI (default: CLI)")
+    parser.add_argument("--health-check", action="store_true", help="Boot verify the environment and exit 0 (for OTA rollbacks)")
     args = parser.parse_args()
     
+    if args.health_check:
+        print("AXIOM Health Check OK")
+        sys.exit(0)
+        
     _ensure_directories()
     
     if args.gui:

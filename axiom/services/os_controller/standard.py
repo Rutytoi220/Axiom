@@ -6,6 +6,22 @@ logger = logging.getLogger(__name__)
 class StandardController(BaseOSController):
     """OS Controller for X11, Windows, and macOS using pyautogui."""
 
+    @property
+    def can_click(self) -> bool:
+        return True
+
+    @property
+    def can_type(self) -> bool:
+        return True
+
+    @property
+    def can_capture(self) -> bool:
+        return True
+
+    @property
+    def can_manage_windows(self) -> bool:
+        return True
+
     def click(self, x: int, y: int, button: str = "left", clicks: int = 1) -> None:
         import pyautogui
         try:

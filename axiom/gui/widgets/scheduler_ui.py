@@ -14,33 +14,22 @@ class TemporalSchedulerDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("📅 Temporal Engine")
+        self.setWindowTitle("Temporal Engine")
         self.setMinimumSize(600, 500)
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #1e1e2e;
-                color: #cdd6f4;
-            }
-            QLabel {
-                font-size: 14px;
-            }
-        """)
 
         self.db = ScheduleDatabase()
         
         layout = QVBoxLayout(self)
         
-        # Header
         header = QLabel("<h2>Semantic Scheduler (Temporal Engine)</h2>")
-        header.setStyleSheet("color: #fab387; font-weight: bold;")
+        header.setObjectName("update_header")
         layout.addWidget(header)
         
         desc = QLabel("Manage background AI tasks scheduled via natural language.")
-        desc.setStyleSheet("color: #a6adc8; margin-bottom: 20px;")
+        desc.setObjectName("hub_desc")
         desc.setWordWrap(True)
         layout.addWidget(desc)
 
-        # Scroll Area for tasks
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
@@ -52,43 +41,29 @@ class TemporalSchedulerDialog(QDialog):
         
         layout.addWidget(self.scroll)
         
-        # Refresh Button
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-        refresh_btn = QPushButton("🔄 Refresh")
-        refresh_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #89b4fa;
-                color: #11111b;
-                font-weight: bold;
-                border-radius: 8px;
-                padding: 6px 12px;
-            }
-        """)
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.setObjectName("scheduler_refresh")
         refresh_btn.clicked.connect(self.load_tasks)
         btn_layout.addWidget(refresh_btn)
         layout.addLayout(btn_layout)
 
-        # Ensure DB is initialized before loading
         loop = asyncio.get_event_loop()
         if loop.is_running():
             asyncio.create_task(self.db.initialize())
         else:
             loop.run_until_complete(self.db.initialize())
             
-        # Defer load to give layout time
         QTimer.singleShot(100, self.load_tasks)
 
     @Slot()
     def load_tasks(self):
-        """Fetch tasks from DB and populate UI."""
-        # Clear layout
         while self.tasks_layout.count():
             child = self.tasks_layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
                 
-        # Fetch data async
         loop = asyncio.get_event_loop()
         if loop.is_running():
             import concurrent.futures
@@ -101,29 +76,22 @@ class TemporalSchedulerDialog(QDialog):
     def _populate_ui(self, tasks):
         if not tasks:
             empty = QLabel("No semantic tasks scheduled. Tell AXIOM to 'schedule a task...'")
-            empty.setStyleSheet("color: #6c7086; font-style: italic;")
+            empty.setObjectName("scheduler_empty")
             self.tasks_layout.addWidget(empty)
             return
             
         for t in tasks:
             row = QFrame()
-            row.setStyleSheet("""
-                QFrame {
-                    background-color: #313244;
-                    border-radius: 8px;
-                    padding: 10px;
-                    margin-bottom: 10px;
-                }
-            """)
+            row.setObjectName("scheduler_task_row")
             row_layout = QHBoxLayout(row)
             
             text_layout = QVBoxLayout()
             t_label = QLabel(f"<b>Prompt:</b> {t['user_prompt']}")
-            t_label.setStyleSheet("color: #cdd6f4; font-size: 14px;")
+            t_label.setObjectName("scheduler_task_label")
             t_label.setWordWrap(True)
             
             d_label = QLabel(f"<b>Cron:</b> <code>{t['cron_expression']}</code> | <b>Active:</b> {t['is_active']}")
-            d_label.setStyleSheet("color: #a6adc8; font-size: 12px;")
+            d_label.setObjectName("scheduler_cron_label")
             
             text_layout.addWidget(t_label)
             text_layout.addWidget(d_label)
@@ -131,39 +99,17 @@ class TemporalSchedulerDialog(QDialog):
             
             row_layout.addStretch()
             
-            # Action Buttons
             btn_layout = QVBoxLayout()
             
             toggle_btn = QPushButton("Pause" if t['is_active'] else "Resume")
-            toggle_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #f9e2af;
-                    color: #11111b;
-                    font-weight: bold;
-                    border-radius: 4px;
-                    padding: 4px 8px;
-                }
-            """ if t['is_active'] else """
-                QPushButton {
-                    background-color: #a6e3a1;
-                    color: #11111b;
-                    font-weight: bold;
-                    border-radius: 4px;
-                    padding: 4px 8px;
-                }
-            """)
+            toggle_btn.setObjectName("scheduler_toggle")
+            toggle_btn.setProperty("status", "warning" if t['is_active'] else "success")
+            toggle_btn.style().unpolish(toggle_btn)
+            toggle_btn.style().polish(toggle_btn)
             toggle_btn.clicked.connect(lambda _, t_id=t['id'], state=t['is_active']: self.toggle_task(t_id, not state))
             
             del_btn = QPushButton("Delete")
-            del_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #f38ba8;
-                    color: #11111b;
-                    font-weight: bold;
-                    border-radius: 4px;
-                    padding: 4px 8px;
-                }
-            """)
+            del_btn.setObjectName("scheduler_delete")
             del_btn.clicked.connect(lambda _, t_id=t['id']: self.delete_task(t_id))
             
             btn_layout.addWidget(toggle_btn)

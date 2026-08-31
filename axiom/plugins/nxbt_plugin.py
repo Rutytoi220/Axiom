@@ -20,6 +20,12 @@ Returns:
 
     def initialize(self, config: Optional[Dict]=None) -> bool:
         """Initialize NXBT plugin."""
+        try:
+            import nxbt
+        except ImportError:
+            logger.warning("nxbt is not installed. To use hardware automation, install the [automation] extra.")
+            return False
+            
         try:  # pragma: no cover
             self.config = config or {}  # pragma: no cover
             logger.info('NXBT Plugin initialized')  # pragma: no cover

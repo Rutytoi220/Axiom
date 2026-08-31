@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from axiom.tools import BaseTool, ToolParameter, ToolResult
+from axiom.tools.core import BaseTool, ToolParameter, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -28,21 +28,15 @@ class SystemAdminTool(BaseTool):
 
     async def execute(self, bash_command: str) -> ToolResult:
         logger.info(f"SystemAdminTool executing: {bash_command}")
+        
+        from axiom.core.sandbox import SandboxRunner, SandboxPolicy
+        policy = SandboxPolicy(require_network=True, timeout_seconds=60)
+        runner = SandboxRunner(policy)
+        
         try:
-            # Create shell subprocess
-            process = await asyncio.create_subprocess_shell(
-                bash_command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
+            returncode, out_str, err_str = await runner.run_async("bash", "-c", bash_command)
             
-            # Enforce strict 60s timeout
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=60.0)
-            
-            out_str = stdout.decode('utf-8', errors='replace').strip()
-            err_str = stderr.decode('utf-8', errors='replace').strip()
-            
-            if process.returncode == 0:
+            if returncode == 0:
                 output_msg = out_str if out_str else "(Command succeeded with no output)"
                 if err_str:
                     output_msg += f"\n\nStandard Error output:\n{err_str}"

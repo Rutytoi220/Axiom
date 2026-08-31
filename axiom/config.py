@@ -43,6 +43,7 @@ Returns:
             self.behavior = BehaviorConfig()
     ollama_base_url: str = 'http://localhost:11434'
     ollama_model: str = 'qwen3:8b'
+    power_saving_model: str = 'qwen2.5:1.5b'
     embedding_model: str = 'nomic-embed-text'
     ollama_temperature: float = 0.7
     db_path: str = 'axiom.db'
@@ -52,6 +53,7 @@ Returns:
     event_history_limit: int = 1000
     sandbox_mode: bool = True
     allow_system_tools: bool = True
+    max_vector_memories: int = 5000
     
     # UI / GUI Settings
     first_launch: bool = True
@@ -61,6 +63,7 @@ Returns:
     theme_mode: str = 'dark'  # 'system', 'dark', 'light'
     ui_profile_level: str = 'standard' # 'standard', 'advanced', 'developer'
     persona: dict = field(default_factory=dict)
+    persona_key: str = 'default'
     llm_complexity: str = 'detailed'
     auto_ollama_start: bool = True
     model_selection_mode: str = 'auto'  # 'auto', 'manual'
@@ -112,7 +115,8 @@ Returns:
             'max_tools': self.max_tools, 
             'event_history_limit': self.event_history_limit, 
             'sandbox_mode': self.sandbox_mode, 
-            'allow_system_tools': self.allow_system_tools, 
+            'allow_system_tools': self.allow_system_tools,
+            'max_vector_memories': self.max_vector_memories,
             'allow_cloud_fallback': self.allow_cloud_fallback, 
             'monitor_window_focus': self.monitor_window_focus, 
             'monitor_clipboard': self.monitor_clipboard,
@@ -124,6 +128,7 @@ Returns:
             'theme_mode': self.theme_mode,
             'ui_profile_level': self.ui_profile_level,
             'persona': self.persona,
+            'persona_key': self.persona_key,
             'llm_complexity': self.llm_complexity,
             'auto_ollama_start': self.auto_ollama_start,
             'model_selection_mode': self.model_selection_mode,

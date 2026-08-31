@@ -7,7 +7,7 @@ class GovernorDialog(QDialog):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("⚡ Hardware Governor")
+        self.setWindowTitle("Hardware Governor")
         self.setMinimumSize(500, 400)
         self._init_ui()
         
@@ -18,7 +18,6 @@ class GovernorDialog(QDialog):
     def _init_ui(self):
         layout = QVBoxLayout(self)
         
-        # CPU/VRAM Metrics
         metrics_group = QGroupBox("System Resources")
         metrics_layout = QVBoxLayout()
         
@@ -35,7 +34,6 @@ class GovernorDialog(QDialog):
         metrics_group.setLayout(metrics_layout)
         layout.addWidget(metrics_group)
         
-        # Process Priorities
         proc_group = QGroupBox("Throttled Background Workers")
         proc_layout = QVBoxLayout()
         self.proc_list = QListWidget()
@@ -43,7 +41,6 @@ class GovernorDialog(QDialog):
         proc_group.setLayout(proc_layout)
         layout.addWidget(proc_group)
         
-        # Mesh Sessions
         mesh_group = QGroupBox("Active P2P Mesh Nodes (Encrypted)")
         mesh_layout = QVBoxLayout()
         self.mesh_list = QListWidget()
@@ -57,7 +54,6 @@ class GovernorDialog(QDialog):
         self.cpu_bar.setValue(int(cpu))
         self.cpu_bar.setFormat(f"{cpu}%")
         
-        # Proxy VRAM
         vram = 50.0
         try:
             import torch
@@ -86,12 +82,14 @@ class ExecutionGateDialog(QDialog):
         self.setWindowTitle("AXIOM Governor - Execution Gate")
         self.setModal(True)
         self.setMinimumWidth(400)
-        self.setStyleSheet("background-color: #1e1e2e; color: #cdd6f4;")
         
         layout = QVBoxLayout(self)
         
-        warning = QLabel(f"⚠️ AXIOM is attempting to run a high-risk tool:")
-        warning.setStyleSheet("color: #f38ba8; font-weight: bold; font-size: 14px;")
+        warning = QLabel("AXIOM is attempting to run a high-risk tool:")
+        warning.setObjectName("warning")
+        warning.setProperty("status", "danger")
+        warning.style().unpolish(warning)
+        warning.style().polish(warning)
         layout.addWidget(warning)
         
         tname = QLabel(f"Tool: {tool_name}")
@@ -102,19 +100,18 @@ class ExecutionGateDialog(QDialog):
         
         args_text = QTextEdit()
         args_text.setReadOnly(True)
-        # avoid font import issues
-        args_text.setStyleSheet("background-color: #11111b; border: 1px solid #313244; padding: 5px; font-family: monospace;")
+        args_text.setObjectName("governor_args")
         args_text.setText(json.dumps(arguments, indent=2))
         layout.addWidget(args_text)
         
         btn_layout = QHBoxLayout()
         
         self.deny_btn = QPushButton("Deny (Esc)")
-        self.deny_btn.setStyleSheet("background-color: #f38ba8; color: #11111b; font-weight: bold; padding: 8px;")
+        self.deny_btn.setObjectName("governor_deny")
         self.deny_btn.clicked.connect(self.reject)
         
         self.approve_btn = QPushButton("Approve (Enter)")
-        self.approve_btn.setStyleSheet("background-color: #a6e3a1; color: #11111b; font-weight: bold; padding: 8px;")
+        self.approve_btn.setObjectName("governor_approve")
         self.approve_btn.clicked.connect(self.accept)
         
         btn_layout.addWidget(self.deny_btn)

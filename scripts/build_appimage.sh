@@ -31,6 +31,7 @@ echo -e "${BLUE}[INFO]${NC} Constructing AXIOM.AppDir..."
 APPDIR="AXIOM.AppDir"
 rm -rf "$APPDIR"
 mkdir -p "$APPDIR/usr/bin"
+mkdir -p "$APPDIR/usr/share/applications"
 
 echo -e "${BLUE}[INFO]${NC} Copying binaries to AppDir..."
 # With the COLLECT step in axiom.spec, PyInstaller generates a directory at dist/AXIOM/
@@ -46,6 +47,9 @@ Type=Application
 Categories=Utility;Development;
 EOF
 
+# Make sure it's also in usr/share/applications/ per AppImage best practices
+cp "$APPDIR/axiom.desktop" "$APPDIR/usr/share/applications/"
+
 echo -e "${BLUE}[INFO]${NC} Setting up icon..."
 if [ -f "assets/axiom-logo.png" ]; then
     cp assets/axiom-logo.png "$APPDIR/"
@@ -57,10 +61,39 @@ fi
 
 echo -e "${BLUE}[INFO]${NC} Creating AppRun symlink..."
 # AppRun must point to the executable relative to the AppDir root
-cat <<EOF > "$APPDIR/AppRun"
+cat <<'EOF' > "$APPDIR/AppRun"
 #!/bin/bash
-HERE="\$(dirname "\$(readlink -f "\${0}")")"
-exec "\${HERE}/usr/bin/AXIOM" "\$@"
+HERE="$(dirname "$(readlink -f "${0}")")"
+
+# Dependency Check Function
+check_lib() {
+    if ! /sbin/ldconfig -p | grep -q "$1"; then
+        return 1
+    fi
+    return 0
+}
+
+MISSING_LIBS=""
+if ! check_lib "libxcb.so.1"; then
+    MISSING_LIBS="$MISSING_LIBS\n- libxcb.so.1 (sudo apt install libxcb-cursor0 libxcb1)"
+fi
+if ! check_lib "libGL.so.1"; then
+    MISSING_LIBS="$MISSING_LIBS\n- libGL.so.1 (sudo apt install libgl1)"
+fi
+
+if [ -n "$MISSING_LIBS" ]; then
+    MSG="AXIOM cannot start because critical host libraries are missing:\n$MISSING_LIBS\n\nPlease install them using your package manager."
+    echo -e "\033[0;31m[CRITICAL ERROR]\033[0m $MSG"
+    
+    if command -v zenity &> /dev/null; then
+        zenity --error --title="AXIOM: Missing Dependencies" --text="$MSG"
+    elif command -v kdialog &> /dev/null; then
+        kdialog --error "$MSG" --title "AXIOM: Missing Dependencies"
+    fi
+    exit 1
+fi
+
+exec "${HERE}/usr/bin/AXIOM" "$@"
 EOF
 chmod +x "$APPDIR/AppRun"
 
@@ -73,8 +106,8 @@ if [ ! -f "appimagetool-x86_64.AppImage" ]; then
 fi
 
 echo -e "${BLUE}[INFO]${NC} Packaging AppImage..."
-# Run appimagetool
-./appimagetool-x86_64.AppImage "$APPDIR" AXIOM-v11.2.0-x86_64.AppImage
+# Run appimagetool silently to avoid noisy stdout, but set -e ensures we catch exit codes
+./appimagetool-x86_64.AppImage "$APPDIR" AXIOM-v11.2.0-x86_64.AppImage > /dev/null
 
 echo -e "${BLUE}[INFO]${NC} Cleaning up temporary AppDir..."
 rm -rf "$APPDIR"

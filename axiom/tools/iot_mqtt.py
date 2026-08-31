@@ -12,7 +12,7 @@ try:
 except ImportError:
     MQTT_AVAILABLE = False
 
-from axiom.tools import BaseTool, ToolResult, ToolParameter
+from axiom.tools.core import BaseTool, ToolResult, ToolParameter
 
 logger = logging.getLogger(__name__)
 
