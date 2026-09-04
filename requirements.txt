@@ -31,3 +31,4 @@ structlog>=23.1.0
 qasync>=0.27.0
 pyttsx3>=2.90
 sounddevice>=0.4.6
+anthropic>=0.16.0
