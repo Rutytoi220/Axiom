@@ -1,3 +1,4 @@
+import anthropic
 """Top-level entrypoint preserved for backward compatibility.
 
 Supports both CLI and GUI modes.
