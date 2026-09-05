@@ -51,7 +51,7 @@ if os.path.exists('assets'):
 
 
 a = Analysis(
-    ['main.py'],
+    ['axiom/launcher.py'],
     pathex=[],
     binaries=[],
     datas=datas,
