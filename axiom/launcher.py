@@ -1,3 +1,11 @@
+import sys
+import runpy
+if "axiom.server.daemon" in sys.argv:
+    try:
+        runpy.run_module("axiom.server.daemon", run_name="__main__")
+    except ImportError:
+        runpy.run_module("axiom.core.daemon", run_name="__main__")
+    sys.exit(0)
 import os
 import sys
 import time
