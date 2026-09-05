@@ -16,6 +16,7 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
 ]
 dependencies = [
+    "markdown>=3.4.0",
     "qasync>=0.27.1",
     "anthropic>=0.16.0",
     "PySide6>=6.0",
