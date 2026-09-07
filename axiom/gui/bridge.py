@@ -153,11 +153,8 @@ class AxiomBridge(QObject):
             return
 
         # Retry connection with backoff (daemon needs time to boot, especially if pulling models)
-        for attempt in range(15):  # Up to ~40 seconds total wait
-            delay = 1.0 + (attempt * 0.5)
-            # Cap delay at 3.0s per tick
-            if delay > 3.0:
-                delay = 3.0
+        for attempt in range(15):
+            delay = min(0.5 * (1.5 ** attempt), 5.0)
             await asyncio.sleep(delay)
             success = await self._client.connect()
             if success:

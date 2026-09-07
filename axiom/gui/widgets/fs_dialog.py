@@ -64,9 +64,8 @@ class AxiomFSDialog(QDialog):
             cmd = f"python3 -c 'from axiom.fs.axiom_fs import mount_axiom_fs; mount_axiom_fs(\"{self.mount_path}\")'"
             subprocess.Popen(cmd, shell=True)
             # Give it a second to mount
-            import time
-            time.sleep(1)
-            self._check_status()
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(1000, self._check_status)
         except Exception as e:
             self.status_label.setText(f"Error mounting: {e}")
             
