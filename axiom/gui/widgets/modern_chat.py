@@ -50,10 +50,19 @@ class ModernInputBar(QFrame):
         self.layout.setSpacing(12)
         self.layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
-        from PySide6.QtWidgets import QStyle
+        from PySide6.QtGui import QIcon
+        from PySide6.QtCore import QSize
+        import os
+        from pathlib import Path
+        
+        # Resolve absolute path to assets/icons
+        base_dir = Path(__file__).parent.parent.resolve()
+        icons_dir = base_dir / "assets" / "icons"
+
 
         self.attach_btn = QPushButton()
-        self.attach_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton))
+        self.attach_btn.setIcon(QIcon(str(icons_dir / "attach.svg")))
+        self.attach_btn.setIconSize(QSize(20, 20))
         self.attach_btn.setObjectName("attach_btn")
         self.attach_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.attach_btn.setFixedSize(40, 40)
@@ -63,14 +72,16 @@ class ModernInputBar(QFrame):
         self.input_area.setFixedHeight(40)
         
         self.mic_btn = QPushButton()
-        self.mic_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaVolume))
+        self.mic_btn.setIcon(QIcon(str(icons_dir / "mic.svg")))
+        self.mic_btn.setIconSize(QSize(20, 20))
         self.mic_btn.setCheckable(True)
         self.mic_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.mic_btn.setFixedSize(40, 40)
         self.mic_btn.toggled.connect(self.mic_toggled.emit)
         
         self.send_btn = QPushButton()
-        self.send_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton))
+        self.send_btn.setIcon(QIcon(str(icons_dir / "send.svg")))
+        self.send_btn.setIconSize(QSize(20, 20))
         self.send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.send_btn.setFixedSize(40, 40)
         self.send_btn.clicked.connect(self._on_send)
