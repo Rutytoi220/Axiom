@@ -4,24 +4,24 @@ from typing import Dict
 class ThemeTokens(BaseModel):
     model_config = ConfigDict(extra='allow')
     
-    bg_base: str
-    bg_surface: str
-    primary: str = ""
-    accent: str
-    text_main: str = ""
-    text_muted: str
-    borders: str = ""
+    bg_base: str = "#0D1117"
+    bg_surface: str = "#161B22"
+    primary: str = "#8B5CF6"
+    accent: str = "#A78BFA"
+    text_main: str = "#FAFAFA"
+    text_muted: str = "#8B949E"
+    borders: str = "#30363D"
     danger: str = "#ef4444"
     success: str = "#10b981"
     
-    spacing_sm: str
-    spacing_md: str
-    radius_sm: str
-    radius_md: str
+    spacing_sm: str = "8px"
+    spacing_md: str = "16px"
+    radius_sm: str = "4px"
+    radius_md: str = "8px"
     radius_lg: str = "12px"
     
-    font_main: str
-    font_mono: str
+    font_main: str = "'Inter', sans-serif"
+    font_mono: str = "'JetBrains Mono', monospace"
 
 class ThemeManifest(BaseModel):
     id: str
