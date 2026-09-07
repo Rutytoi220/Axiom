@@ -82,7 +82,7 @@ class JarvisOverlayWindow(QWidget):
         top_bar.addWidget(self.status_icon)
         
         self.input_field = QLineEdit()
-        self.input_field.setPlaceholderText("Ask AXIOM... or hold [🎤 Voice Command]")
+        self.input_field.setPlaceholderText("Ask AXIOM... or hold [Voice Command]")
         self.input_field
         self.input_field.returnPressed.connect(self._on_submit)
         top_bar.addWidget(self.input_field)
@@ -96,7 +96,7 @@ class JarvisOverlayWindow(QWidget):
         # Control Buttons
         btn_layout = QHBoxLayout()
         
-        self.voice_btn = QPushButton("🎤 Voice Command")
+        self.voice_btn = QPushButton("Voice Command")
         self._style_btn(self.voice_btn, "#cba6f7")
         self.voice_btn.pressed.connect(self._start_voice)
         self.voice_btn.released.connect(self._stop_voice)
@@ -127,7 +127,7 @@ class JarvisOverlayWindow(QWidget):
         logger.info("Jarvis: Voice STT recording started.")
         
     def _stop_voice(self):
-        self.input_field.setPlaceholderText("Ask AXIOM... or hold [🎤 Voice Command]")
+        self.input_field.setPlaceholderText("Ask AXIOM... or hold [Voice Command]")
         self.visualizer.update_waveform([])
         self.input_field.setText("Explain this error message highlighted in red and read the fix aloud to me.")
         logger.info("Jarvis: Voice STT recording stopped. Processing...")

@@ -125,7 +125,7 @@ class ModernSidebar(QFrame):
         settings_layout.addWidget(self.settings_btn)
         self.layout.addLayout(settings_layout)
 
-        self.hub_btn = QPushButton("🌐 AXIOM Hub")
+        self.hub_btn = QPushButton("[Hub] AXIOM Hub")
         self.hub_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.hub_btn.setFixedHeight(36)
         hub_layout = QHBoxLayout()
@@ -151,7 +151,7 @@ class ModernSidebar(QFrame):
         if item and not item.parent():
             project_id = item.data(0, Qt.ItemDataRole.UserRole)
             menu = QMenu(self)
-            new_chat_action = menu.addAction("➕ New Chat in Project")
+            new_chat_action = menu.addAction("+ New Chat in Project")
             action = menu.exec(self.tree.mapToGlobal(pos))
             if action == new_chat_action:
                 self.new_project_chat_requested.emit(project_id)

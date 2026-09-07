@@ -166,7 +166,7 @@ class OOBEWindow(QDialog):
         
         self.voice_group = QButtonGroup(self)
         
-        self.btn_ptt = QRadioButton("🎤 Push-to-Talk")
+        self.btn_ptt = QRadioButton("Push-to-Talk")
         self.btn_ptt.setChecked(True)
         self.btn_ptt.setToolTip("Privacy First. AXIOM only listens when you click the microphone.")
         

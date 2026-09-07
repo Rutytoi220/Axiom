@@ -22,7 +22,7 @@ class SystemHubDialog(QDialog):
     def __init__(self, main_window):
         super().__init__(main_window)
         self.main_window = main_window
-        self.setWindowTitle("⚙️ AXIOM System Hub")
+        self.setWindowTitle("AXIOM System Hub")
         self.setMinimumSize(600, 400)
         pass
         self._init_ui()
@@ -31,7 +31,7 @@ class SystemHubDialog(QDialog):
         layout = QVBoxLayout(self)
 
         # Header
-        header = QLabel("<h2>⚙️ System Hub</h2>")
+        header = QLabel("<h2>System Hub</h2>")
         header.setObjectName("hub_name")
         layout.addWidget(header)
         

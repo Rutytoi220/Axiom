@@ -8,8 +8,6 @@
         "bg_surface": "#161B22",
         "primary": "#8B5CF6",
         "accent": "#A78BFA",
-        "accent_hover": "#8B5CF6",
-        "bg_deep": "#0D0D12",
         "text_main": "#FAFAFA",
         "text_muted": "#8B949E",
         "borders": "#30363D",
@@ -21,6 +19,8 @@
         "radius_md": "8px",
         "radius_lg": "12px",
         "font_main": "'Inter', sans-serif",
-        "font_mono": "'JetBrains Mono', monospace"
+        "font_mono": "'JetBrains Mono', monospace",
+        "accent_hover": "#8B5CF6",
+        "bg_deep": "#0D0D12"
     }
 }

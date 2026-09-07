@@ -346,7 +346,7 @@ class MainWindow(QMainWindow):
         from axiom.gui.swarm_client import SwarmClient
         self._swarm = SwarmClient(self)
         self._swarm.connected.connect(self.settings_drawer.on_swarm_connected)
-        self._swarm.connected.connect(lambda: self._chat_display.add_bubble('assistant', '🌐 Swarm Node connected — prompts will be routed remotely.'))
+        self._swarm.connected.connect(lambda: self._chat_display.add_bubble('assistant', 'Swarm Node connected — prompts will be routed remotely.'))
         self._swarm.disconnected.connect(self.settings_drawer.on_swarm_disconnected)
         self._swarm.disconnected.connect(lambda: self._chat_display.add_bubble('assistant', '🔌 Swarm Node disconnected — falling back to local engine.'))
         self._swarm.connection_error.connect(self.settings_drawer.on_swarm_error)
@@ -1177,7 +1177,7 @@ class MainWindow(QMainWindow):
 
     def _on_dock_visibility_changed(self, visible: bool) -> None:
         self._expert_btn.setChecked(visible)
-        self._expert_btn.setText(f"⚙️ Expert Mode: {('ON' if visible else 'OFF')}")
+        self._expert_btn.setText(f"Expert Mode: {('ON' if visible else 'OFF')}")
         
     def update_model_label(self, model: str) -> None:
         pass
