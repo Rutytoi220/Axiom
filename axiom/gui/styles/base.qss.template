@@ -14,7 +14,7 @@ QLineEdit, QTextEdit, QPlainTextEdit, QComboBox {
     background-color: @bg_surface@;
     color: @text_main@;
     border: 1px solid @borders@;
-    border-radius: @radius_md@;
+    border-radius: @radius_pill@;
     padding: 8px 12px;
 }
 
@@ -45,7 +45,7 @@ QPushButton, QToolButton {
     background-color: @bg_surface@;
     color: @text_main@;
     border: 1px solid @borders@;
-    border-radius: @radius_md@;
+    border-radius: @radius_pill@;
     padding: @spacing_sm@ @spacing_md@;
 }
 
@@ -71,7 +71,7 @@ QPushButton:disabled, QToolButton:disabled {
 QFrame#surface, QFrame#border {
     background-color: @bg_surface@;
     border: 1px solid @borders@;
-    border-radius: @radius_md@;
+    border-radius: @radius_pill@;
     padding: @spacing_md@;
 }
 
@@ -126,7 +126,7 @@ QPushButton[status="warning"] {
    ========================================================================= */
 QFrame#hub_card {
     background-color: @bg_surface@;
-    border-radius: @radius_md@;
+    border-radius: @radius_pill@;
     padding: @spacing_md@;
 }
 
@@ -240,7 +240,7 @@ QPushButton#sync_host {
     color: @bg_base@;
     font-weight: bold;
     padding: 12px;
-    border-radius: @radius_md@;
+    border-radius: @radius_pill@;
     font-size: 16px;
 }
 
@@ -249,7 +249,7 @@ QPushButton#sync_connect {
     color: @bg_base@;
     font-weight: bold;
     padding: 12px;
-    border-radius: @radius_md@;
+    border-radius: @radius_pill@;
     font-size: 16px;
 }
 
@@ -258,7 +258,7 @@ QPushButton#sync_action {
     color: @bg_base@;
     font-weight: bold;
     padding: 10px;
-    border-radius: @radius_md@;
+    border-radius: @radius_pill@;
     font-size: 14px;
 }
 
@@ -267,7 +267,7 @@ QPushButton#sync_action {
    ========================================================================= */
 QFrame#plugin_card {
     background-color: @bg_surface@;
-    border-radius: @radius_md@;
+    border-radius: @radius_pill@;
 }
 
 QLabel#plugin_name {
@@ -326,7 +326,7 @@ QLabel#update_header {
 QTextEdit#update_changelog {
     background-color: @bg_base@;
     color: @text_main@;
-    border-radius: @radius_md@;
+    border-radius: @radius_pill@;
     padding: @spacing_md@;
 }
 
@@ -335,7 +335,7 @@ QPushButton#update_install {
     color: @bg_base@;
     font-weight: bold;
     padding: 10px 20px;
-    border-radius: @radius_md@;
+    border-radius: @radius_pill@;
 }
 
 QPushButton#update_later {
@@ -343,7 +343,7 @@ QPushButton#update_later {
     color: @text_main@;
     font-weight: bold;
     padding: 10px 20px;
-    border-radius: @radius_md@;
+    border-radius: @radius_pill@;
 }
 
 /* =========================================================================
@@ -365,7 +365,7 @@ QTextEdit.code, QPlainTextEdit.code {
    ========================================================================= */
 QFrame#segmented_control {
     background-color: @bg_surface@;
-    border-radius: @radius_md@;
+    border-radius: @radius_pill@;
     border: 1px solid @borders@;
 }
 QPushButton#segmented_btn {
@@ -383,28 +383,28 @@ QPushButton#segmented_btn[status="active"] {
     color: #FFFFFF;
 }
 QPushButton#segmented_btn[position="first"] {
-    border-top-left-radius: @radius_md@;
-    border-bottom-left-radius: @radius_md@;
+    border-top-left-radius: @radius_pill@;
+    border-bottom-left-radius: @radius_pill@;
 }
 QPushButton#segmented_btn[position="last"] {
-    border-top-right-radius: @radius_md@;
-    border-bottom-right-radius: @radius_md@;
+    border-top-right-radius: @radius_pill@;
+    border-bottom-right-radius: @radius_pill@;
 }
 
 /* =========================================================================
    Chat Window Specifics
    ========================================================================= */
-QPushButton#attach_btn {
-    background: transparent;
-    color: @text_muted@;
-    font-size: 24px;
-    font-weight: bold;
-    border: none;
-    padding-bottom: 2px;
+QPushButton#attach_btn, QPushButton#mic_btn, QPushButton#send_btn {
+    background-color: @bg_surface@;
+    border: 1px solid @borders@;
+    border-radius: @radius_circle@;
+    padding: 0px;
 }
-QPushButton#attach_btn:hover {
-    color: @text_main@;
+QPushButton#attach_btn:hover, QPushButton#mic_btn:hover, QPushButton#send_btn:hover {
+    background-color: @primary@;
+    border: 1px solid @primary@;
 }
+
 
 #swarm_hud {
     background: transparent;
@@ -427,7 +427,7 @@ QLabel#chat_watermark {
    Chat Bubbles
    ========================================================================= */
 QFrame#chat_bubble {
-    border-radius: @radius_lg@;
+    border-radius: @radius_pill@;
 }
 
 QFrame#chat_bubble[role="user"] {
@@ -494,7 +494,7 @@ QProgressBar::chunk {
    ========================================================================= */
 QFrame#scheduler_task_row {
     background-color: @bg_surface@;
-    border-radius: @radius_md@;
+    border-radius: @radius_pill@;
     padding: 10px;
     margin-bottom: 10px;
 }
@@ -518,7 +518,7 @@ QPushButton#scheduler_refresh {
     background-color: @primary@;
     color: @bg_base@;
     font-weight: bold;
-    border-radius: @radius_md@;
+    border-radius: @radius_pill@;
     padding: 6px 12px;
 }
 
@@ -694,7 +694,7 @@ QPushButton#security_heal {
     background-color: @accent@;
     color: @bg_base@;
     border: none;
-    border-radius: 6px;
+    border-radius: @radius_pill@;
     padding: 10px 20px;
     font-weight: bold;
     font-size: 14px;
@@ -708,7 +708,7 @@ QPushButton#security_heal {
     background-color: @bg_deep@;
     color: @text_main@;
     border: 1px solid @borders@;
-    border-radius: 6px;
+    border-radius: @radius_pill@;
     padding: 10px 20px;
     font-weight: bold;
     font-size: 14px;
@@ -742,7 +742,7 @@ PersonaCard[selected="true"], ThemeCard[selected="true"] {
     background-color: @bg_base@;
     color: @text_main@;
     border: 1px solid @borders@;
-    border-radius: 6px;
+    border-radius: @radius_pill@;
     padding: 8px;
 }
 
@@ -765,4 +765,3 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; bord
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
 
 /* --- FIX SQUARE BUTTONS --- */
-QToolButton { border-radius: 6px; }

@@ -19,6 +19,8 @@ class ThemeTokens(BaseModel):
     radius_sm: str = "4px"
     radius_md: str = "8px"
     radius_lg: str = "12px"
+    radius_pill: str = "20px"
+    radius_circle: str = "20px"
     
     font_main: str = "'Inter', sans-serif"
     font_mono: str = "'JetBrains Mono', monospace"

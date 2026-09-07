@@ -72,6 +72,7 @@ class ModernInputBar(QFrame):
         self.input_area.setFixedHeight(40)
         
         self.mic_btn = QPushButton()
+        self.mic_btn.setObjectName("mic_btn")
         self.mic_btn.setIcon(QIcon(str(icons_dir / "mic.svg")))
         self.mic_btn.setIconSize(QSize(20, 20))
         self.mic_btn.setCheckable(True)
@@ -80,6 +81,7 @@ class ModernInputBar(QFrame):
         self.mic_btn.toggled.connect(self.mic_toggled.emit)
         
         self.send_btn = QPushButton()
+        self.send_btn.setObjectName("send_btn")
         self.send_btn.setIcon(QIcon(str(icons_dir / "send.svg")))
         self.send_btn.setIconSize(QSize(20, 20))
         self.send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
