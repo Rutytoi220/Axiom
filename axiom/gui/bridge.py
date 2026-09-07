@@ -1,11 +1,10 @@
-import time
+from __future__ import annotations
 """AXIOM GUI — Async Signal Bridge.
 
 Bridges AXIOM's synchronous EventBus and async OrchestratorAgent
 to Qt's main thread via thread-safe Signal emissions.
 """
 
-from __future__ import annotations
 
 import asyncio
 import logging
@@ -144,8 +143,8 @@ class AxiomBridge(QObject):
                 )
                 daemon_started = True
                 logger.info("Started daemon via subprocess fallback.")
-        print("[GUI] Waiting 3 seconds for daemon to bind to port 9410...")
-        time.sleep(3)
+                print("[GUI] Waiting 3 seconds for daemon to bind to port 9410...")
+                await asyncio.sleep(3)
             except Exception as e:
                 logger.error(f"Failed to start daemon subprocess: {e}")
 

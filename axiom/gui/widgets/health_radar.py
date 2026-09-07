@@ -22,13 +22,13 @@ class StatusPill(QLabel):
             color = "#000000"
         else:
             bg = "transparent"
-            color = "@text_secondary@"
+            color = "#8B949E"
             
         self.setStyleSheet(f"""
             QLabel {{
                 background-color: {bg};
                 color: {color};
-                border: 1px solid @borders@;
+                border: 1px solid #30363D;
                 border-radius: 10px;
                 padding: 2px 8px;
                 font-weight: bold;
@@ -49,7 +49,7 @@ class TelemetryBar(QWidget):
         self.title_lbl = QLabel(title)
         self.title_lbl.setStyleSheet("font-weight: bold; font-size: 11px;")
         self.val_lbl = QLabel("0%")
-        self.val_lbl.setStyleSheet("color: @accent@; font-size: 11px;")
+        self.val_lbl.setStyleSheet("color: #A78BFA; font-size: 11px;")
         
         header_layout.addWidget(self.title_lbl)
         header_layout.addStretch()
@@ -65,12 +65,12 @@ class TelemetryBar(QWidget):
         
         self.bar.setStyleSheet("""
             QProgressBar {
-                background-color: @bg_base@;
+                background-color: #0D1117;
                 border-radius: 3px;
-                border: 1px solid @borders@;
+                border: 1px solid #30363D;
             }
             QProgressBar::chunk {
-                background-color: @accent@;
+                background-color: #A78BFA;
                 border-radius: 3px;
             }
         """)
@@ -89,13 +89,13 @@ class TelemetryBar(QWidget):
         elif percent > 75:
             color = "#ffcc00"
         else:
-            color = "@accent@"
+            color = "#A78BFA"
             
         self.bar.setStyleSheet(f"""
             QProgressBar {{
-                background-color: @bg_base@;
+                background-color: #0D1117;
                 border-radius: 3px;
-                border: 1px solid @borders@;
+                border: 1px solid #30363D;
             }}
             QProgressBar::chunk {{
                 background-color: {color};
@@ -112,8 +112,8 @@ class HealthRadarWidget(QFrame):
         self.setObjectName("healthRadar")
         self.setStyleSheet("""
             QFrame#healthRadar {
-                background-color: @bg_surface@;
-                border: 1px solid @borders@;
+                background-color: #161B22;
+                border: 1px solid #30363D;
                 border-radius: 8px;
             }
         """)
@@ -124,20 +124,20 @@ class HealthRadarWidget(QFrame):
         
         # --- HEADER ---
         header = QLabel("📡 Health Radar")
-        header.setStyleSheet("font-size: 14px; font-weight: bold; color: @text_primary@;")
+        header.setStyleSheet("font-size: 14px; font-weight: bold; color: #FAFAFA;")
         layout.addWidget(header)
         
         # --- LATENCY / LIFECYCLE ---
         info_layout = QHBoxLayout()
         
         self.lifecycle_lbl = QLabel("State: UNKNOWN")
-        self.lifecycle_lbl.setStyleSheet("font-size: 11px; color: @text_secondary@;")
+        self.lifecycle_lbl.setStyleSheet("font-size: 11px; color: #8B949E;")
         
         self.latency_lbl = QLabel("Latency: -- ms")
-        self.latency_lbl.setStyleSheet("font-size: 11px; color: @text_secondary@;")
+        self.latency_lbl.setStyleSheet("font-size: 11px; color: #8B949E;")
         
         self.tasks_lbl = QLabel("Tasks: 0")
-        self.tasks_lbl.setStyleSheet("font-size: 11px; color: @text_secondary@;")
+        self.tasks_lbl.setStyleSheet("font-size: 11px; color: #8B949E;")
         
         info_layout.addWidget(self.lifecycle_lbl)
         info_layout.addStretch()

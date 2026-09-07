@@ -235,7 +235,7 @@ class AxiomHubDialog(QDialog):
         # Header actions
         header_layout = QHBoxLayout()
         header_lbl = QLabel("Manage dynamic Model Context Protocol (MCP) servers.")
-        header_lbl.setStyleSheet("color: @text_secondary@;")
+        header_lbl.setStyleSheet("color: #8B949E;")
         header_layout.addWidget(header_lbl)
         header_layout.addStretch()
         
@@ -317,7 +317,7 @@ class AxiomHubDialog(QDialog):
         if not servers:
             empty_lbl = QLabel("No MCP servers configured.")
             empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            empty_lbl.setStyleSheet("color: @text_secondary@;")
+            empty_lbl.setStyleSheet("color: #8B949E;")
             self.mcp_list_layout.addWidget(empty_lbl)
             return
             
@@ -334,7 +334,7 @@ class AxiomHubDialog(QDialog):
             cmd = srv.get("command", "")
             args = " ".join(srv.get("args", []))
             cmd_lbl = QLabel(f"{cmd} {args}")
-            cmd_lbl.setStyleSheet("color: @text_secondary@; font-family: monospace; font-size: 11px;")
+            cmd_lbl.setStyleSheet("color: #8B949E; font-family: monospace; font-size: 11px;")
             
             status = srv.get("status", "OFFLINE")
             color = "#00cc66" if status == "ONLINE" else "#ff4444"
