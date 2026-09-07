@@ -74,14 +74,13 @@ class SandboxContainer(QWidget):
         
         # Simple header for closing or interacting
         self.close_btn = QPushButton("✖")
-                self.close_btn
+        self.close_btn.setObjectName("sandbox_close")
         self.close_btn.clicked.connect(self.hide)
         
         header_layout.addStretch()
         header_layout.addWidget(self.close_btn)
         
         self.view = QWebEngineView()
-        self.view
         
         layout.addLayout(header_layout)
         layout.addWidget(self.view)

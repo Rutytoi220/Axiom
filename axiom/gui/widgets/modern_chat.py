@@ -51,18 +51,18 @@ class ModernInputBar(QFrame):
 
         self.attach_btn = QPushButton("+")
         self.attach_btn.setObjectName("attach_btn")
-                self.attach_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.attach_btn.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self.input_area = AutoExpandTextEdit(theme_manager)
         self.input_edit = self.input_area  # ALIAS for main_window.py
         
         self.mic_btn = QToolButton()
         self.mic_btn.setText("Mic")
-                self.mic_btn.setCheckable(True)
+        self.mic_btn.setCheckable(True)
         self.mic_btn.toggled.connect(self.mic_toggled.emit)
         
         self.send_btn = QPushButton("Send")
-                self.send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.send_btn.clicked.connect(self._on_send)
         
         self.input_area.return_pressed.connect(self.send_btn.click)
