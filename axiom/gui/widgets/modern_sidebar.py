@@ -88,13 +88,11 @@ class ModernSidebar(QFrame):
         
         self.new_chat_btn = QPushButton("+ New Chat")
         self.new_chat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.new_chat_btn.setFixedHeight(40)
-        self.new_chat_btn.clicked.connect(self.new_chat_requested.emit)
+                self.new_chat_btn.clicked.connect(self.new_chat_requested.emit)
         
         self.new_proj_btn = QPushButton("+ Project")
         self.new_proj_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.new_proj_btn.setFixedHeight(40)
-        self.new_proj_btn.clicked.connect(self.new_project_requested.emit)
+                self.new_proj_btn.clicked.connect(self.new_project_requested.emit)
 
         btn_layout.addWidget(self.new_chat_btn)
         btn_layout.addWidget(self.new_proj_btn)
@@ -119,16 +117,14 @@ class ModernSidebar(QFrame):
 
         self.settings_btn = QPushButton("Settings")
         self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.settings_btn.setFixedHeight(36)
-        settings_layout = QHBoxLayout()
+                settings_layout = QHBoxLayout()
         settings_layout.setContentsMargins(0, 0, 0, 0)
         settings_layout.addWidget(self.settings_btn)
         self.layout.addLayout(settings_layout)
 
         self.hub_btn = QPushButton("[Hub] AXIOM Hub")
         self.hub_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.hub_btn.setFixedHeight(36)
-        hub_layout = QHBoxLayout()
+                hub_layout = QHBoxLayout()
         hub_layout.setContentsMargins(0, 0, 0, 0)
         hub_layout.addWidget(self.hub_btn)
         self.layout.addLayout(hub_layout)

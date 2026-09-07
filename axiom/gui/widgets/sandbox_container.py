@@ -74,8 +74,7 @@ class SandboxContainer(QWidget):
         
         # Simple header for closing or interacting
         self.close_btn = QPushButton("✖")
-        self.close_btn.setFixedSize(24, 24)
-        self.close_btn
+                self.close_btn
         self.close_btn.clicked.connect(self.hide)
         
         header_layout.addStretch()

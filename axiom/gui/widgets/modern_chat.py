@@ -51,21 +51,18 @@ class ModernInputBar(QFrame):
 
         self.attach_btn = QPushButton("+")
         self.attach_btn.setObjectName("attach_btn")
-        self.attach_btn.setFixedSize(32, 32)
-        self.attach_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                self.attach_btn.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self.input_area = AutoExpandTextEdit(theme_manager)
         self.input_edit = self.input_area  # ALIAS for main_window.py
         
         self.mic_btn = QToolButton()
         self.mic_btn.setText("Mic")
-        self.mic_btn.setFixedSize(28, 28)
-        self.mic_btn.setCheckable(True)
+                self.mic_btn.setCheckable(True)
         self.mic_btn.toggled.connect(self.mic_toggled.emit)
         
         self.send_btn = QPushButton("Send")
-        self.send_btn.setFixedSize(32, 32)
-        self.send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                self.send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.send_btn.clicked.connect(self._on_send)
         
         self.input_area.return_pressed.connect(self.send_btn.click)
@@ -128,14 +125,15 @@ class ModernChatBubble(QFrame):
     def resizeEvent(self, event):
         if event is not None:
             super().resizeEvent(event)
+        import math
         vp_width = self.text_browser.viewport().width()
         if vp_width > 0:
             # Force text reflow to the exact viewport width so Qt knows the height.
             self.text_browser.document().setTextWidth(vp_width)
-        exact_h = int(self.text_browser.document().size().height())
+        exact_h = math.ceil(self.text_browser.document().size().height())
         if exact_h > 0:
-            self.text_browser.setFixedHeight(exact_h)
-            self.setFixedHeight(exact_h + 24)  # 24px = 12px top + 12px bottom padding
+            self.text_browser.setMinimumHeight(exact_h)
+            self.setMinimumHeight(exact_h + 24)  # 24px = 12px top + 12px bottom padding
 
 class ModernChatDisplay(QWidget):
     def __init__(self, parent=None):

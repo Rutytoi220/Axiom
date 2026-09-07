@@ -14,17 +14,9 @@ class StatusPill(QLabel):
 
     def set_status(self, status: str):
         """status in ['online', 'offline', 'warning']"""
-        if status == "online":
-            bg = "#00cc66" # Green
-            color = "#000000"
-        elif status == "warning":
-            bg = "#ffcc00" # Yellow
-            color = "#000000"
-        else:
-            bg = "transparent"
-            color = "#8B949E"
-            
-        self
+        self.setProperty("status", status)
+        self.style().unpolish(self)
+        self.style().polish(self)
 
 
 class TelemetryBar(QWidget):
@@ -37,9 +29,9 @@ class TelemetryBar(QWidget):
         # Header
         header_layout = QHBoxLayout()
         self.title_lbl = QLabel(title)
-        self.title_lbl
+        self.title_lbl.setObjectName("telemetry_title")
         self.val_lbl = QLabel("0%")
-        self.val_lbl
+        self.val_lbl.setObjectName("telemetry_val")
         
         header_layout.addWidget(self.title_lbl)
         header_layout.addStretch()
@@ -49,11 +41,10 @@ class TelemetryBar(QWidget):
         # Bar
         self.bar = QProgressBar()
         self.bar.setTextVisible(False)
-        self.bar.setFixedHeight(6)
+        self.bar.setObjectName("telemetry_bar")
         self.bar.setRange(0, 100)
         self.bar.setValue(0)
         
-        self.bar
         layout.addWidget(self.bar)
 
     def set_value(self, percent: float, label_text: str = ""):
@@ -65,14 +56,15 @@ class TelemetryBar(QWidget):
         
         # Color transition logic based on %
         if percent > 90:
-            color = "#ff4444"
+            status = "danger"
         elif percent > 75:
-            color = "#ffcc00"
+            status = "warning"
         else:
-            color = "#A78BFA"
+            status = "normal"
             
-        self.bar
-
+        self.bar.setProperty("status", status)
+        self.bar.style().unpolish(self.bar)
+        self.bar.style().polish(self.bar)
 
 class HealthRadarWidget(QFrame):
     """Real-Time Telemetry HUD & Health Radar."""
@@ -80,7 +72,6 @@ class HealthRadarWidget(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("healthRadar")
-        self
         
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)

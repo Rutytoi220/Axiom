@@ -65,8 +65,7 @@ class SchedulerDialog(QDialog):
         self._style_toggle_btn(btn, default_state)
         btn.setProperty("trigger_id", trigger_id)
         btn.setProperty("state", default_state)
-        btn.setFixedSize(60, 30)
-        btn.setCursor(Qt.PointingHandCursor)
+                btn.setCursor(Qt.PointingHandCursor)
         btn.clicked.connect(lambda _, b=btn: self._on_toggle(b))
         
         row_layout.addWidget(btn)
