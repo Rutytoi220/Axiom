@@ -117,39 +117,18 @@ class UpdateDialog(QDialog):
         self.layout = QVBoxLayout(self)
 
         self.header = QLabel(f"<h2>Checking for updates...</h2>")
-        self.header.setStyleSheet("color: #a6e3a1;")
+        self.header.setObjectName("update_header")
         self.layout.addWidget(self.header)
 
         self.changelog_view = QTextEdit()
         self.changelog_view.setReadOnly(True)
-        self.changelog_view.setStyleSheet(
-            "background-color: #181825; color: #cdd6f4; border-radius: 6px; padding: 10px;"
-        )
-        self.layout.addWidget(self.changelog_view)
-
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setTextVisible(True)
-        self.progress_bar.hide()
-        self.layout.addWidget(self.progress_bar)
-
-        btn_row = QHBoxLayout()
-
-        self.install_btn = QPushButton("🚀 Install && Relaunch Now")
-        self.install_btn.setStyleSheet(
-            "background-color: #a6e3a1; color: #11111b; font-weight: bold; "
-            "padding: 10px 20px; border-radius: 6px;"
-        )
+        self.changelog_view.setObjectName("update_header")
         self.install_btn.setEnabled(False)
         self.install_btn.clicked.connect(self._on_install)
         btn_row.addWidget(self.install_btn)
 
         self.later_btn = QPushButton("⏰ Remind Me Later")
-        self.later_btn.setStyleSheet(
-            "background-color: #313244; color: #cdd6f4; font-weight: bold; "
-            "padding: 10px 20px; border-radius: 6px;"
-        )
+        self.later_btn.setObjectName("update_changelog")
         self.later_btn.clicked.connect(self.reject)
         btn_row.addWidget(self.later_btn)
 

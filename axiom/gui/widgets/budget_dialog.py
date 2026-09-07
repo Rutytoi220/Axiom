@@ -26,7 +26,7 @@ class BudgetDialog(QDialog):
         
         # Today's Usage Group
         today_group = QGroupBox("Today's Cloud Usage")
-        today_group.setStyleSheet("QGroupBox { font-weight: bold; color: #cdd6f4; }")
+        today_group
         today_layout = QGridLayout(today_group)
         
         self.lbl_tokens_used = QLabel("Tokens Used:")
@@ -42,17 +42,7 @@ class BudgetDialog(QDialog):
         # Progress Bar
         self.progress_bar = QProgressBar()
         self.progress_bar.setTextVisible(True)
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #313244;
-                border-radius: 5px;
-                text-align: center;
-                color: white;
-            }
-            QProgressBar::chunk {
-                background-color: #89b4fa;
-            }
-        """)
+        self.progress_bar
         today_layout.addWidget(self.progress_bar, 2, 0, 1, 2)
         
         layout.addWidget(today_group)
@@ -83,26 +73,6 @@ class BudgetDialog(QDialog):
         self.progress_bar.setFormat(f"{percent}% of Daily Limit")
         
         if percent >= 90:
-            self.progress_bar.setStyleSheet("""
-                QProgressBar {
-                    border: 1px solid #313244;
-                    border-radius: 5px;
-                    text-align: center;
-                    color: white;
-                }
-                QProgressBar::chunk {
-                    background-color: #f38ba8;
-                }
-            """)
+            self.progress_bar
         elif percent >= 75:
-            self.progress_bar.setStyleSheet("""
-                QProgressBar {
-                    border: 1px solid #313244;
-                    border-radius: 5px;
-                    text-align: center;
-                    color: white;
-                }
-                QProgressBar::chunk {
-                    background-color: #f9e2af;
-                }
-            """)
+            self.progress_bar

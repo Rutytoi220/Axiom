@@ -82,7 +82,7 @@ class ColorButton(QPushButton):
         self.color_hex = color_hex
         self.setCheckable(True)
         self.setProperty("class", "colorBtn")
-        self.setStyleSheet(f"background-color: {color_hex};")
+        self
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
 class OOBEWindow(QDialog):
@@ -94,7 +94,7 @@ class OOBEWindow(QDialog):
         self.setWindowTitle("AXIOM Setup")
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setFixedSize(600, 420)
-        self.setStyleSheet(_OOBE_QSS)
+        self
         
         self.selected_color = "#2ECC71"  # Default Green
         self.selected_voice_mode = "push_to_talk"
@@ -156,7 +156,7 @@ class OOBEWindow(QDialog):
         
         # Voice Mode Selection
         voice_title = QLabel("Voice Mode:")
-        voice_title.setStyleSheet("color: #A1A1AA; font-weight: bold;")
+        voice_title
         voice_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(voice_title)
         

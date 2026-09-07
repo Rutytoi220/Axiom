@@ -31,9 +31,18 @@ QScrollBar::handle:vertical { background: rgba(255, 255, 255, 0.15); min-height:
 QScrollBar::handle:vertical:hover { background: rgba(255, 255, 255, 0.3); }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical, QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { border: none; background: none; height: 0px; }
 
-QPushButton:hover {
+QPushButton:hover, QToolButton:hover {
     border: 1px solid @primary@;
     color: @accent@;
+}
+QPushButton:pressed, QToolButton:pressed {
+    background-color: @primary@;
+    color: @bg_base@;
+}
+QPushButton:disabled, QToolButton:disabled {
+    background-color: transparent;
+    color: @text_muted@;
+    border: 1px solid @borders@;
 }
 
 QFrame#surface, QFrame#border {
@@ -289,14 +298,23 @@ QPushButton#segmented_btn {
     background-color: transparent;
     color: @text_muted@;
     border: none;
-    border-radius: @radius_sm@;
+    border-radius: 0px;
 }
 QPushButton#segmented_btn:hover {
     color: @text_main@;
+    background-color: rgba(255, 255, 255, 0.05);
 }
 QPushButton#segmented_btn[status="active"] {
     background-color: @primary@;
     color: #FFFFFF;
+}
+QPushButton#segmented_btn[position="first"] {
+    border-top-left-radius: @radius_md@;
+    border-bottom-left-radius: @radius_md@;
+}
+QPushButton#segmented_btn[position="last"] {
+    border-top-right-radius: @radius_md@;
+    border-bottom-right-radius: @radius_md@;
 }
 
 /* =========================================================================

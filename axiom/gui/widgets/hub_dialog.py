@@ -235,7 +235,7 @@ class AxiomHubDialog(QDialog):
         # Header actions
         header_layout = QHBoxLayout()
         header_lbl = QLabel("Manage dynamic Model Context Protocol (MCP) servers.")
-        header_lbl.setStyleSheet("color: #8B949E;")
+        header_lbl.setObjectName("hub_desc")
         header_layout.addWidget(header_lbl)
         header_layout.addStretch()
         
@@ -317,7 +317,7 @@ class AxiomHubDialog(QDialog):
         if not servers:
             empty_lbl = QLabel("No MCP servers configured.")
             empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            empty_lbl.setStyleSheet("color: #8B949E;")
+            empty_lbl.setObjectName("hub_desc")
             self.mcp_list_layout.addWidget(empty_lbl)
             return
             
@@ -329,17 +329,17 @@ class AxiomHubDialog(QDialog):
             # Left: Info
             info_layout = QVBoxLayout()
             name_lbl = QLabel(srv.get("name", "Unknown"))
-            name_lbl.setStyleSheet("font-weight: bold; font-size: 14px;")
+            name_lbl.setObjectName("hub_name")
             
             cmd = srv.get("command", "")
             args = " ".join(srv.get("args", []))
             cmd_lbl = QLabel(f"{cmd} {args}")
-            cmd_lbl.setStyleSheet("color: #8B949E; font-family: monospace; font-size: 11px;")
+            cmd_lbl.setObjectName("hub_desc")
             
             status = srv.get("status", "OFFLINE")
             color = "#00cc66" if status == "ONLINE" else "#ff4444"
             status_lbl = QLabel(f"● {status} ({srv.get('tools_count', 0)} tools)")
-            status_lbl.setStyleSheet(f"color: {color}; font-size: 11px; font-weight: bold;")
+            status_lbl.setObjectName("hub_tags")
             
             info_layout.addWidget(name_lbl)
             info_layout.addWidget(cmd_lbl)
@@ -618,7 +618,7 @@ class AxiomHubDialog(QDialog):
         
         self.pin_label = QLabel("Not in pairing mode.")
         self.pin_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.pin_label.setStyleSheet("font-size: 24px; font-weight: bold; margin: 20px;")
+        self.pin_label.setObjectName("sync_pin")
         layout.addWidget(self.pin_label)
         
         btn_layout = QHBoxLayout()

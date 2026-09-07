@@ -49,13 +49,7 @@ class KernelControlCenterDialog(QDialog):
         # Self Patcher Control
         patcher_layout = QHBoxLayout()
         self.patch_btn = QPushButton("✨ Trigger Self-Patch Analysis")
-        self.patch_btn.setStyleSheet("""
-            background-color: #cba6f7;
-            color: #11111b;
-            font-weight: bold;
-            padding: 10px;
-            border-radius: 6px;
-        """)
+        self.patch_btn
         self.patch_btn.clicked.connect(self._trigger_self_patch)
         patcher_layout.addWidget(self.patch_btn)
         

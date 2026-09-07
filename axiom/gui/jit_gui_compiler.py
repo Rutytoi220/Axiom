@@ -97,7 +97,7 @@ class GenerativeUIEngine:
         w = QWidget()
         lay = QVBoxLayout(w)
         lbl = QLabel("⚠️ Generative UI Compilation Failed")
-        lbl.setStyleSheet("color: #f38ba8; font-weight: bold;")
+        lbl
         lay.addWidget(lbl)
         lay.addWidget(QLabel(error_msg))
         return w

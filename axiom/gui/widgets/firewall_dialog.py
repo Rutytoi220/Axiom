@@ -44,18 +44,18 @@ class FirewallControlDialog(QDialog):
 
         # Header
         header = QLabel("<h2>Kernel Firewall & Distributed Swarm</h2>")
-        header.setStyleSheet("color: #f38ba8;")
+        header
         layout.addWidget(header)
 
         # Firewall Group
         firewall_group = QGroupBox("eBPF Intercept Matrix")
-        firewall_group.setStyleSheet("QGroupBox { font-weight: bold; color: #cdd6f4; border: 1px solid #45475a; margin-top: 10px; }")
+        firewall_group
         fw_layout = QVBoxLayout()
         
         self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(["PID", "Process", "Source IP", "Dest IP", "Status"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table.setStyleSheet("QTableWidget { background-color: #1e1e2e; color: #a6adc8; gridline-color: #313244; }")
+        self.table
         fw_layout.addWidget(self.table)
         
         firewall_group.setLayout(fw_layout)
@@ -63,11 +63,11 @@ class FirewallControlDialog(QDialog):
 
         # Swarm Group
         swarm_group = QGroupBox("Active Swarm Nodes (Docker)")
-        swarm_group.setStyleSheet("QGroupBox { font-weight: bold; color: #cdd6f4; border: 1px solid #45475a; margin-top: 10px; }")
+        swarm_group
         swarm_layout = QVBoxLayout()
         
         self.swarm_label = QLabel("No active ephemeral nodes.")
-        self.swarm_label.setStyleSheet("color: #a6adc8; font-style: italic;")
+        self.swarm_label
         swarm_layout.addWidget(self.swarm_label)
         
         btn_layout = QHBoxLayout()
@@ -104,7 +104,7 @@ class FirewallControlDialog(QDialog):
         for col, item in enumerate(items):
             item.setForeground(Qt.GlobalColor.white)
             if col == 4:
-                item.setStyleSheet(f"color: {color}; font-weight: bold;")
+                item
             self.table.setItem(row, col, item)
             
         # Keep table small
@@ -116,9 +116,9 @@ class FirewallControlDialog(QDialog):
     def _simulate_swarm(self):
         """Mock triggering a swarm job for UI testing."""
         self.swarm_label.setText("3 Active Nodes: [axiom-worker-a1b2c3] [axiom-worker-d4e5f6] [axiom-worker-g7h8i9]")
-        self.swarm_label.setStyleSheet("color: #a6e3a1; font-weight: bold;")
+        self.swarm_label
         QTimer.singleShot(4000, lambda: self.swarm_label.setText("No active ephemeral nodes."))
-        QTimer.singleShot(4000, lambda: self.swarm_label.setStyleSheet("color: #a6adc8; font-style: italic;"))
+        QTimer.singleShot(4000, lambda: self.swarm_label)
 
     def _add_mock_connection(self):
         """Add mock data for visual testing."""

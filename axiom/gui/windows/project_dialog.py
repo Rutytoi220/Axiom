@@ -16,58 +16,7 @@ class ProjectDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("New Project")
         self.setFixedSize(500, 550)
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #1E1E1E;
-                color: #FFFFFF;
-            }
-            QLabel {
-                font-family: 'Inter', sans-serif;
-                font-size: 13px;
-                color: #D1D5DB;
-                margin-top: 10px;
-            }
-            QLineEdit, QTextEdit {
-                background-color: #262626;
-                border: 1px solid #3A3A3A;
-                border-radius: 8px;
-                padding: 10px;
-                color: #FFFFFF;
-                font-family: 'Inter', sans-serif;
-                font-size: 14px;
-            }
-            QLineEdit:focus, QTextEdit:focus {
-                border: 1px solid #2563EB;
-            }
-            QListWidget {
-                background-color: #262626;
-                border: 1px solid #3A3A3A;
-                border-radius: 8px;
-                padding: 5px;
-                color: #FFFFFF;
-                font-size: 13px;
-            }
-            QPushButton {
-                background-color: #333333;
-                color: #FFFFFF;
-                border: 1px solid #4A4A4A;
-                border-radius: 8px;
-                padding: 8px 16px;
-                font-family: 'Inter', sans-serif;
-                font-weight: 500;
-            }
-            QPushButton:hover {
-                background-color: #444444;
-            }
-            QPushButton#createBtn {
-                background-color: #2563EB;
-                border: none;
-                font-weight: bold;
-            }
-            QPushButton#createBtn:hover {
-                background-color: #1D4ED8;
-            }
-        """)
+        self
 
         self.attached_files = []
 
@@ -131,7 +80,7 @@ class ProjectDialog(QDialog):
     def _on_create(self):
         title = self.title_input.text().strip()
         if not title:
-            self.title_input.setStyleSheet("border: 1px solid #DC2626;")
+            self.title_input
             return
             
         context = self.context_input.toPlainText()

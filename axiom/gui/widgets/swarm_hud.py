@@ -7,12 +7,7 @@ class SwarmHUD(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("swarmHUD")
-        self.setStyleSheet("""
-            QWidget#swarmHUD {
-                background-color: transparent;
-                border-bottom: 1px solid #30363D;
-            }
-        """)
+        self
         
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(16, 4, 16, 4)
@@ -32,17 +27,7 @@ class SwarmHUD(QWidget):
         elif "vision" in agent_name.lower(): icon = "👁️"
             
         pill = QLabel(f"[ {icon} {agent_name} ]")
-        pill.setStyleSheet("""
-            QLabel {
-                background-color: #161B22;
-                color: #A1A1AA;
-                border: 1px solid #30363D;
-                border-radius: 12px;
-                padding: 4px 10px;
-                font-family: monospace;
-                font-size: 11px;
-            }
-        """)
+        pill
         
         # Insert before the stretch
         self.layout.insertWidget(self.layout.count() - 1, pill)

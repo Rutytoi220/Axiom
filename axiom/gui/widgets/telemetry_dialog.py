@@ -14,32 +14,7 @@ class TelemetryDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("📊 Telemetry Trace Observer")
         self.setMinimumSize(800, 500)
-        self.setStyleSheet("""
-            QDialog { background-color: #1e1e2e; }
-            QLabel { color: #cdd6f4; font-size: 14px; font-weight: bold; }
-            QTableWidget {
-                background-color: #181825;
-                color: #a6adc8;
-                border: 1px solid #313244;
-                gridline-color: #313244;
-                font-family: monospace;
-            }
-            QHeaderView::section {
-                background-color: #313244;
-                color: #cdd6f4;
-                padding: 4px;
-                border: none;
-                font-weight: bold;
-            }
-            QPushButton {
-                background-color: #313244;
-                color: #cdd6f4;
-                border-radius: 4px;
-                padding: 6px 12px;
-                font-weight: bold;
-            }
-            QPushButton:hover { background-color: #45475a; }
-        """)
+        self
 
         layout = QVBoxLayout(self)
         

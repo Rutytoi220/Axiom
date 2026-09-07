@@ -147,7 +147,7 @@ class OnboardingWindow(QMainWindow):
         # Borderless, dark-themed
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.resize(900, 620)
-        self.setStyleSheet(_GLOBAL_QSS)
+        self
         
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)

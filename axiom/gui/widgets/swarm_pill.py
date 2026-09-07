@@ -17,7 +17,7 @@ class SwarmPill(QFrame):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("swarmPill")
-        self.setStyleSheet("QFrame#swarmPill { background: #2a2a35; border: 1px solid #4b4b60; border-radius: 8px; padding: 6px; margin-top: 4px; }")
+        self
 
         self.outer_layout = QVBoxLayout(self)
         self.outer_layout.setContentsMargins(4, 4, 4, 4)
@@ -27,7 +27,7 @@ class SwarmPill(QFrame):
         self.header_layout = QHBoxLayout()
         self.header_icon = QLabel("🐝")
         self.header_label = QLabel("<b>Swarm Active — Supervisor Delegating...</b>")
-        self.header_label.setStyleSheet("color: #eab308;")
+        self.header_label
         self.header_layout.addWidget(self.header_icon)
         self.header_layout.addWidget(self.header_label, 1)
         
@@ -57,7 +57,7 @@ class SwarmPill(QFrame):
         all_done = all(a.is_completed for a in self.agents.values())
         if all_done:
             self.header_label.setText("<b>Swarm Execution Complete ✅</b>")
-            self.header_label.setStyleSheet("color: #10b981;")
+            self.header_label
 
 
 class SwarmAgentPill(QFrame):
@@ -66,7 +66,7 @@ class SwarmAgentPill(QFrame):
     def __init__(self, agent_name: str, task: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("swarmAgentPill")
-        self.setStyleSheet("QFrame#swarmAgentPill { background: #1f1f28; border-radius: 4px; }")
+        self
         
         self._expanded = False
         self.is_completed = False
@@ -81,7 +81,7 @@ class SwarmAgentPill(QFrame):
         self._summary = QLabel(f"<b>{html.escape(agent_name)}</b>: {html.escape(task)}")
         self._summary.setWordWrap(True)
         self._status = QLabel("[Running ⏳]")
-        self._status.setStyleSheet("color: #a8a8b3;")
+        self._status
         
         self._toggle = QToolButton()
         self._toggle.setText("▶")
@@ -97,7 +97,7 @@ class SwarmAgentPill(QFrame):
         self._detail = QLabel("")
         self._detail.setWordWrap(True)
         self._detail.setVisible(False)
-        self._detail.setStyleSheet("color: #d1d1d6; font-family: monospace;")
+        self._detail
         self.layout_main.addWidget(self._detail)
 
     def append_text(self, chunk: str) -> None:
@@ -108,7 +108,7 @@ class SwarmAgentPill(QFrame):
         """Mark as completed and append final result."""
         self.is_completed = True
         self._status.setText("[Done ✅]")
-        self._status.setStyleSheet("color: #10b981;")
+        self._status
         if result:
             self._detail.setText(self._detail.text() + f"\n\nResult:\n{html.escape(result)}")
 

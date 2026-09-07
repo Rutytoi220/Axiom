@@ -93,7 +93,7 @@ class ExecutionGateDialog(QDialog):
         layout.addWidget(warning)
         
         tname = QLabel(f"Tool: {tool_name}")
-        tname.setStyleSheet("font-weight: bold; font-size: 16px; margin-top: 10px;")
+        tname
         layout.addWidget(tname)
         
         layout.addWidget(QLabel("Arguments:"))

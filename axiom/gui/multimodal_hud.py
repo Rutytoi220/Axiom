@@ -70,13 +70,7 @@ class JarvisOverlayWindow(QWidget):
         
         container = QWidget()
         container.setObjectName("container")
-        container.setStyleSheet("""
-            #container {
-                background-color: rgba(30, 30, 46, 220); /* 86% opacity */
-                border: 2px solid #89b4fa;
-                border-radius: 16px;
-            }
-        """)
+        container
         container_layout = QVBoxLayout(container)
         container_layout.setContentsMargins(20, 20, 20, 20)
         container_layout.setSpacing(15)
@@ -89,15 +83,7 @@ class JarvisOverlayWindow(QWidget):
         
         self.input_field = QLineEdit()
         self.input_field.setPlaceholderText("Ask AXIOM... or hold [🎤 Voice Command]")
-        self.input_field.setStyleSheet("""
-            QLineEdit {
-                background: transparent;
-                border: none;
-                color: #cdd6f4;
-                font-size: 20px;
-                font-weight: bold;
-            }
-        """)
+        self.input_field
         self.input_field.returnPressed.connect(self._on_submit)
         top_bar.addWidget(self.input_field)
         
@@ -126,40 +112,14 @@ class JarvisOverlayWindow(QWidget):
         # Output Area
         self.output_area = QTextEdit()
         self.output_area.setReadOnly(True)
-        self.output_area.setStyleSheet("""
-            QTextEdit {
-                background-color: rgba(24, 24, 37, 200);
-                color: #a6adc8;
-                border: 1px solid #313244;
-                border-radius: 8px;
-                padding: 15px;
-                font-size: 16px;
-            }
-        """)
+        self.output_area
         self.output_area.hide()
         container_layout.addWidget(self.output_area)
         
         main_layout.addWidget(container)
         
     def _style_btn(self, btn: QPushButton, accent: str):
-        btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: #313244;
-                color: {accent};
-                border: 1px solid {accent};
-                border-radius: 8px;
-                padding: 10px 15px;
-                font-weight: bold;
-                font-size: 14px;
-            }}
-            QPushButton:hover {{
-                background-color: #45475a;
-            }}
-            QPushButton:pressed {{
-                background-color: {accent};
-                color: #11111b;
-            }}
-        """)
+        btn
         
     def _start_voice(self):
         self.input_field.setPlaceholderText("Listening...")

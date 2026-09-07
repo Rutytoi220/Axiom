@@ -25,7 +25,7 @@ class AuditDialog(QDialog):
         # Header
         header_layout = QHBoxLayout()
         title = QLabel("🛡️ Security Sandbox Executions")
-        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #cdd6f4;")
+        title
         header_layout.addWidget(title)
         
         refresh_btn = QPushButton("🔄 Refresh")
@@ -42,19 +42,7 @@ class AuditDialog(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Stretch)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setStyleSheet("""
-            QTableWidget {
-                background-color: #1e1e2e;
-                color: #cdd6f4;
-                gridline-color: #313244;
-            }
-            QHeaderView::section {
-                background-color: #313244;
-                color: #cdd6f4;
-                padding: 4px;
-                border: none;
-            }
-        """)
+        self.table
         layout.addWidget(self.table)
         
     def _load_data(self):

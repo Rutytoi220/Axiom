@@ -69,7 +69,7 @@ class ThemeManager(QObject):
                 if isinstance(value, str):
                     qss = qss.replace(f"@{key}@", value)
 
-            app.setStyleSheet(qss)
+            app
             logger.info(f"Theme '{theme_name}' applied successfully.")
             self.theme_changed.emit(theme_name)
         except Exception as e:

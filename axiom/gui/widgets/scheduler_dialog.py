@@ -21,25 +21,17 @@ class SchedulerDialog(QDialog):
         self.event_bus = event_bus
         self.setWindowTitle("⏱️ AXIOM Automation Triggers")
         self.setMinimumSize(500, 400)
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #1e1e2e;
-                color: #cdd6f4;
-            }
-            QLabel {
-                font-size: 14px;
-            }
-        """)
+        pass
 
         layout = QVBoxLayout(self)
         
         # Header
         header = QLabel("<h2>Autonomous Background Triggers</h2>")
-        header.setStyleSheet("color: #a6e3a1; font-weight: bold;")
+        header.setObjectName("scheduler_task_label")
         layout.addWidget(header)
         
         desc = QLabel("Easily toggle AXIOM's core background subsystems without complex cron rules.")
-        desc.setStyleSheet("color: #a6adc8; margin-bottom: 20px;")
+        desc.setObjectName("scheduler_empty")
         desc.setWordWrap(True)
         layout.addWidget(desc)
 
@@ -53,22 +45,15 @@ class SchedulerDialog(QDialog):
 
     def _add_toggle_row(self, parent_layout, title: str, description: str, trigger_id: str, default_state: bool):
         row = QFrame()
-        row.setStyleSheet("""
-            QFrame {
-                background-color: #313244;
-                border-radius: 8px;
-                padding: 10px;
-                margin-bottom: 10px;
-            }
-        """)
+        row.setObjectName("scheduler_task_row")
         row_layout = QHBoxLayout(row)
         
         text_layout = QVBoxLayout()
         t_label = QLabel(f"<b>{title}</b>")
-        t_label.setStyleSheet("color: #cdd6f4; font-size: 15px;")
+        t_label.setObjectName("scheduler_task_label")
         
         d_label = QLabel(description)
-        d_label.setStyleSheet("color: #a6adc8; font-size: 12px;")
+        d_label.setObjectName("scheduler_cron_label")
         
         text_layout.addWidget(t_label)
         text_layout.addWidget(d_label)
@@ -89,23 +74,11 @@ class SchedulerDialog(QDialog):
 
     def _style_toggle_btn(self, btn: QPushButton, state: bool):
         if state:
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #a6e3a1;
-                    color: #11111b;
-                    font-weight: bold;
-                    border-radius: 15px;
-                }
-            """)
+            btn.setObjectName("scheduler_toggle")
         else:
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #45475a;
-                    color: #cdd6f4;
-                    font-weight: bold;
-                    border-radius: 15px;
-                }
-            """)
+            btn.setObjectName("scheduler_delete")
+        btn.style().unpolish(btn)
+        btn.style().polish(btn)
 
     @Slot()
     def _on_toggle(self, btn: QPushButton):

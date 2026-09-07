@@ -125,6 +125,16 @@ def run_gui() -> None:
 
     # --- QApplication ---
     os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
+    os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
+    
+    try:
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
+        QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+    except AttributeError:
+        pass
+        
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("AXIOM Desktop")
     app.setApplicationVersion("3.0")

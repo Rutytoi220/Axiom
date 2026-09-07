@@ -102,7 +102,7 @@ class SyncDialog(QDialog):
         sel_layout.setSpacing(20)
         
         title = QLabel("Device Sync")
-        title.setStyleSheet("font-size: 24px; font-weight: bold;")
+        title.setObjectName("sync_pin")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sel_layout.addWidget(title)
         

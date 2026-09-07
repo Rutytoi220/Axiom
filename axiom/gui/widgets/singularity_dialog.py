@@ -42,16 +42,16 @@ class SingularityControlDialog(QDialog):
 
         # Header
         header = QLabel("<h2>AXIOM Singularity: Self-Optimization & Expansion</h2>")
-        header.setStyleSheet("color: #cba6f7;")
+        header
         layout.addWidget(header)
 
         # 1. RLHF Self-Improvement
         rlhf_group = QGroupBox("Continuous RLHF Self-Improvement")
-        rlhf_group.setStyleSheet("QGroupBox { font-weight: bold; color: #cdd6f4; border: 1px solid #45475a; margin-top: 10px; }")
+        rlhf_group
         rlhf_layout = QVBoxLayout()
         
         self.dataset_label = QLabel("Loading dataset stats...")
-        self.dataset_label.setStyleSheet("color: #a6e3a1; font-weight: bold;")
+        self.dataset_label
         rlhf_layout.addWidget(self.dataset_label)
         
         self.btn_evolve = QPushButton("🧬 Evolve Model (Create Modelfile)")
@@ -63,7 +63,7 @@ class SingularityControlDialog(QDialog):
 
         # 2. Network Assimilation
         assim_group = QGroupBox("Autonomous Network Assimilation")
-        assim_group.setStyleSheet("QGroupBox { font-weight: bold; color: #cdd6f4; border: 1px solid #45475a; margin-top: 10px; }")
+        assim_group
         assim_layout = QVBoxLayout()
         
         input_layout = QHBoxLayout()
@@ -72,7 +72,7 @@ class SingularityControlDialog(QDialog):
         input_layout.addWidget(self.ssh_input)
         
         self.btn_assimilate = QPushButton("Assimilate Node")
-        self.btn_assimilate.setStyleSheet("background-color: #313244; color: #f38ba8; font-weight: bold;")
+        self.btn_assimilate
         self.btn_assimilate.clicked.connect(self._trigger_assimilation)
         input_layout.addWidget(self.btn_assimilate)
         
@@ -82,12 +82,12 @@ class SingularityControlDialog(QDialog):
 
         # 3. REM Sleep
         rem_group = QGroupBox("Nightly REM Sleep Log")
-        rem_group.setStyleSheet("QGroupBox { font-weight: bold; color: #cdd6f4; border: 1px solid #45475a; margin-top: 10px; }")
+        rem_group
         rem_layout = QVBoxLayout()
         
         self.rem_log = QTextEdit()
         self.rem_log.setReadOnly(True)
-        self.rem_log.setStyleSheet("background-color: #1e1e2e; color: #a6adc8;")
+        self.rem_log
         rem_layout.addWidget(self.rem_log)
         
         self.btn_rem = QPushButton("Trigger Manual REM Sleep")

@@ -662,7 +662,7 @@ class OOBEWindow(QDialog):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
         self.setFixedSize(840, 640)
-        self.setStyleSheet(_OOBE_QSS)
+        self
 
         self._diag_worker: _DiagnosticsWorker | None = None
         self._model_worker: _ModelListWorker | None = None

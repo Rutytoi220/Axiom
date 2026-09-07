@@ -17,7 +17,7 @@ class RecallDialog(QDialog):
         layout = QVBoxLayout(self)
         
         header = QLabel("Continuous Visual Memory (OCR History)")
-        header.setStyleSheet("font-weight: bold; color: #89b4fa; font-size: 16px;")
+        header
         layout.addWidget(header)
         
         # Search bar
@@ -37,16 +37,13 @@ class RecallDialog(QDialog):
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["Timestamp", "Window Title", "OCR Snippet"])
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.table.setStyleSheet("""
-            QTableWidget { background-color: #11111b; color: #cdd6f4; border: 1px solid #313244; }
-            QHeaderView::section { background-color: #181825; color: #bac2de; }
-        """)
+        self.table
         layout.addWidget(self.table)
         
         # Toolbar
         toolbar = QHBoxLayout()
         btn_delete = QPushButton("🗑️ Clear History")
-        btn_delete.setStyleSheet("color: #f38ba8;")
+        btn_delete
         btn_delete.clicked.connect(self._clear_history)
         toolbar.addWidget(btn_delete)
         toolbar.addStretch()

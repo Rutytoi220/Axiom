@@ -16,17 +16,14 @@ class GraphDialog(QDialog):
         layout = QVBoxLayout(self)
         
         header = QLabel("Entity & Relationship Explorer")
-        header.setStyleSheet("font-weight: bold; color: #cba6f7; font-size: 16px;")
+        header
         layout.addWidget(header)
         
         # Table
         self.table = QTableWidget(0, 4)
         self.table.setHorizontalHeaderLabels(["Source Entity", "Type", "Relation", "Target Entity"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table.setStyleSheet("""
-            QTableWidget { background-color: #1e1e2e; color: #cdd6f4; border: 1px solid #45475a; }
-            QHeaderView::section { background-color: #181825; color: #a6adc8; }
-        """)
+        self.table
         layout.addWidget(self.table)
         
         # Toolbar

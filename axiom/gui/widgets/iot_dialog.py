@@ -36,12 +36,12 @@ class IoTControlDialog(QDialog):
 
         # Header
         header = QLabel("<h2>Physical Environment Controls</h2>")
-        header.setStyleSheet("color: #f9e2af;")
+        header
         layout.addWidget(header)
 
         # Lighting Controls
         light_group = QGroupBox("Office Lighting")
-        light_group.setStyleSheet("QGroupBox { font-weight: bold; color: #cdd6f4; border: 1px solid #45475a; margin-top: 10px; }")
+        light_group
         light_layout = QVBoxLayout()
         
         btn_layout = QHBoxLayout()
@@ -70,7 +70,7 @@ class IoTControlDialog(QDialog):
 
         # HVAC / Fan
         fan_group = QGroupBox("HVAC / Fan")
-        fan_group.setStyleSheet("QGroupBox { font-weight: bold; color: #cdd6f4; border: 1px solid #45475a; margin-top: 10px; }")
+        fan_group
         fan_layout = QHBoxLayout()
         
         self.btn_fan_on = QPushButton("Fan ON")

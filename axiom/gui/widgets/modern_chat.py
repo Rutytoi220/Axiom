@@ -58,12 +58,12 @@ class ModernInputBar(QFrame):
         self.input_edit = self.input_area  # ALIAS for main_window.py
         
         self.mic_btn = QToolButton()
-        self.mic_btn.setText("🎤")
+        self.mic_btn.setText("Mic")
         self.mic_btn.setFixedSize(28, 28)
         self.mic_btn.setCheckable(True)
         self.mic_btn.toggled.connect(self.mic_toggled.emit)
         
-        self.send_btn = QPushButton("➤")
+        self.send_btn = QPushButton("Send")
         self.send_btn.setFixedSize(32, 32)
         self.send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.send_btn.clicked.connect(self._on_send)
@@ -156,14 +156,15 @@ class ModernChatDisplay(QWidget):
         top_bar = QHBoxLayout()
         top_bar.addStretch()
         self.settings_btn = QToolButton()
-        self.settings_btn.setText("⚙️")
+        self.settings_btn.setText("Settings")
         top_bar.addWidget(self.settings_btn)
         self.layout.addLayout(top_bar)
 
         self.scroll_area = QScrollArea()
-        self.scroll_area.setObjectName("chat_scroll_area")
+        self.scroll_area.verticalScrollBar().setSingleStep(15)
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll_area
         
         self.scroll_widget = QWidget()
         self.scroll_widget.setObjectName("chat_scroll_widget")

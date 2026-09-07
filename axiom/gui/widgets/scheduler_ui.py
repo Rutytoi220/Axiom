@@ -32,7 +32,7 @@ class TemporalSchedulerDialog(QDialog):
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
-        self.scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        self.scroll
         
         self.tasks_container = QWidget()
         self.tasks_layout = QVBoxLayout(self.tasks_container)

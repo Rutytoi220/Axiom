@@ -43,13 +43,7 @@ class HUDWindow(QWidget):
         # Main container with rounded corners and dark theme
         container = QWidget()
         container.setObjectName("container")
-        container.setStyleSheet("""
-            #container {
-                background-color: #1e1e2e;
-                border: 1px solid #313244;
-                border-radius: 12px;
-            }
-        """)
+        container
         container_layout = QVBoxLayout(container)
         container_layout.setContentsMargins(15, 15, 15, 15)
         container_layout.setSpacing(10)
@@ -84,23 +78,7 @@ class HUDWindow(QWidget):
 
         self.mesh_sync_btn = QPushButton("📋 Mesh Sync")
         self.mesh_sync_btn.setCheckable(True)
-        self.mesh_sync_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #313244;
-                color: #cdd6f4;
-                border: none;
-                border-radius: 6px;
-                padding: 5px 10px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #45475a;
-            }
-            QPushButton:checked {
-                background-color: #a6e3a1;
-                color: #11111b;
-            }
-        """)
+        self.mesh_sync_btn
         self.mesh_sync_btn.clicked.connect(self._on_mesh_sync_toggle)
         header_layout.addWidget(self.mesh_sync_btn)
         

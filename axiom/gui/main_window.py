@@ -64,7 +64,7 @@ class SettingsDrawer(QFrame):
 
         # ── Title ──────────────────────────────────────────────────────── #
         title = QLabel("Settings")
-        title.setStyleSheet("font-size: 18px; font-weight: bold; margin-bottom: 10px;")
+        title
         layout.addWidget(title)
 
         # ── Model Settings ─────────────────────────────────────────────── #
@@ -104,7 +104,7 @@ class SettingsDrawer(QFrame):
 
         # Status indicator
         self._status_label = QLabel("● Disconnected")
-        self._status_label.setProperty("status", "danger"); self._status_label.setStyleSheet("font-size: 12px;")
+        self._status_label.setProperty("status", "danger"); self._status_label
         layout.addWidget(self._status_label)
 
         node_layout = QHBoxLayout()
@@ -127,7 +127,7 @@ class SettingsDrawer(QFrame):
 
         # Node list — shows connected node
         self._node_list_label = QLabel("")
-        self._node_list_label.setProperty("status", "muted"); self._node_list_label.setStyleSheet("font-size: 11px; font-style: italic;")
+        self._node_list_label.setProperty("status", "muted"); self._node_list_label
         self._node_list_label.setWordWrap(True)
         layout.addWidget(self._node_list_label)
 
@@ -135,29 +135,14 @@ class SettingsDrawer(QFrame):
 
         # ── Audio / TTS Controls ─────────────────────────────────────────── #
         audio_label = QLabel("🔉 Audio")
-        audio_label.setProperty("status", "muted"); audio_label.setStyleSheet("font-size: 13px; font-weight: 600; letter-spacing: 0.5px;")
+        audio_label.setProperty("status", "muted"); audio_label
         layout.addWidget(audio_label)
 
         self._tts_toggle_btn = QPushButton("🔊  Voice Responses: ON")
         self._tts_toggle_btn.setCheckable(True)
         self._tts_toggle_btn.setChecked(True)
         self._tts_toggle_btn.setCursor(Qt.PointingHandCursor)
-        self._tts_toggle_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #10b981;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 6px;
-                padding: 7px 12px;
-                font-size: 13px;
-                font-weight: 600;
-                text-align: left;
-            }
-            QPushButton:!checked {
-                background-color: #374151;
-                color: #9CA3AF;
-            }
-        """)
+        self._tts_toggle_btn
         self._tts_toggle_btn.toggled.connect(self._on_tts_toggled)
         layout.addWidget(self._tts_toggle_btn)
 
@@ -165,20 +150,7 @@ class SettingsDrawer(QFrame):
 
         self._sync_btn = QPushButton("\U0001f504 Device Sync")
         self._sync_btn.setCursor(Qt.PointingHandCursor)
-        self._sync_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #8B5CF6;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 6px;
-                padding: 10px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #7C3AED;
-            }
-        """)
+        self._sync_btn
         self._sync_btn.clicked.connect(self._on_sync_clicked)
         layout.addWidget(self._sync_btn)
 
@@ -186,20 +158,7 @@ class SettingsDrawer(QFrame):
 
         self._update_btn = QPushButton("🔄 Check for Updates")
         self._update_btn.setCursor(Qt.PointingHandCursor)
-        self._update_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3B82F6;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 6px;
-                padding: 10px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #2563EB;
-            }
-        """)
+        self._update_btn
         self._update_btn.clicked.connect(self._on_update_clicked)
         layout.addWidget(self._update_btn)
 
@@ -282,7 +241,7 @@ class SettingsDrawer(QFrame):
     def on_swarm_disconnected(self):
         self._connected = False
         self._status_label.setText("● Disconnected")
-        self._status_label.setProperty("status", "danger"); self._status_label.setStyleSheet("font-size: 12px;")
+        self._status_label.setProperty("status", "danger"); self._status_label
         self._node_list_label.setText("")
         self.connect_btn.setText("Connect")
         self.connect_btn.setEnabled(True)
@@ -415,7 +374,7 @@ class MainWindow(QMainWindow):
         
         # Init startup status
         self._startup_status = QLabel("⏳ Background services starting...")
-        self._startup_status.setProperty("status", "warning"); self._startup_status.setStyleSheet("font-size: 12px; font-weight: bold; padding-left: 10px;")
+        self._startup_status.setProperty("status", "warning"); self._startup_status
         self.statusBar().addWidget(self._startup_status)
 
         self._apply_theme()
@@ -1091,9 +1050,9 @@ class MainWindow(QMainWindow):
             if bubble:
                 # Optional: Make the bubble visually distinct
                 if throttled:
-                    bubble.setStyleSheet("QFrame { background-color: #3b3010; border-left: 4px solid #ffcc00; }")
+                    bubble
                 else:
-                    bubble.setStyleSheet("QFrame { background-color: #1a3320; border-left: 4px solid #00cc66; }")
+                    bubble
 
     def _on_swarm_started(self, agent_name: str, task: str) -> None:
         if hasattr(self, '_swarm_hud'):

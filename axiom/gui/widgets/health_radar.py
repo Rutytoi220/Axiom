@@ -24,17 +24,7 @@ class StatusPill(QLabel):
             bg = "transparent"
             color = "#8B949E"
             
-        self.setStyleSheet(f"""
-            QLabel {{
-                background-color: {bg};
-                color: {color};
-                border: 1px solid #30363D;
-                border-radius: 10px;
-                padding: 2px 8px;
-                font-weight: bold;
-                font-size: 10px;
-            }}
-        """)
+        self
 
 
 class TelemetryBar(QWidget):
@@ -47,9 +37,9 @@ class TelemetryBar(QWidget):
         # Header
         header_layout = QHBoxLayout()
         self.title_lbl = QLabel(title)
-        self.title_lbl.setStyleSheet("font-weight: bold; font-size: 11px;")
+        self.title_lbl
         self.val_lbl = QLabel("0%")
-        self.val_lbl.setStyleSheet("color: #A78BFA; font-size: 11px;")
+        self.val_lbl
         
         header_layout.addWidget(self.title_lbl)
         header_layout.addStretch()
@@ -63,17 +53,7 @@ class TelemetryBar(QWidget):
         self.bar.setRange(0, 100)
         self.bar.setValue(0)
         
-        self.bar.setStyleSheet("""
-            QProgressBar {
-                background-color: #0D1117;
-                border-radius: 3px;
-                border: 1px solid #30363D;
-            }
-            QProgressBar::chunk {
-                background-color: #A78BFA;
-                border-radius: 3px;
-            }
-        """)
+        self.bar
         layout.addWidget(self.bar)
 
     def set_value(self, percent: float, label_text: str = ""):
@@ -91,17 +71,7 @@ class TelemetryBar(QWidget):
         else:
             color = "#A78BFA"
             
-        self.bar.setStyleSheet(f"""
-            QProgressBar {{
-                background-color: #0D1117;
-                border-radius: 3px;
-                border: 1px solid #30363D;
-            }}
-            QProgressBar::chunk {{
-                background-color: {color};
-                border-radius: 3px;
-            }}
-        """)
+        self.bar
 
 
 class HealthRadarWidget(QFrame):
@@ -110,13 +80,7 @@ class HealthRadarWidget(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("healthRadar")
-        self.setStyleSheet("""
-            QFrame#healthRadar {
-                background-color: #161B22;
-                border: 1px solid #30363D;
-                border-radius: 8px;
-            }
-        """)
+        self
         
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -124,20 +88,20 @@ class HealthRadarWidget(QFrame):
         
         # --- HEADER ---
         header = QLabel("📡 Health Radar")
-        header.setStyleSheet("font-size: 14px; font-weight: bold; color: #FAFAFA;")
+        header
         layout.addWidget(header)
         
         # --- LATENCY / LIFECYCLE ---
         info_layout = QHBoxLayout()
         
         self.lifecycle_lbl = QLabel("State: UNKNOWN")
-        self.lifecycle_lbl.setStyleSheet("font-size: 11px; color: #8B949E;")
+        self.lifecycle_lbl
         
         self.latency_lbl = QLabel("Latency: -- ms")
-        self.latency_lbl.setStyleSheet("font-size: 11px; color: #8B949E;")
+        self.latency_lbl
         
         self.tasks_lbl = QLabel("Tasks: 0")
-        self.tasks_lbl.setStyleSheet("font-size: 11px; color: #8B949E;")
+        self.tasks_lbl
         
         info_layout.addWidget(self.lifecycle_lbl)
         info_layout.addStretch()
@@ -157,7 +121,7 @@ class HealthRadarWidget(QFrame):
         
         # --- WORKER PILLS ---
         workers_label = QLabel("Active Workers")
-        workers_label.setStyleSheet("font-size: 11px; font-weight: bold; margin-top: 8px;")
+        workers_label
         layout.addWidget(workers_label)
         
         grid = QGridLayout()

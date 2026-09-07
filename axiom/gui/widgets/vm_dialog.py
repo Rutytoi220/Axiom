@@ -24,7 +24,7 @@ class VMManagerDialog(QDialog):
         header.addWidget(self.refresh_btn)
         
         self.destroy_btn = QPushButton("🗑️ Destroy Selected")
-        self.destroy_btn.setStyleSheet("background-color: #f38ba8; color: #11111b; font-weight: bold;")
+        self.destroy_btn
         self.destroy_btn.clicked.connect(self._destroy_selected)
         header.addWidget(self.destroy_btn)
         

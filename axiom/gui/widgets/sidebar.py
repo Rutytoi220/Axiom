@@ -18,38 +18,7 @@ class SessionSidebar(QDockWidget):
         self.bridge = bridge
         self.session_db = bridge.session_db
         
-        self.setStyleSheet("""
-            QDockWidget {
-                background-color: #0D1117;
-                color: #C9D1D9;
-                border-right: 1px solid #30363D;
-                font-family: 'Inter', sans-serif;
-            }
-            QDockWidget::title {
-                background-color: #161B22;
-                padding: 10px;
-                font-weight: bold;
-                border-bottom: 1px solid #30363D;
-            }
-            QListWidget {
-                background-color: #0D1117;
-                border: none;
-                color: #C9D1D9;
-                outline: none;
-            }
-            QListWidget::item {
-                padding: 10px;
-                border-bottom: 1px solid #21262D;
-            }
-            QListWidget::item:hover {
-                background-color: #161B22;
-            }
-            QListWidget::item:selected {
-                background-color: #1F6FEB;
-                color: white;
-                border-radius: 4px;
-            }
-        """)
+        self
         
         container = QWidget()
         layout = QVBoxLayout(container)

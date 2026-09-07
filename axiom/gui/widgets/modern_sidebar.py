@@ -15,18 +15,27 @@ class SegmentedControl(QFrame):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setObjectName("segmented_control")
         self.layout = QHBoxLayout(self)
-        self.layout.setContentsMargins(4, 4, 4, 4)
-        self.layout.setSpacing(4)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(0)
         
         self.buttons = []
         self.active_btn = None
         
-        for mode in ["Basic", "Strict", "Autopilot"]:
+        modes = ["Basic", "Strict", "Autopilot"]
+        for i, mode in enumerate(modes):
             btn = QPushButton(mode)
             btn.setObjectName("segmented_btn")
             btn.setCheckable(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setProperty("status", "inactive")
+            
+            if i == 0:
+                btn.setProperty("position", "first")
+            elif i == len(modes) - 1:
+                btn.setProperty("position", "last")
+            else:
+                btn.setProperty("position", "middle")
+                
             btn.clicked.connect(lambda checked, b=btn: self._on_toggled(b))
             self.buttons.append(btn)
             self.layout.addWidget(btn)
@@ -108,7 +117,7 @@ class ModernSidebar(QFrame):
 
         self.layout.addStretch(1)
 
-        self.settings_btn = QPushButton("⚙ Settings")
+        self.settings_btn = QPushButton("Settings")
         self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.settings_btn.setFixedHeight(36)
         settings_layout = QHBoxLayout()

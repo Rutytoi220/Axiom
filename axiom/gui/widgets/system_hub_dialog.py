@@ -24,24 +24,7 @@ class SystemHubDialog(QDialog):
         self.main_window = main_window
         self.setWindowTitle("⚙️ AXIOM System Hub")
         self.setMinimumSize(600, 400)
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #1e1e2e;
-            }
-            QPushButton {
-                background-color: #313244;
-                color: #cdd6f4;
-                border-radius: 8px;
-                padding: 15px;
-                font-weight: bold;
-                font-size: 14px;
-                text-align: left;
-            }
-            QPushButton:hover {
-                background-color: #45475a;
-                border: 1px solid #89b4fa;
-            }
-        """)
+        pass
         self._init_ui()
 
     def _init_ui(self):
@@ -49,7 +32,7 @@ class SystemHubDialog(QDialog):
 
         # Header
         header = QLabel("<h2>⚙️ System Hub</h2>")
-        header.setStyleSheet("color: #cdd6f4; font-weight: bold;")
+        header.setObjectName("hub_name")
         layout.addWidget(header)
         
         # Profile Switcher
@@ -61,7 +44,7 @@ class SystemHubDialog(QDialog):
         profile_layout = QHBoxLayout()
         profile_layout.setContentsMargins(0, 0, 0, 15)
         profile_label = QLabel("UI Profile:")
-        profile_label.setStyleSheet("color: #a0a0b0; font-weight: bold;")
+        profile_label.setObjectName("hub_author")
         profile_layout.addWidget(profile_label)
 
         self.btn_group = QButtonGroup(self)
@@ -83,10 +66,7 @@ class SystemHubDialog(QDialog):
             btn_dev.setChecked(True)
 
         for b, lvl in [(btn_std, ProfileLevel.STANDARD), (btn_adv, ProfileLevel.ADVANCED), (btn_dev, ProfileLevel.DEVELOPER)]:
-            b.setStyleSheet("""
-                QPushButton { background-color: #181825; color: #a0a0b0; padding: 5px 15px; border-radius: 4px; border: 1px solid #313244; }
-                QPushButton:checked { background-color: #89b4fa; color: #11111b; font-weight: bold; }
-            """)
+            b.setObjectName("plugin_card")
             b.clicked.connect(lambda checked=False, l=lvl: ps.set_profile(l))
             self.btn_group.addButton(b)
             profile_layout.addWidget(b)
@@ -110,13 +90,13 @@ class SystemHubDialog(QDialog):
             ("🛡️ Cyber Audit", "#fab387", self.main_window._open_security_dialog if hasattr(self.main_window, '_open_security_dialog') else None),
             ("🧩 Skill Library", "#a6e3a1", self.main_window._open_skill_dialog if hasattr(self.main_window, '_open_skill_dialog') else None),
             ("📊 Telemetry Trace", "#89dceb", self.main_window._open_telemetry_dialog if hasattr(self.main_window, '_open_telemetry_dialog') else None),
-            ("⚙️ Settings", "#cdd6f4", self.main_window._open_settings_dialog if hasattr(self.main_window, '_open_settings_dialog') else None),
+            ("Settings", "#cdd6f4", self.main_window._open_settings_dialog if hasattr(self.main_window, '_open_settings_dialog') else None),
         ]
         
         row, col = 0, 0
         for text, color, callback in buttons:
             btn = QPushButton(text)
-            btn.setStyleSheet(f"color: {color};")
+            btn.setObjectName("plugin_toggle")
             if callback:
                 btn.clicked.connect(self._wrap_callback(callback))
             else:

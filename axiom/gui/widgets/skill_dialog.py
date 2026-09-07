@@ -33,7 +33,7 @@ class SkillManagerDialog(QDialog):
         # Left: Actions
         btn_layout = QHBoxLayout()
         self.delete_btn = QPushButton("🗑️ Delete")
-        self.delete_btn.setStyleSheet("color: #ef4444;")
+        self.delete_btn
         self.delete_btn.clicked.connect(self._delete_skill)
         self.delete_btn.setEnabled(False)
         btn_layout.addWidget(self.delete_btn)
@@ -47,13 +47,7 @@ class SkillManagerDialog(QDialog):
         
         self.code_viewer = QTextEdit()
         self.code_viewer.setReadOnly(True)
-        self.code_viewer.setStyleSheet("""
-            QTextEdit {
-                background-color: #1e1e2e;
-                color: #cdd6f4;
-                font-family: monospace;
-            }
-        """)
+        self.code_viewer
         right_layout.addWidget(self.code_viewer)
         
         layout.addLayout(right_layout)
