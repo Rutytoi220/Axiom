@@ -1,0 +1,33 @@
+{
+    "id": "custom",
+    "name": "Custom Sovereign",
+    "author": "Axiom User",
+    "version": "1.0.0",
+    "tokens": {
+        "bg_base": "#000000",
+        "bg_surface": "#080C10",
+        "bg_deep": "#000000",
+        "primary": "#00FFCC",
+        "accent": "#FF007F",
+        "accent_hover": "#00E6B8",
+        "text_main": "#FFFFFF",
+        "text_muted": "#00FFCC",
+        "borders": "#00FFCC",
+        "danger": "#FF1744",
+        "success": "#00E676",
+        "warning": "#FFEA00",
+        "info": "#00E5FF",
+        "card_bg": "#0D1117",
+        "input_bg": "#000000",
+        "selection": "#FF007F",
+        "spacing_sm": "8px",
+        "spacing_md": "16px",
+        "radius_sm": "4px",
+        "radius_md": "8px",
+        "radius_lg": "12px",
+        "radius_pill": "20px",
+        "radius_circle": "20px",
+        "font_main": "'Inter', sans-serif",
+        "font_mono": "'JetBrains Mono', monospace"
+    }
+}

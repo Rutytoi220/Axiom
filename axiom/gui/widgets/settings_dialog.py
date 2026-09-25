@@ -1,29 +1,35 @@
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QLabel, QComboBox, QDialogButtonBox, QCheckBox
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
+    QDialogButtonBox, QCheckBox, QFrame, QLineEdit
 )
 from PySide6.QtCore import Qt
+
+from axiom.gui.styles.squircle import AnimatedSquircleButton
+
 
 class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(440)
         
         self.setObjectName("settings_dialog")
         
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(20, 20, 20, 20)
-        self.layout.setSpacing(16)
+        self.layout.setSpacing(14)
         
         # Title
         title_label = QLabel("System Settings")
         title_label.setObjectName("settings_title_label")
+        title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #FFFFFF;")
         self.layout.addWidget(title_label)
         
         # Mock Model Selector
         self.model_combo = QComboBox()
         self.model_combo.setObjectName("settings_model_combo")
-        self.model_combo.addItems(["qwen2.5:1.5b", "qwen3:8b"])
+        self.model_combo.addItems(["qwen2.5:1.5b", "qwen3:8b", "MiMo-V2.6", "qwen3-vl:2b"])
+        self.layout.addWidget(QLabel("Default LLM Model:"))
         self.layout.addWidget(self.model_combo)
         
         from axiom.config import get_config
@@ -60,6 +66,46 @@ class SettingsDialog(QDialog):
         self.wake_word_checkbox.setObjectName("settings_checkbox_wakeword")
         self.wake_word_checkbox.setChecked(getattr(config, 'wake_word_enabled', False))
         self.layout.addWidget(self.wake_word_checkbox)
+
+        # Network Engine Mode Toggle (Local Engine vs Remote Server Engine)
+        engine_box = QFrame()
+        engine_box.setObjectName("settings_engine_box")
+        engine_layout = QVBoxLayout(engine_box)
+        engine_layout.setContentsMargins(10, 10, 10, 10)
+        engine_layout.setSpacing(6)
+
+        engine_title = QLabel("🌐 Compute Engine & Network")
+        engine_title.setStyleSheet("font-weight: bold; font-size: 12px; color: #FFFFFF;")
+        engine_layout.addWidget(engine_title)
+
+        self.engine_mode_combo = QComboBox()
+        self.engine_mode_combo.setObjectName("settings_engine_mode_combo")
+        self.engine_mode_combo.addItems(["Local Engine", "Remote Server Engine"])
+        is_remote = getattr(config, 'engine_mode', 'local') == 'remote'
+        self.engine_mode_combo.setCurrentIndex(1 if is_remote else 0)
+        engine_layout.addWidget(self.engine_mode_combo)
+
+        ip_layout = QHBoxLayout()
+        ip_label = QLabel("Remote Server IP:Port :")
+        self.server_ip_edit = QLineEdit()
+        self.server_ip_edit.setObjectName("settings_server_ip_input")
+        self.server_ip_edit.setPlaceholderText("127.0.0.1:9412")
+        self.server_ip_edit.setText(getattr(config, 'remote_server_ip', '127.0.0.1:9412'))
+        self.server_ip_edit.setEnabled(is_remote)
+        self.engine_mode_combo.currentIndexChanged.connect(
+            lambda idx: self.server_ip_edit.setEnabled(idx == 1)
+        )
+        ip_layout.addWidget(ip_label)
+        ip_layout.addWidget(self.server_ip_edit)
+        engine_layout.addLayout(ip_layout)
+
+        self.layout.addWidget(engine_box)
+
+        # Theme Builder Button
+        self.theme_builder_btn = AnimatedSquircleButton("🎨 Open Sovereign Theme Builder", radius=10.0, n=3.2, duration_ms=180)
+        self.theme_builder_btn.setObjectName("settings_theme_builder_btn")
+        self.theme_builder_btn.clicked.connect(self._open_theme_builder)
+        self.layout.addWidget(self.theme_builder_btn)
         
         self.layout.addStretch(1)
         
@@ -71,6 +117,11 @@ class SettingsDialog(QDialog):
         self.button_box.rejected.connect(self.reject)
         
         self.layout.addWidget(self.button_box)
+
+    def _open_theme_builder(self):
+        from axiom.gui.widgets.theme_builder_dialog import ThemeBuilderDialog
+        dlg = ThemeBuilderDialog(self)
+        dlg.exec()
         
     def accept(self):
         from axiom.config import get_config
@@ -81,6 +132,10 @@ class SettingsDialog(QDialog):
         config.persona_key = self.persona_combo.currentText()
         from axiom.core.persona import PERSONA_PRESETS
         config.persona = PERSONA_PRESETS.get(config.persona_key, PERSONA_PRESETS["default"])
+
+        # Network compute mode
+        config.engine_mode = "remote" if self.engine_mode_combo.currentIndex() == 1 else "local"
+        config.remote_server_ip = self.server_ip_edit.text().strip() or "127.0.0.1:9412"
+
         config.save()
         super().accept()
-
