@@ -9,6 +9,74 @@ from axiom.config import get_config
 
 logger = logging.getLogger(__name__)
 
+from axiom.gui.styles.squircle import SquirclePath, AnimatedSquircleButton
+from PySide6.QtCore import QPropertyAnimation, QEasingCurve, Property, QRectF
+from PySide6.QtGui import QPainter, QBrush, QPen, QColor
+
+class PluginCard(QFrame):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("plugin_card")
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.setContentsMargins(14, 10, 14, 10)
+        self._hover_progress = 0.0
+
+        self._anim = QPropertyAnimation(self, b"hoverProgress", self)
+        self._anim.setDuration(180)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutExpo)
+
+    def get_hover_progress(self) -> float:
+        return self._hover_progress
+
+    def set_hover_progress(self, val: float) -> None:
+        self._hover_progress = val
+        self.update()
+
+    hoverProgress = Property(float, get_hover_progress, set_hover_progress)
+
+    def enterEvent(self, event):
+        self._anim.stop()
+        self._anim.setDuration(180)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutExpo)
+        self._anim.setStartValue(self._hover_progress)
+        self._anim.setEndValue(1.0)
+        self._anim.start()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._anim.stop()
+        self._anim.setDuration(180)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutExpo)
+        self._anim.setStartValue(self._hover_progress)
+        self._anim.setEndValue(0.0)
+        self._anim.start()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        if rect.width() <= 0 or rect.height() <= 0:
+            return
+
+        # Continuous super-ellipse curvature with degree n ≈ 3.2
+        path = SquirclePath(rect, n=3.2, radius=16.0)
+
+        # Dynamic hover highlight
+        alpha_add = int(self._hover_progress * 15)
+        bg = QColor(22 + alpha_add, 27 + alpha_add, 34 + alpha_add)
+        painter.fillPath(path, QBrush(bg))
+
+        # Border transition on hover
+        border_r = int(48 + (139 - 48) * self._hover_progress)
+        border_g = int(54 + (92 - 54) * self._hover_progress)
+        border_b = int(61 + (246 - 61) * self._hover_progress)
+        pen = QPen(QColor(border_r, border_g, border_b), 1.0)
+        painter.setPen(pen)
+        painter.drawPath(path)
+
 class PluginManagerDialog(QDialog):
     """Dialog to manage loaded plugins and toggle them on/off."""
     
@@ -58,7 +126,7 @@ class PluginManagerDialog(QDialog):
         scroll.setWidget(self.container)
         layout.addWidget(scroll)
         
-        close_btn = QPushButton("Close")
+        close_btn = AnimatedSquircleButton("Close", radius=10.0, n=3.2, duration_ms=180)
         close_btn.setFixedWidth(100)
         close_btn.setObjectName("plugin_close")
         close_btn.clicked.connect(self.accept)
@@ -81,8 +149,7 @@ class PluginManagerDialog(QDialog):
             desc_text = t["description"]
             is_enabled = t["enabled"]
             
-            card = QFrame()
-            card.setObjectName("plugin_card")
+            card = PluginCard()
             card_layout = QHBoxLayout(card)
             
             info_layout = QVBoxLayout()

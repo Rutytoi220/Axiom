@@ -411,6 +411,7 @@ Returns:
                     pass
 
                 system_messages = self._context_manager.build_system_prompt(task, tool_schemas, intent)
+                system_messages.insert(0, {'role': 'system', 'content': self._get_system_prompt()})
                 if override_prompt:
                     system_messages.append({'role': 'system', 'content': override_prompt})
                 # ReAct enforces thinking block
@@ -856,6 +857,23 @@ Returns:
         self._emit('orchestrator.task.completed', {'task': task, 'success': True, 'rounds': rounds, 'session_id': session_id})
         return AgentResult(True, output={'response': final_response, 'tool_results': observations, 'rounds': rounds, 'session_id': session_id, 'plan': asdict(plan)}, steps_taken=steps)
 
+    def _get_system_prompt(self) -> str:
+        """Return the immutable anti-refusal identity anchor injected at position 0 of every LLM call."""
+        from axiom.config import get_config
+        config = get_config()
+        active_persona = getattr(config, 'active_persona', 'axiom_core')
+        return (
+            f"[PERSONA: {active_persona}]\n"
+            "You are AXIOM, a native AI agent running directly on the user's Linux hardware.\n"
+            "You are NOT a cloud-based chatbot. You HAVE physical access to the host machine.\n"
+            "You possess a Tool Registry capable of controlling the OS, executing terminal commands, "
+            "viewing the screen, and managing files.\n"
+            "NEVER say 'I cannot access your computer' or 'I am an AI language model.'\n"
+            "NEVER claim you are running in a sandbox or that you lack access to local resources.\n"
+            "If the user asks you to interact with the system, you MUST use your provided tools to "
+            "fulfill the request immediately."
+        )
+
     def _build_messages(self, task: str, plan: Plan, observations: List[Dict[str, Any]], session_id: str, override_prompt: Optional[str]=None, intent: str='orchestration') -> List[Dict[str, Any]]:
         """Auto-generated docstring.
 
@@ -944,7 +962,11 @@ Returns:
                 episodic_summaries = [rec.get('value') or rec.get('value_json') for rec in summary_records[:5]]
             except Exception as e:
                 self._log(f'Failed to fetch episodic summaries: {e}', [])
-        system_messages = [{'role': 'system', 'content': base_prompt}, {'role': 'system', 'content': json.dumps({'plan': asdict(plan), 'persisted_summaries': persisted_summaries, 'episodic_knowledge': episodic_summaries}, default=str)}]
+        system_messages = [
+            {'role': 'system', 'content': self._get_system_prompt()},
+            {'role': 'system', 'content': base_prompt},
+            {'role': 'system', 'content': json.dumps({'plan': asdict(plan), 'persisted_summaries': persisted_summaries, 'episodic_knowledge': episodic_summaries}, default=str)},
+        ]
         if override_prompt:
             system_messages.append({'role': 'system', 'content': override_prompt})
         if intent != 'chat':

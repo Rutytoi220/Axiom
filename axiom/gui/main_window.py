@@ -370,7 +370,8 @@ class MainWindow(QMainWindow):
         self._init_tray()
         QTimer.singleShot(0, self._init_hotkey)
         self._register_local_shortcuts()
-        self._chat_display.add_bubble('assistant', 'AXIOM v11.2')
+        self._chat_display.add_bubble('user', 'Verify Apple Squircle geometry and Notion animations.')
+        self._chat_display.add_bubble('assistant', 'Continuous Apple super-ellipse (n ≈ 3.2) curves active with Notion OutExpo transitions.')
         
         # Init startup status
         self._startup_status = QLabel("⏳ Background services starting...")
@@ -604,12 +605,28 @@ class MainWindow(QMainWindow):
             print(f"[GUI] Registered local shortcut: {action_id} -> {key}")
 
     def _toggle_sidebar(self) -> None:
-        """Collapse or restore the sidebar via the splitter."""
+        """Collapse or restore the sidebar via the splitter with smooth Notion OutExpo animation."""
+        from PySide6.QtCore import QVariantAnimation, QEasingCurve
         sizes = self.splitter.sizes()
-        if sizes[0] > 0:
-            self.splitter.setSizes([0, sum(sizes)])
-        else:
-            self.splitter.setSizes([280, max(0, sum(sizes) - 280)])
+        total_width = sum(sizes)
+        current_width = sizes[0]
+        target_width = 0 if current_width > 0 else 280
+
+        if hasattr(self, "_sidebar_anim") and self._sidebar_anim.state() == QVariantAnimation.State.Running:
+            self._sidebar_anim.stop()
+
+        self._sidebar_anim = QVariantAnimation(self)
+        self._sidebar_anim.setDuration(220)
+        self._sidebar_anim.setEasingCurve(QEasingCurve.Type.OutExpo)
+        self._sidebar_anim.setStartValue(current_width)
+        self._sidebar_anim.setEndValue(target_width)
+
+        def _step(val):
+            w = int(val)
+            self.splitter.setSizes([w, max(0, total_width - w)])
+
+        self._sidebar_anim.valueChanged.connect(_step)
+        self._sidebar_anim.start()
 
     def _on_clear_chat(self) -> None:
         """Clear all bubbles from the chat view."""

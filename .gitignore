@@ -143,5 +143,9 @@ INFINITE POWER/
 # Tests
 tests/
 *.AppImage
+*.rpm
+*.deb
+*.exe
+*.dmg
 trace.txt
 appimagetool*

@@ -1,13 +1,33 @@
-import sys
+with open("axiom/gui/styles/base.qss.template", "r") as f:
+    qss = f.read()
 
-with open("axiom/gui/windows/oobe_window.py", "r") as f:
-    text = f.read()
+# Replace QLineEdit... rules
+import re
+new_rules = """
+QLineEdit, QTextEdit, QPlainTextEdit, QComboBox {
+    background-color: @bg_surface@;
+    color: @text_main@;
+    border: 1px solid @borders@;
+    border-radius: @radius_md@;
+    padding: 8px 12px;
+}
 
-text = text.replace('background-color: #18181B;', 'background-color: #1e1e2e;')
-text = text.replace('border: 2px solid #3F3F46;', 'border: 2px solid #313244;')
-text = text.replace('border: 1px solid #3F3F46;', 'border: 1px solid #313244;')
-text = text.replace('background-color: #27272A;', 'background-color: #11111b;')
-text = text.replace('background-color: #3F3F46;', 'background-color: #313244;')
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 24px;
+    border-left: none;
+}
 
-with open("axiom/gui/windows/oobe_window.py", "w") as f:
-    f.write(text)
+QComboBox QAbstractItemView {
+    background-color: @bg_surface@;
+    color: @text_main@;
+    border: 1px solid @borders@;
+    border-radius: @radius_sm@;
+    selection-background-color: @accent@;
+}
+"""
+qss = re.sub(r'QLineEdit, QTextEdit, QPlainTextEdit, QComboBox \{.*?\n\}', new_rules.strip(), qss, flags=re.DOTALL)
+
+with open("axiom/gui/styles/base.qss.template", "w") as f:
+    f.write(qss)

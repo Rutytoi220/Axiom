@@ -60,31 +60,30 @@ class ModernInputBar(QFrame):
         icons_dir = base_dir / "assets" / "icons"
 
 
-        self.attach_btn = QPushButton()
+        from axiom.gui.styles.squircle import AnimatedSquircleButton
+
+        self.attach_btn = AnimatedSquircleButton(radius=20, n=3.2, duration_ms=180)
         self.attach_btn.setIcon(QIcon(str(icons_dir / "attach.svg")))
         self.attach_btn.setIconSize(QSize(20, 20))
         self.attach_btn.setObjectName("attach_btn")
-        self.attach_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.attach_btn.setFixedSize(40, 40)
 
         self.input_area = AutoExpandTextEdit(theme_manager)
         self.input_edit = self.input_area  # ALIAS for main_window.py
         self.input_area.setFixedHeight(40)
         
-        self.mic_btn = QPushButton()
+        self.mic_btn = AnimatedSquircleButton(radius=20, n=3.2, duration_ms=180)
         self.mic_btn.setObjectName("mic_btn")
         self.mic_btn.setIcon(QIcon(str(icons_dir / "mic.svg")))
         self.mic_btn.setIconSize(QSize(20, 20))
         self.mic_btn.setCheckable(True)
-        self.mic_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.mic_btn.setFixedSize(40, 40)
         self.mic_btn.toggled.connect(self.mic_toggled.emit)
         
-        self.send_btn = QPushButton()
+        self.send_btn = AnimatedSquircleButton(radius=20, n=3.2, duration_ms=180)
         self.send_btn.setObjectName("send_btn")
         self.send_btn.setIcon(QIcon(str(icons_dir / "send.svg")))
         self.send_btn.setIconSize(QSize(20, 20))
-        self.send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.send_btn.setFixedSize(40, 40)
         self.send_btn.clicked.connect(self._on_send)
         
@@ -110,14 +109,15 @@ class ModernInputBar(QFrame):
 class ModernChatBubble(QFrame):
     def __init__(self, role: str, text: str, theme_manager: ThemeManager):
         super().__init__()
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setObjectName("chat_bubble")
         self.role = role
         self.setProperty("role", role)
         self._raw_text = text
+        self.theme_manager = theme_manager
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(12, 12, 12, 12)
+        self.layout.setContentsMargins(16, 12, 16, 12)
         self.layout.setSpacing(0)
 
         self.text_browser = QTextBrowser()
@@ -125,8 +125,6 @@ class ModernChatBubble(QFrame):
         self.text_browser.document().setDocumentMargin(0)
         self.text_browser.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.text_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        # Size policy is intentionally left at default (Preferred/Preferred).
-        # resizeEvent below takes over height management precisely.
         
         html_content = markdown.markdown(self._raw_text, extensions=['fenced_code', 'tables'])
         self.text_browser.setHtml(html_content)
@@ -135,8 +133,37 @@ class ModernChatBubble(QFrame):
         self._apply_theme()
 
     def _apply_theme(self):
-        # Delegate styles to base.qss.template
-        pass
+        self.update()
+
+    def paintEvent(self, event):
+        from axiom.gui.styles.squircle import SquirclePath
+        from PySide6.QtGui import QPainter, QBrush, QPen, QColor
+        from PySide6.QtCore import QRectF
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        if rect.width() <= 0 or rect.height() <= 0:
+            return
+
+        # Continuous super-ellipse curvature with degree n ≈ 3.2
+        radius = min(rect.height() / 2.0, 18.0)
+        path = SquirclePath(rect, n=3.2, radius=radius)
+
+        tokens = getattr(self.theme_manager, 'theme', {}) if hasattr(self, 'theme_manager') and self.theme_manager else {}
+        primary = QColor(tokens.get("primary", "#8B5CF6"))
+        surface = QColor(tokens.get("bg_surface", "#161B22"))
+        borders = QColor(tokens.get("borders", "#30363D"))
+
+        if self.role == "user":
+            painter.fillPath(path, QBrush(primary))
+        else:
+            painter.fillPath(path, QBrush(surface))
+            pen = QPen(borders, 1.0)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen)
+            painter.drawPath(path)
 
     def set_text(self, text: str):
         self._raw_text = text

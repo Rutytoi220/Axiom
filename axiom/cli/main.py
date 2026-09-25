@@ -123,6 +123,9 @@ def main():
     # test command
     subparsers.add_parser("test", help="Run the automated test suite")
     
+    # daemon command
+    subparsers.add_parser("daemon", help="Run the background daemon")
+    
     args = parser.parse_args()
     
     if args.command == "send":
@@ -138,6 +141,13 @@ def main():
         show_status()
     elif args.command == "test":
         run_tests()
+    elif args.command == "daemon":
+        try:
+            import runpy
+            runpy.run_module("axiom.server.daemon", run_name="__main__")
+        except ImportError:
+            import runpy
+            runpy.run_module("axiom.core.daemon", run_name="__main__")
     else:
         parser.print_help()
 

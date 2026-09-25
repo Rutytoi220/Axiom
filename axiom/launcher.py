@@ -1,11 +1,6 @@
 import sys
 import runpy
-if "axiom.server.daemon" in sys.argv:
-    try:
-        runpy.run_module("axiom.server.daemon", run_name="__main__")
-    except ImportError:
-        runpy.run_module("axiom.core.daemon", run_name="__main__")
-    sys.exit(0)
+
 import os
 import sys
 import time
@@ -34,7 +29,12 @@ def main():
         logger.info("Daemon not running. Spawning background daemon...")
         
         env = os.environ.copy()
-        daemon_process = subprocess.Popen([sys.executable, "-m", "axiom.server.daemon"], env=env)
+        if getattr(sys, 'frozen', False):
+            cmd = [sys.executable, "daemon"]
+        else:
+            # Fallback for dev mode
+            cmd = [sys.executable, sys.argv[0], "daemon"]
+        daemon_process = subprocess.Popen(cmd, env=env)
         
         # Poll up to 5 seconds
         start_time = time.time()

@@ -64,6 +64,7 @@ Returns:
     ui_profile_level: str = 'standard' # 'standard', 'advanced', 'developer'
     persona: dict = field(default_factory=dict)
     persona_key: str = 'default'
+    active_persona: str = 'axiom_core'
     llm_complexity: str = 'detailed'
     auto_ollama_start: bool = True
     model_selection_mode: str = 'auto'  # 'auto', 'manual'
@@ -129,6 +130,7 @@ Returns:
             'ui_profile_level': self.ui_profile_level,
             'persona': self.persona,
             'persona_key': self.persona_key,
+            'active_persona': self.active_persona,
             'llm_complexity': self.llm_complexity,
             'auto_ollama_start': self.auto_ollama_start,
             'model_selection_mode': self.model_selection_mode,

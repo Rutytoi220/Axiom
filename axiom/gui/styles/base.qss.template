@@ -266,8 +266,8 @@ QPushButton#sync_action {
    Plugin Manager
    ========================================================================= */
 QFrame#plugin_card {
-    background-color: @bg_surface@;
-    border-radius: @radius_pill@;
+    background-color: transparent;
+    border: none;
 }
 
 QLabel#plugin_name {
@@ -361,48 +361,75 @@ QTextEdit.code, QPlainTextEdit.code {
 }
 
 /* =========================================================================
-   Sidebar Segmented Control
+   Sidebar Segmented Control — Apple-style iOS picker pill
    ========================================================================= */
 QFrame#segmented_control {
-    background-color: @bg_surface@;
-    border-radius: @radius_pill@;
-    border: 1px solid @borders@;
+    background-color: transparent;
+    border: none;
+    padding: 3px;
 }
 QPushButton#segmented_btn {
     background-color: transparent;
     color: @text_muted@;
     border: none;
-    border-radius: 0px;
+    border-radius: 12px;
+    padding: 5px 10px;
+    font-size: 12px;
+    font-weight: 500;
 }
 QPushButton#segmented_btn:hover {
     color: @text_main@;
-    background-color: rgba(255, 255, 255, 0.05);
+    background-color: transparent;
 }
 QPushButton#segmented_btn[status="active"] {
-    background-color: @primary@;
+    background-color: transparent;
     color: #FFFFFF;
+    font-weight: bold;
 }
 QPushButton#segmented_btn[position="first"] {
-    border-top-left-radius: @radius_pill@;
-    border-bottom-left-radius: @radius_pill@;
+    border-top-left-radius: 12px;
+    border-bottom-left-radius: 12px;
 }
 QPushButton#segmented_btn[position="last"] {
-    border-top-right-radius: @radius_pill@;
-    border-bottom-right-radius: @radius_pill@;
+    border-top-right-radius: 12px;
+    border-bottom-right-radius: 12px;
+}
+
+/* =========================================================================
+   Sidebar Action Buttons — Squircle (+ New Chat, + Project, AXIOM Hub)
+   ========================================================================= */
+QPushButton#sidebar_action_btn {
+    background-color: transparent;
+    color: @text_main@;
+    border: none;
+    border-radius: 14px;
+    padding: 10px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    text-align: left;
+}
+QPushButton#sidebar_action_btn:hover {
+    background-color: transparent;
+    color: #FFFFFF;
+    border: none;
+}
+QPushButton#sidebar_action_btn:pressed {
+    background-color: transparent;
+    color: #FFFFFF;
+    border: none;
 }
 
 /* =========================================================================
    Chat Window Specifics
    ========================================================================= */
 QPushButton#attach_btn, QPushButton#mic_btn, QPushButton#send_btn {
-    background-color: @bg_surface@;
-    border: 1px solid @borders@;
-    border-radius: @radius_circle@;
+    background-color: transparent;
+    border: none;
     padding: 0px;
 }
 QPushButton#attach_btn:hover, QPushButton#mic_btn:hover, QPushButton#send_btn:hover {
-    background-color: @primary@;
-    border: 1px solid @primary@;
+    background-color: transparent;
+    border: none;
 }
 
 
@@ -427,11 +454,13 @@ QLabel#chat_watermark {
    Chat Bubbles
    ========================================================================= */
 QFrame#chat_bubble {
-    border-radius: @radius_pill@;
+    background-color: transparent;
+    border: none;
 }
 
 QFrame#chat_bubble[role="user"] {
-    background-color: @primary@;
+    background-color: transparent;
+    border: none;
 }
 QFrame#chat_bubble[role="user"] QTextBrowser {
     color: #FFFFFF;
@@ -440,8 +469,8 @@ QFrame#chat_bubble[role="user"] QTextBrowser {
 }
 
 QFrame#chat_bubble[role="assistant"] {
-    background-color: @bg_surface@;
-    border: 1px solid @borders@;
+    background-color: transparent;
+    border: none;
 }
 QFrame#chat_bubble[role="assistant"] QTextBrowser {
     color: @text_main@;

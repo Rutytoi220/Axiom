@@ -7,19 +7,31 @@ from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QIcon
 from axiom.gui.styles.theme_manager import ThemeManager
 
+from axiom.gui.styles.squircle import SquirclePath, AnimatedSquircleButton
+from PySide6.QtCore import QVariantAnimation, QEasingCurve, QRectF
+from PySide6.QtGui import QPainter, QBrush, QPen, QColor
+
 class SegmentedControl(QFrame):
     value_changed = Signal(str)
 
     def __init__(self, theme_manager: ThemeManager):
         super().__init__()
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setObjectName("segmented_control")
+        self.theme_manager = theme_manager
         self.layout = QHBoxLayout(self)
-        self.layout.setContentsMargins(0, 0, 0, 0)
-        self.layout.setSpacing(0)
+        self.layout.setContentsMargins(4, 4, 4, 4)
+        self.layout.setSpacing(4)
         
         self.buttons = []
         self.active_btn = None
+        self._pill_x = 4.0
+        self._pill_w = 60.0
+        
+        self._anim = QVariantAnimation(self)
+        self._anim.setDuration(180)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutExpo)
+        self._anim.valueChanged.connect(self._on_anim_val)
         
         modes = ["Basic", "Strict", "Autopilot"]
         for i, mode in enumerate(modes):
@@ -45,7 +57,28 @@ class SegmentedControl(QFrame):
         self.active_btn = self.buttons[0]
         self._apply_theme()
 
+    def _on_anim_val(self, val):
+        self._pill_x = val[0]
+        self._pill_w = val[1]
+        self.update()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.active_btn:
+            self._pill_x = float(self.active_btn.x())
+            self._pill_w = float(self.active_btn.width())
+
     def _on_toggled(self, clicked_btn):
+        start_x = self._pill_x
+        start_w = self._pill_w
+        target_x = float(clicked_btn.x())
+        target_w = float(clicked_btn.width())
+
+        self._anim.stop()
+        self._anim.setStartValue([start_x, start_w])
+        self._anim.setEndValue([target_x, target_w])
+        self._anim.start()
+
         for btn in self.buttons:
             if btn != clicked_btn:
                 btn.setChecked(False)
@@ -61,7 +94,34 @@ class SegmentedControl(QFrame):
         self._apply_theme()
 
     def _apply_theme(self):
-        pass
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        if rect.width() <= 0 or rect.height() <= 0:
+            return
+
+        # Background container squircle (n ≈ 3.2, radius 16)
+        path = SquirclePath(rect, n=3.2, radius=16.0)
+        tokens = getattr(self.theme_manager, 'theme', {}) if hasattr(self, 'theme_manager') and self.theme_manager else {}
+        surface = QColor(tokens.get("bg_surface", "#161B22"))
+        borders = QColor(tokens.get("borders", "#30363D"))
+        primary = QColor(tokens.get("primary", "#8B5CF6"))
+
+        painter.fillPath(path, QBrush(surface))
+        pen = QPen(borders, 1.0)
+        painter.setPen(pen)
+        painter.drawPath(path)
+
+        # Sliding indicator squircle pill (n ≈ 3.2, radius 12)
+        if self._pill_w > 0:
+            pill_rect = QRectF(self._pill_x, 4.0, self._pill_w, float(self.height()) - 8.0)
+            pill_path = SquirclePath(pill_rect, n=3.2, radius=12.0)
+            painter.fillPath(pill_path, QBrush(primary))
+
 class ModernSidebar(QFrame):
     new_chat_requested = Signal()
     new_project_requested = Signal()
@@ -86,12 +146,12 @@ class ModernSidebar(QFrame):
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(8)
         
-        self.new_chat_btn = QPushButton("+ New Chat")
-        self.new_chat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.new_chat_btn = AnimatedSquircleButton("+ New Chat", radius=14.0, n=3.2, duration_ms=180)
+        self.new_chat_btn.setObjectName("sidebar_action_btn")
         self.new_chat_btn.clicked.connect(self.new_chat_requested.emit)
-        
-        self.new_proj_btn = QPushButton("+ Project")
-        self.new_proj_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        self.new_proj_btn = AnimatedSquircleButton("+ Project", radius=14.0, n=3.2, duration_ms=180)
+        self.new_proj_btn.setObjectName("sidebar_action_btn")
         self.new_proj_btn.clicked.connect(self.new_project_requested.emit)
 
         btn_layout.addWidget(self.new_chat_btn)
@@ -109,25 +169,19 @@ class ModernSidebar(QFrame):
         self.tree.setAttribute(Qt.WidgetAttribute.WA_MacShowFocusRect, False)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
-        
+
         self.layout.addWidget(self.tree)
         self.tree.itemSelectionChanged.connect(self._on_tree_selection)
 
         self.layout.addStretch(1)
 
-        self.settings_btn = QPushButton("Settings")
-        self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        settings_layout = QHBoxLayout()
-        settings_layout.setContentsMargins(0, 0, 0, 0)
-        settings_layout.addWidget(self.settings_btn)
-        self.layout.addLayout(settings_layout)
+        self.hub_btn = AnimatedSquircleButton("⬡  AXIOM Hub", radius=14.0, n=3.2, duration_ms=180)
+        self.hub_btn.setObjectName("sidebar_action_btn")
+        self.layout.addWidget(self.hub_btn)
 
-        self.hub_btn = QPushButton("[Hub] AXIOM Hub")
-        self.hub_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        hub_layout = QHBoxLayout()
-        hub_layout.setContentsMargins(0, 0, 0, 0)
-        hub_layout.addWidget(self.hub_btn)
-        self.layout.addLayout(hub_layout)
+        self.settings_btn = AnimatedSquircleButton("⚙  Settings", radius=14.0, n=3.2, duration_ms=180)
+        self.settings_btn.setObjectName("sidebar_action_btn")
+        self.layout.addWidget(self.settings_btn)
 
         self._apply_theme()
 

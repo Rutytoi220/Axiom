@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+import websockets
 
 from axiom.core.events import Event
 
