@@ -707,6 +707,8 @@ def create_tui_app() -> Application[None]:
         multiline=False,
         style="class:system-alert",
     )
+
+    trace_field = TextArea(text="", read_only=True, scrollbar=True, height=20, width=100)
     modal_search_field.buffer.on_text_changed += handle_modal_search_change
 
     modal_kb = KeyBindings()
@@ -791,7 +793,6 @@ def create_tui_app() -> Application[None]:
         content=ConditionalContainer(modal_frame, filter=is_modal_open)
     )
 
-    trace_field = TextArea(text="", read_only=True, scrollbar=True, height=20, width=100)
 
 
     ask_human_visible = False
@@ -895,10 +896,17 @@ def create_tui_app() -> Application[None]:
     @kb.add("c-o")
     def _trace_key(event: Any) -> None:
         global active_modal, MODAL_VISIBLE
-        active_modal = None if active_modal == "trace" else "trace"
-        MODAL_VISIBLE = active_modal is not None
-        if not MODAL_VISIBLE:
+        if active_modal == "trace":
+            active_modal = None
+            MODAL_VISIBLE = False
             event.app.layout.focus(input_field)
+        else:
+            active_modal = "trace"
+            MODAL_VISIBLE = True
+            import json
+            trace_str = json.dumps(execution_trace, indent=2) if execution_trace else "No tools executed yet."
+            trace_field.text = trace_str
+            event.app.layout.focus(trace_field)
         event.app.invalidate()
 
     @kb.add("c-t")
