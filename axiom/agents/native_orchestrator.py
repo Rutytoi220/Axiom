@@ -152,8 +152,10 @@ class NativeOrchestrator:
                         extracted_b64 = extracted_b64.split(",", 1)[1]
                     payload["messages"].append({
                         "role": "user",
-                        "content": "Here is the requested screenshot. Please analyze it.",
-                        "images": [extracted_b64]
+                        "content": [
+                            {"type": "text", "text": "Here is the requested screenshot. Please analyze it and output the tool call to interact with it if requested."},
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{extracted_b64}"}}
+                        ]
                     })
 
             async for chunk in self.generate_stream(payload, depth=depth + 1):
