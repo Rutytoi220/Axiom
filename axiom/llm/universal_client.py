@@ -42,7 +42,7 @@ Returns:
         self.config = DummyConfig(default_model)
         self.federation = HybridFederationClient()
 
-    def _execute_completion(self, model: str, messages: List[Dict[str, Any]], **kwargs) -> Any:
+    async def _execute_completion(self, model: str, messages: List[Dict[str, Any]], **kwargs) -> Any:
         """Auto-generated docstring."""
         import re
         images = kwargs.pop('images', None)
@@ -80,9 +80,9 @@ Returns:
         priority = kwargs.pop('priority', 0)  # Default priority is 0 (Critical/Real-time)
         scheduler = get_scheduler()
 
-        def _do_completion():
+        async def _do_completion():
             try:
-                return litellm.completion(model=model, messages=messages, **kwargs)
+                return await litellm.acompletion(model=model, messages=messages, **kwargs)
             except (litellm.exceptions.RateLimitError, litellm.exceptions.APIConnectionError) as e:
                 if model != self.fallback_model:
                     logger.warning(f'Provider error for {model}: {e}. Falling back to {self.fallback_model}')
@@ -92,22 +92,21 @@ Returns:
                             kwargs['api_base'] = SwarmRouter.instance().get_ollama_base_url()
                         except Exception:
                             kwargs['api_base'] = 'http://127.0.0.1:11434'
-                    return litellm.completion(model=self.fallback_model, messages=messages, **kwargs)
+                    return await litellm.acompletion(model=self.fallback_model, messages=messages, **kwargs)
                 raise e
 
-        def _streaming_generator():
-            with scheduler.priority_lock(priority):
-                response = _do_completion()
-                for chunk in response:
-                    yield chunk
+        async def _streaming_generator():
+            # In an async context, we rely on the event loop to manage priority without hard locking
+            response = await _do_completion()
+            async for chunk in response:
+                yield chunk
 
         if kwargs.get('stream'):
             return _streaming_generator()
         else:
-            with scheduler.priority_lock(priority):
-                return _do_completion()
+            return await _do_completion()
 
-    def chat(self, messages: List[Dict[str, Any]], **kwargs) -> str:
+    async def chat(self, messages: List[Dict[str, Any]], **kwargs) -> str:
         """Execute a standard chat completion."""
         timeout = kwargs.pop('timeout', None)
         if timeout:
@@ -140,10 +139,10 @@ Returns:
             kwargs['stream'] = True
 
         try:
-            response = self._execute_completion(model, messages, **kwargs)
+            response = await self._execute_completion(model, messages, **kwargs)
             if stream_callback:
                 full_text = []
-                for chunk in response:
+                async for chunk in response:
                     delta = chunk.choices[0].delta
                     content = getattr(delta, "content", "") or ""
                     if content:
@@ -155,7 +154,7 @@ Returns:
             logger.error(f'UniversalLLMClient chat error: {e}')
             raise e
 
-    def chat_with_tools(self, messages: List[Dict[str, Any]], tool_schemas: List[Dict[str, Any]], **kwargs) -> Dict[str, Any]:
+    async def chat_with_tools(self, messages: List[Dict[str, Any]], tool_schemas: List[Dict[str, Any]], **kwargs) -> Dict[str, Any]:
         """Execute a tool-enabled chat completion."""
         timeout = kwargs.pop('timeout', None)
         if timeout:
@@ -184,12 +183,12 @@ Returns:
         if litellm_tools:
             kwargs['tools'] = litellm_tools
         try:
-            response = self._execute_completion(model, messages, **kwargs)
+            response = await self._execute_completion(model, messages, **kwargs)
             
             if stream_callback:
                 full_text = []
                 tool_calls_dict = {}
-                for chunk in response:
+                async for chunk in response:
                     delta = chunk.choices[0].delta
                     content = getattr(delta, "content", "") or ""
                     if content:

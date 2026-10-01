@@ -193,11 +193,18 @@ Returns:
             steps: List[str] = []
             if self._llm is None:
                 return AgentResult(False, error='No LLM attached to OrchestratorAgent', steps_taken=steps)
-            return self._agentic_loop(task, steps, use_tools=use_tools, session_id=session_id, timeout=timeout)
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+                import concurrent.futures
+                future = asyncio.run_coroutine_threadsafe(self._agentic_loop(task, steps, use_tools=use_tools, session_id=session_id, timeout=timeout), loop)
+                return future.result()
+            except RuntimeError:
+                return asyncio.run(self._agentic_loop(task, steps, use_tools=use_tools, session_id=session_id, timeout=timeout))
         finally:
             self._state = 'idle'
 
-    def _agentic_loop(self, task: str, steps: List[str], use_tools: bool=True, session_id: Optional[str]=None, timeout: Optional[float]=None) -> AgentResult:
+    async def _agentic_loop(self, task: str, steps: List[str], use_tools: bool=True, session_id: Optional[str]=None, timeout: Optional[float]=None) -> AgentResult:
         """Auto-generated docstring.
 
 Args:
@@ -465,7 +472,7 @@ Returns:
                     current_schemas = copy.deepcopy(tool_schemas)
                 except Exception:
                     pass
-                response_msg = self._call_llm(messages, current_schemas, timeout=time_left, temperature=temp_override)
+                response_msg = await self._call_llm(messages, current_schemas, timeout=time_left, temperature=temp_override)
                 force_text_response = False
                 tool_calls = response_msg.get('tool_calls') or []
                 content = response_msg.get('content')
@@ -674,7 +681,7 @@ Returns:
                         final_response = ' [!] The model returned an empty response. Try rephrasing or typing /help.'
                     if intent == 'chat' and self._is_duplicate_assistant_response(final_response):
                         logger.warning('Echo Pruning: Dropped duplicate assistant response from history buffer.')
-                        retry_response, retry_message = self._retry_pruned_chat_response(task=task, plan=plan, observations=observations, session_id=session_id, timeout=time_left)
+                        retry_response, retry_message = await self._retry_pruned_chat_response(task=task, plan=plan, observations=observations, session_id=session_id, timeout=time_left)
                         final_response = retry_response or CHAT_ECHO_RETRY_FALLBACK
                         accumulated_response = final_response
                         if retry_message is not None:
@@ -750,7 +757,7 @@ Returns:
                             'state': 'ACT',
                             'action': f"AXIOM is executing: {tool_name} (Step {rounds}/{MAX_ITERATIONS})..."
                         })
-                        result = self._execute_tool(tool_name, arguments)
+                        result = await self._execute_tool(tool_name, arguments)
                         try:
                             from axiom.memory.compression import ObservationCompressor
                             result = ObservationCompressor.compress(result, tool_name)
@@ -797,7 +804,7 @@ Returns:
                 else:
                     state = AgentState.THINK
             elif state == AgentState.REFLECT:
-                reflection = self._reflect(task, plan, observations, final_response)
+                reflection = await self._reflect(task, plan, observations, final_response)
                 self._persist_step(session_id, 'reflection', reflection)
                 if reflection.get('complete') or final_response:
                     if final_response:
@@ -1013,7 +1020,7 @@ Returns:
                 messages = self._context_manager.build_context_window(system_messages=system_messages, chat_history=self._chat_history, current_task=task, retrieved_memories=memories, observations=observations)
         return messages
 
-    def _call_llm(self, messages: List[Dict[str, Any]], tool_schemas: List[Dict[str, Any]], timeout: Optional[float]=None, temperature: Optional[float]=None, images: Optional[List[str]]=None) -> Dict[str, Any]:
+    async def _call_llm(self, messages: List[Dict[str, Any]], tool_schemas: List[Dict[str, Any]], timeout: Optional[float]=None, temperature: Optional[float]=None, images: Optional[List[str]]=None) -> Dict[str, Any]:
         """Auto-generated docstring."""
         last_exc = None
         for attempt in range(LLM_RETRIES):
@@ -1038,10 +1045,10 @@ Returns:
                         kwargs_inject['images'] = images
 
                 if tool_schemas and hasattr(self._llm, 'chat_with_tools'):
-                    msg = self._llm.chat_with_tools(messages, tool_schemas, **kwargs_inject)
+                    msg = await self._llm.chat_with_tools(messages, tool_schemas, **kwargs_inject)
                     response = msg if isinstance(msg, dict) else {'role': 'assistant', 'content': str(msg)}
                 else:
-                    content = self._llm.chat(messages, **kwargs_inject)
+                    content = await self._llm.chat(messages, **kwargs_inject)
                     response = {'role': 'assistant', 'content': content or ''}
                 
                 content_str = response.get('content', '')
@@ -1114,7 +1121,7 @@ Returns:
 """
         return Plan(objective=task, steps=['Understand the objective', 'Use tools if needed', 'Synthesize final answer'], current_step=0)
 
-    def _reflect(self, task: str, plan: Plan, observations: List[Dict[str, Any]], final_response: str) -> Dict[str, Any]:
+    async def _reflect(self, task: str, plan: Plan, observations: List[Dict[str, Any]], final_response: str) -> Dict[str, Any]:
         """Auto-generated docstring.
 
 Args:
@@ -1164,7 +1171,7 @@ Returns:
                 })
         return schemas
 
-    def _execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    async def _execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """Auto-generated docstring.
 
 Args:
@@ -1261,7 +1268,7 @@ Returns:
             if hasattr(self, 'plugin_manager') and tool_name in self.plugin_manager.active_tools:
                 plugin = self.plugin_manager.active_tools[tool_name]
                 try:
-                    result = self._run_coro_sync(_safe_execute(plugin.execute, **arguments))
+                    result = await _safe_execute(plugin.execute, **arguments)
                     payload = {'output': result, 'error': None}
                     result_dict = self._structured_tool_result(tool_name, arguments, payload, True)
                 except asyncio.TimeoutError:
@@ -1279,7 +1286,7 @@ Returns:
             elif self.registry and hasattr(self.registry, 'execute') and (hasattr(self.registry, 'has_tool') and self.registry.has_tool(tool_name) or True):
                 # Try core registry execute
                 try:
-                    tool_result = self._run_coro_sync(_safe_execute(self.registry.execute, tool_name, **arguments))
+                    tool_result = await _safe_execute(self.registry.execute, tool_name, **arguments)
                     raw_error = getattr(tool_result, 'error', None)
                     error = _scrub_jargon(raw_error) if isinstance(raw_error, str) else None
                     payload = {'output': getattr(tool_result, 'output', None), 'error': error}
@@ -1302,7 +1309,7 @@ Returns:
                     result_dict = self._structured_tool_result(tool_name, arguments, {'error': f'Tool not found: {tool_name}'}, False)
                 else:
                     try:
-                        result = self._run_coro_sync(_safe_execute(tool.execute, arguments))
+                        result = await _safe_execute(tool.execute, arguments)
                         if isinstance(result, dict) and {'tool', 'arguments', 'result', 'success'}.issubset(result.keys()):
                             if 'error' in result.get('result', {}):
                                 result['result']['error'] = _scrub_jargon(result['result']['error'])
@@ -1395,11 +1402,11 @@ Returns:
             candidates.append(output)
         return any((isinstance(value, str) and value.lstrip().lower().startswith(INTERNAL_OBSERVATION_PREFIXES) for value in candidates))
 
-    def _retry_pruned_chat_response(self, task: str, plan: Plan, observations: List[Dict[str, Any]], session_id: str, timeout: Optional[float]) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
+    async def _retry_pruned_chat_response(self, task: str, plan: Plan, observations: List[Dict[str, Any]], session_id: str, timeout: Optional[float]) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
         """Make one diversified retry after suppressing a conversational echo."""
         try:
             messages = self._build_messages(task, plan, observations, session_id, override_prompt=CHAT_ECHO_RETRY_PROMPT, intent='chat')
-            retry_message = self._call_llm(messages, [], timeout=timeout, temperature=0.4)
+            retry_message = await self._call_llm(messages, [], timeout=timeout, temperature=0.4)
             content = self._clean_retry_content(retry_message.get('content'))
             if content and (not self._is_duplicate_assistant_response(content)):
                 return (content, retry_message)

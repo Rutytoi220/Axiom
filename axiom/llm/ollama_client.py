@@ -174,7 +174,7 @@ class OllamaClient:
         import asyncio
         return await asyncio.to_thread(self.list_models)
     
-    def generate(self, prompt: str, model: Optional[str] = None, 
+    async def generate(self, prompt: str, model: Optional[str] = None, 
                 stream: bool = False) -> str:
         """Generate text using Ollama.
         
@@ -214,7 +214,7 @@ class OllamaClient:
         import asyncio
         return await asyncio.to_thread(self.generate, prompt, model)
     
-    def chat(self, messages: List[Dict[str, str]], model: Optional[str] = None, timeout: Optional[float] = None, temperature: Optional[float] = None) -> str:
+    async def chat(self, messages: List[Dict[str, str]], model: Optional[str] = None, timeout: Optional[float] = None, temperature: Optional[float] = None) -> str:
         """Chat with Ollama using message format.
         
         Args:
@@ -254,7 +254,7 @@ class OllamaClient:
         }
         
         try:
-            response = self._request("POST", "/api/chat", payload, timeout=timeout)
+            response = await self._request("POST", "/api/chat", payload, timeout=timeout)
             message = response.get("message", {})
             return message.get("content", "")
         except OllamaError as e:
@@ -283,7 +283,7 @@ class OllamaClient:
         import asyncio
         return await asyncio.to_thread(self.chat, messages, model)
     
-    def chat_with_tools(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]],
+    async def chat_with_tools(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]],
                         model: Optional[str] = None, timeout: Optional[float] = None, temperature: Optional[float] = None) -> Dict[str, Any]:
         """Chat with Ollama using tool/function calling.
 
