@@ -109,7 +109,6 @@ effort_index: int = 1
 model_list: list[str] = []
 filtered_model_list: list[str] = []
 model_index: int = 0
-model_search_query: str = ""
 
 CURRENT_SESSION_ID: str = ""
 
@@ -258,7 +257,6 @@ class SlashCommandCompleter(Completer):
 
 def render_model_modal_content() -> FormattedText:
     lines = []
-    lines.append(("class:system-alert", f"\n  Search: {model_search_query}█\n\n"))
     lines.append(("class:modal-text", "  Available Models:\n"))
     
     visible_count = 7
@@ -593,7 +591,7 @@ def create_tui_app() -> Application[None]:
                 active_modal = "model"
                 input_field.text = ""
                 input_field.read_only = True
-                get_app().layout.focus(modal_window)
+                get_app().layout.focus(modal_search_field)
                 get_app().invalidate()
                 return False
             if cmd == "/effort":
@@ -696,15 +694,108 @@ def create_tui_app() -> Application[None]:
     def is_effort_modal_open() -> bool:
         return MODAL_VISIBLE or active_modal == "effort"
 
-    modal_window = Window(
+    @Condition
+    def is_model_modal_open() -> bool:
+        return MODAL_VISIBLE and active_modal == "model"
+
+
+    def handle_modal_search_change(buff):
+        global filtered_model_list, model_index
+        query = buff.text.lower()
+        filtered_model_list = [m for m in model_list if query in m.lower()]
+        model_index = max(0, min(model_index, len(filtered_model_list) - 1))
+        get_app().invalidate()
+
+    modal_search_field = TextArea(
+        height=1,
+        prompt="  Search: ",
+        multiline=False,
+        style="class:system-alert",
+    )
+    modal_search_field.buffer.on_text_changed += handle_modal_search_change
+
+    modal_kb = KeyBindings()
+    @modal_kb.add("up")
+    def _model_up(event: Any) -> None:
+        global model_index
+        model_index = max(0, model_index - 1)
+        event.app.invalidate()
+        
+    @modal_kb.add("down")
+    def _model_down(event: Any) -> None:
+        global model_index
+        model_index = min(len(filtered_model_list) - 1, model_index + 1)
+        event.app.invalidate()
+        
+    @modal_kb.add("left")
+    def _model_effort_left(event: Any) -> None:
+        global effort_index
+        effort_index = max(0, effort_index - 1)
+        event.app.invalidate()
+
+    @modal_kb.add("right")
+    def _model_effort_right(event: Any) -> None:
+        global effort_index
+        effort_index = min(len(EFFORT_TIERS) - 1, effort_index + 1)
+        event.app.invalidate()
+        
+    @modal_kb.add("enter")
+    def _model_confirm(event: Any) -> None:
+        global CURRENT_EFFORT, CURRENT_COGNITIVE_MODE, MODAL_VISIBLE, active_modal
+        if filtered_model_list and model_index < len(filtered_model_list):
+            selected_model = filtered_model_list[model_index]
+            config = get_config()
+            config.ollama_model = selected_model
+            tier = EFFORT_TIERS[effort_index]
+            setattr(config, "effort_tier", tier["id"])
+            config.save()
+        tier = EFFORT_TIERS[effort_index]
+        if tier["category"] == "compute":
+            CURRENT_EFFORT = tier["label"] if tier["id"] == "ultra" else tier["label"].capitalize()
+            CURRENT_COGNITIVE_MODE = "Standard"
+        else:
+            CURRENT_COGNITIVE_MODE = tier["label"].capitalize() + " [BETA]"
+            if tier["id"] == "adhd":
+                CURRENT_COGNITIVE_MODE = "ADHD [BETA]"
+            elif tier["id"] == "overthinking":
+                CURRENT_COGNITIVE_MODE = "Overthinking [BETA]"
+        MODAL_VISIBLE = False
+        active_modal = None
+        modal_search_field.text = ""
+        input_field.read_only = False
+        input_field.text = ""
+        event.app.layout.focus(input_field)
+        event.app.invalidate()
+
+    @modal_kb.add("escape")
+    def _model_escape(event: Any) -> None:
+        global MODAL_VISIBLE, active_modal
+        MODAL_VISIBLE = False
+        active_modal = None
+        modal_search_field.text = ""
+        input_field.read_only = False
+        input_field.text = ""
+        event.app.layout.focus(input_field)
+        event.app.invalidate()
+
+    modal_search_field.control.key_bindings = modal_kb
+
+    modal_content_window = Window(
         content=FormattedTextControl(get_modal_content, focusable=True),
         width=82,
-        height=lambda: 22 if active_modal == "model" else 11,
+        height=lambda: 21 if active_modal == "model" else 11,
         dont_extend_width=True,
         dont_extend_height=True,
         style="class:modal",
     )
-    modal_frame = Frame(modal_window, title=get_modal_title, style="class:modal-frame")
+    
+    modal_layout = HSplit([
+        ConditionalContainer(modal_search_field, filter=is_model_modal_open),
+        modal_content_window
+    ])
+    
+    modal_frame = Frame(modal_layout, title=get_modal_title, style="class:modal-frame")
+
     modal_float = Float(
         content=ConditionalContainer(modal_frame, filter=is_modal_open)
     )
@@ -823,89 +914,6 @@ def create_tui_app() -> Application[None]:
         idx = modes.index(CURRENT_COGNITIVE_MODE) if CURRENT_COGNITIVE_MODE in modes else 0
         CURRENT_COGNITIVE_MODE = modes[(idx + 1) % len(modes)]
         event.app.invalidate()
-
-
-    @Condition
-    def is_model_modal_open() -> bool:
-        return MODAL_VISIBLE and active_modal == "model"
-        
-    @kb.add("<any>", filter=is_model_modal_open, eager=True)
-    def _model_type(event: Any) -> None:
-        global model_search_query, filtered_model_list, model_index
-        char = event.key_sequence[0].data
-        if char.isprintable():
-            model_search_query += char
-            filtered_model_list = [m for m in model_list if model_search_query.lower() in m.lower()]
-            model_index = max(0, min(model_index, len(filtered_model_list) - 1))
-            event.app.invalidate()
-            
-    @kb.add("backspace", filter=is_model_modal_open, eager=True)
-    def _model_backspace(event: Any) -> None:
-        global model_search_query, filtered_model_list, model_index
-        if model_search_query:
-            model_search_query = model_search_query[:-1]
-            filtered_model_list = [m for m in model_list if model_search_query.lower() in m.lower()] if model_search_query else model_list.copy()
-            model_index = max(0, min(model_index, len(filtered_model_list) - 1))
-            event.app.invalidate()
-            
-    @kb.add("up", filter=is_model_modal_open, eager=True)
-    def _model_up(event: Any) -> None:
-        global model_index
-        model_index = max(0, model_index - 1)
-        event.app.invalidate()
-        
-    @kb.add("down", filter=is_model_modal_open, eager=True)
-    def _model_down(event: Any) -> None:
-        global model_index
-        model_index = min(len(filtered_model_list) - 1, model_index + 1)
-        event.app.invalidate()
-        
-    @kb.add("left", filter=is_model_modal_open, eager=True)
-    def _model_effort_left(event: Any) -> None:
-        global effort_index
-        effort_index = max(0, effort_index - 1)
-        event.app.invalidate()
-
-    @kb.add("right", filter=is_model_modal_open, eager=True)
-    def _model_effort_right(event: Any) -> None:
-        global effort_index
-        effort_index = min(len(EFFORT_TIERS) - 1, effort_index + 1)
-        event.app.invalidate()
-        
-    @kb.add("enter", filter=is_model_modal_open, eager=True)
-    def _model_confirm(event: Any) -> None:
-        global CURRENT_EFFORT, CURRENT_COGNITIVE_MODE, MODAL_VISIBLE, active_modal
-        
-        # Save model
-        if filtered_model_list and model_index < len(filtered_model_list):
-            selected_model = filtered_model_list[model_index]
-            config = get_config()
-            config.ollama_model = selected_model
-            
-            # Since effort_tier might not exist on AxiomConfig, we can just setattr dynamically
-            tier = EFFORT_TIERS[effort_index]
-            setattr(config, "effort_tier", tier["id"])
-            config.save()
-        
-        # Save effort runtime state
-        tier = EFFORT_TIERS[effort_index]
-        if tier["category"] == "compute":
-            CURRENT_EFFORT = tier["label"] if tier["id"] == "ultra" else tier["label"].capitalize()
-            CURRENT_COGNITIVE_MODE = "Standard"
-        else:
-            CURRENT_COGNITIVE_MODE = tier["label"].capitalize() + " [BETA]"
-            if tier["id"] == "adhd":
-                CURRENT_COGNITIVE_MODE = "ADHD [BETA]"
-            elif tier["id"] == "overthinking":
-                CURRENT_COGNITIVE_MODE = "Overthinking [BETA]"
-                
-        MODAL_VISIBLE = False
-        active_modal = None
-        input_field.read_only = False
-        input_field.text = ""
-        event.app.layout.focus(input_field)
-        event.app.invalidate()
-
     @kb.add("c-e")
     def _effort_key(event: Any) -> None:
         global MODAL_VISIBLE, active_modal
@@ -920,6 +928,7 @@ def create_tui_app() -> Application[None]:
         global MODAL_VISIBLE, active_modal
         MODAL_VISIBLE = False
         active_modal = None
+        modal_search_field.text = ""
         input_field.read_only = False
         input_field.text = ""
         event.app.layout.focus(input_field)
