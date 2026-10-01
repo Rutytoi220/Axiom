@@ -899,7 +899,8 @@ Returns:
             "NEVER say 'I cannot access your computer' or 'I am an AI language model.'\n"
             "NEVER claim you are running in a sandbox or that you lack access to local resources.\n"
             "If the user asks you to interact with the system, you MUST use your provided tools to "
-            "fulfill the request immediately."
+            "fulfill the request immediately.\n"
+            "CRITICAL RULE: NEVER use the ask_human tool to ask the user for screen coordinates, visual layouts, or UI element locations. You MUST use your screen_perception and vision tools to find visual elements autonomously."
         )
 
     def _build_messages(self, task: str, plan: Plan, observations: List[Dict[str, Any]], session_id: str, override_prompt: Optional[str]=None, intent: str='orchestration') -> List[Dict[str, Any]]:

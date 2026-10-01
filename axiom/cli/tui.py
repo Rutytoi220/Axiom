@@ -325,10 +325,7 @@ def get_modal_content() -> Any:
         lines.append("\n  [Press Esc or Ctrl+P to close]")
         return FormattedText([("class:modal-text", "".join(lines))])
     elif active_modal == "trace":
-        trace_str = json.dumps(execution_trace, indent=2) if execution_trace else "No tools executed yet."
-        return FormattedText([
-            ("class:modal-text", f"\n ⬡ AXIOM Debug Trace:\n\n{trace_str}\n\n  [Press Esc or Ctrl+O to close]")
-        ])
+        pass # Now handled by trace_field
     return FormattedText([("", "")])
 
 
@@ -493,11 +490,9 @@ def create_tui_app() -> Application[None]:
                 if "tool_calls" in delta:
                     execution_trace.append(delta["tool_calls"])
                     for tc in delta["tool_calls"]:
-                        if "function" in tc and "name" in tc["function"]:
-                            tool_name = tc["function"]["name"]
-                            msg = TOOL_STATE_MAP.get(tool_name, "Working...")
-                            current_tool_status = msg
-                            chat_history.text += f"  [{msg}]\n"
+                        if "function" in tc and tc["function"].get("name"):
+                            func_name = tc["function"]["name"]
+                            chat_history.text += f"\n[🛠️ Executing tool: {func_name}...]\n"
                             chat_history.buffer.cursor_position = len(chat_history.text)
                             app.invalidate()
                 elif "content" in delta:
@@ -790,7 +785,17 @@ def create_tui_app() -> Application[None]:
     )
 
     modal_float = Float(
-        content=ConditionalContainer(modal_frame, filter=is_modal_open)
+        content=ConditionalContainer(modal_frame, filter=Condition(lambda: is_modal_open() and active_modal != "trace"))
+    )
+
+    trace_field = TextArea(text="", read_only=True, scrollbar=True)
+    trace_frame = Frame(
+        body=trace_field,
+        title="AXIOM Debug Trace",
+        style="class:modal-frame"
+    )
+    trace_float = Float(
+        content=ConditionalContainer(trace_frame, filter=Condition(lambda: active_modal == "trace"))
     )
 
     ask_human_visible = False
@@ -859,6 +864,7 @@ def create_tui_app() -> Application[None]:
         content=main_body,
         floats=[
             modal_float, 
+            trace_float,
             ask_human_float,
             Float(xcursor=True, ycursor=True, content=CompletionsMenu(max_height=10, scroll_offset=1))
         ],
