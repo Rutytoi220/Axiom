@@ -22,8 +22,8 @@ Local (Qt / QKeySequence):
     "Ctrl+N", "Ctrl+Shift+N", "Ctrl+K", …
 
 Global (pynput GlobalHotKeys notation):
-    "<ctrl>+<alt>+<space>", "<super>+<shift>+v", …
-    Note: <super> = the Meta/Windows/Command key.
+    "<ctrl>+<alt>+<space>", "<cmd>+<shift>+v", …
+    Note: <cmd> = the Meta/Windows/Command key.
 
 Adding a new action
 -------------------
@@ -106,13 +106,13 @@ SHORTCUTS: Dict[str, Dict[str, Any]] = {
     },
     "start_audio": {
         "name": "Push-to-Talk",
-        "default": "<super>+<shift>+v",
+        "default": "<cmd>+<shift>+v",
         "global": True,
         "description": "Activate the STT voice input from anywhere.",
     },
     "capture_screen": {
         "name": "Capture Screen",
-        "default": "<super>+<shift>+s",
+        "default": "<cmd>+<shift>+s",
         "global": True,
         "description": "Capture the screen and open SoM vision overlay.",
     },

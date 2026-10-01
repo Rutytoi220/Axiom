@@ -229,7 +229,7 @@ class _DiagnosticsWorker(QThread):
         try:
             from axiom.llm.ollama_client import OllamaClient, OllamaConfig
 
-            base_url = get_config().ollama_base_url or "http://localhost:11434"
+            base_url = get_config().ollama_base_url or "http://127.0.0.1:11434"
             client = OllamaClient(OllamaConfig(base_url=base_url, timeout=2.5))
             ok = client.is_available()
             detail = "Running on " + base_url.split("//")[-1] if ok else "Not reachable"
@@ -306,7 +306,7 @@ class _ModelListWorker(QThread):
         try:
             from axiom.llm.ollama_client import OllamaClient, OllamaConfig
 
-            base_url = get_config().ollama_base_url or "http://localhost:11434"
+            base_url = get_config().ollama_base_url or "http://127.0.0.1:11434"
             client = OllamaClient(OllamaConfig(base_url=base_url, timeout=5.0))
             models = client.list_models()
         except Exception as e:

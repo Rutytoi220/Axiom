@@ -1,15 +1,74 @@
 import os
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QPushButton, QTreeWidget, 
-    QTreeWidgetItem, QLabel, QHBoxLayout, QFrame
+    QWidget, QVBoxLayout, QPushButton, QTreeWidget,
+    QTreeWidgetItem, QLabel, QHBoxLayout, QFrame, QButtonGroup,
+    QStyledItemDelegate, QStyle, QStyleOptionViewItem,
 )
-from PySide6.QtCore import Qt, Signal, QSize
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import Qt, Signal, QSize, QRect
+from PySide6.QtGui import QIcon, QColor, QPainter, QBrush
 from axiom.gui.styles.theme_manager import ThemeManager
 
-from axiom.gui.styles.squircle import SquirclePath, AnimatedSquircleButton
-from PySide6.QtCore import QVariantAnimation, QEasingCurve, QRectF
-from PySide6.QtGui import QPainter, QBrush, QPen, QColor
+from axiom.gui.styles.squircle import AnimatedSquircleButton
+
+
+class SquircleItemDelegate(QStyledItemDelegate):
+    """Custom delegate that renders a floating, inset rounded-rect selection
+    highlight instead of Qt's default full-width band.
+
+    The QSS ``margin`` property on ``QTreeWidget::item`` shifts text content
+    but does NOT clip the painted selection background — that band always
+    spans the full viewport width.  This delegate intercepts the paint call
+    and draws its own highlight geometry: 4 px inset on left/right and 2 px
+    inset on top/bottom with an 8 px corner radius.
+    """
+
+    #: Fallback colour used for the selection background pill when no theme is active.
+    BG_SURFACE_FALLBACK: str = "#161B22"
+
+    def __init__(self, bg_surface_hex: str = BG_SURFACE_FALLBACK, parent=None):
+        super().__init__(parent)
+        self._bg_surface = QColor(bg_surface_hex)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+    def set_surface_color(self, hex_color: str) -> None:
+        """Refresh the highlight colour when the theme changes at runtime."""
+        self._bg_surface = QColor(hex_color)
+
+    # ------------------------------------------------------------------
+    # QStyledItemDelegate overrides
+    # ------------------------------------------------------------------
+    def paint(self, painter: QPainter, option, index) -> None:  # type: ignore[override]
+        """Paint the item, replacing Qt's full-width selection band with a
+        floating squircle pill inset by 4 px left/right and 2 px top/bottom."""
+        is_selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        is_hovered  = bool(option.state & QStyle.StateFlag.State_MouseOver)
+
+        if is_selected or is_hovered:
+            # Build an inset rect — 4 px L/R, 2 px T/B.
+            inset_rect = QRect(
+                option.rect.x() + 4,
+                option.rect.y() + 2,
+                option.rect.width() - 8,
+                option.rect.height() - 4,
+            )
+
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(self._bg_surface))
+            painter.drawRoundedRect(inset_rect, 8.0, 8.0)
+            painter.restore()
+
+            # Re-draw text/icons WITHOUT the selection background flag so
+            # Qt's default initStyleOption won't paint another fill on top.
+            opt = QStyleOptionViewItem(option)
+            opt.state &= ~QStyle.StateFlag.State_Selected
+            opt.state &= ~QStyle.StateFlag.State_MouseOver
+            super().paint(painter, opt, index)
+        else:
+            super().paint(painter, option, index)
 
 class SegmentedControl(QFrame):
     value_changed = Signal(str)
@@ -22,17 +81,15 @@ class SegmentedControl(QFrame):
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(4, 4, 4, 4)
         self.layout.setSpacing(4)
-        
+
         self.buttons = []
         self.active_btn = None
-        self._pill_x = 4.0
-        self._pill_w = 60.0
-        
-        self._anim = QVariantAnimation(self)
-        self._anim.setDuration(180)
-        self._anim.setEasingCurve(QEasingCurve.Type.OutExpo)
-        self._anim.valueChanged.connect(self._on_anim_val)
-        
+
+        # QButtonGroup enforces exclusive single-selection natively —
+        # this makes the :checked QSS pseudo-state fire without unpolish/polish.
+        self._btn_group = QButtonGroup(self)
+        self._btn_group.setExclusive(True)
+
         modes = ["Basic", "Strict", "Autopilot"]
         for i, mode in enumerate(modes):
             btn = QPushButton(mode)
@@ -40,45 +97,24 @@ class SegmentedControl(QFrame):
             btn.setCheckable(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setProperty("status", "inactive")
-            
+
             if i == 0:
                 btn.setProperty("position", "first")
             elif i == len(modes) - 1:
                 btn.setProperty("position", "last")
             else:
                 btn.setProperty("position", "middle")
-                
+
             btn.clicked.connect(lambda checked, b=btn: self._on_toggled(b))
+            self._btn_group.addButton(btn, i)
             self.buttons.append(btn)
             self.layout.addWidget(btn)
-            
+
         self.buttons[0].setChecked(True)
         self.buttons[0].setProperty("status", "active")
         self.active_btn = self.buttons[0]
-        self._apply_theme()
-
-    def _on_anim_val(self, val):
-        self._pill_x = val[0]
-        self._pill_w = val[1]
-        self.update()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if self.active_btn:
-            self._pill_x = float(self.active_btn.x())
-            self._pill_w = float(self.active_btn.width())
 
     def _on_toggled(self, clicked_btn):
-        start_x = self._pill_x
-        start_w = self._pill_w
-        target_x = float(clicked_btn.x())
-        target_w = float(clicked_btn.width())
-
-        self._anim.stop()
-        self._anim.setStartValue([start_x, start_w])
-        self._anim.setEndValue([target_x, target_w])
-        self._anim.start()
-
         for btn in self.buttons:
             if btn != clicked_btn:
                 btn.setChecked(False)
@@ -91,36 +127,6 @@ class SegmentedControl(QFrame):
         clicked_btn.style().polish(clicked_btn)
         self.active_btn = clicked_btn
         self.value_changed.emit(clicked_btn.text().lower())
-        self._apply_theme()
-
-    def _apply_theme(self):
-        self.update()
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-
-        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        if rect.width() <= 0 or rect.height() <= 0:
-            return
-
-        # Background container squircle (n ≈ 3.2, radius 16)
-        path = SquirclePath(rect, n=3.2, radius=16.0)
-        tokens = getattr(self.theme_manager, 'theme', {}) if hasattr(self, 'theme_manager') and self.theme_manager else {}
-        surface = QColor(tokens.get("bg_surface", "#161B22"))
-        borders = QColor(tokens.get("borders", "#30363D"))
-        primary = QColor(tokens.get("primary", "#8B5CF6"))
-
-        painter.fillPath(path, QBrush(surface))
-        pen = QPen(borders, 1.0)
-        painter.setPen(pen)
-        painter.drawPath(path)
-
-        # Sliding indicator squircle pill (n ≈ 3.2, radius 12)
-        if self._pill_w > 0:
-            pill_rect = QRectF(self._pill_x, 4.0, self._pill_w, float(self.height()) - 8.0)
-            pill_path = SquirclePath(pill_rect, n=3.2, radius=12.0)
-            painter.fillPath(pill_path, QBrush(primary))
 
 class ModernSidebar(QFrame):
     new_chat_requested = Signal()
@@ -169,19 +175,39 @@ class ModernSidebar(QFrame):
         self.tree.setAttribute(Qt.WidgetAttribute.WA_MacShowFocusRect, False)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
+        # Expand to fill all available space, pushing hub_btn firmly to the bottom
+        from PySide6.QtWidgets import QSizePolicy
+        self.tree.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-        self.layout.addWidget(self.tree)
+        self.layout.addWidget(self.tree, 1)  # stretch factor 1 = fill remaining space
         self.tree.itemSelectionChanged.connect(self._on_tree_selection)
 
-        self.layout.addStretch(1)
+        # ── Squircle selection delegate ───────────────────────────────────────
+        # Pull bg_surface from the active theme so the pill colour is always in
+        # sync with the current palette.  Falls back to the hardcoded dark value
+        # if no theme is loaded yet.
+        _bg_surface = (
+            self.theme_manager.theme.get("bg_surface", SquircleItemDelegate.BG_SURFACE_FALLBACK)
+            if self.theme_manager and self.theme_manager.theme
+            else SquircleItemDelegate.BG_SURFACE_FALLBACK
+        )
+        self._convo_delegate = SquircleItemDelegate(bg_surface_hex=_bg_surface, parent=self.tree)
+        self.tree.setItemDelegate(self._convo_delegate)
+
+        # NO addStretch here — tree's stretch factor pushes hub_btn to bottom
 
         self.hub_btn = AnimatedSquircleButton("⬡  AXIOM Hub", radius=14.0, n=3.2, duration_ms=180)
         self.hub_btn.setObjectName("sidebar_action_btn")
         self.layout.addWidget(self.hub_btn)
 
+
+        # settings_btn is kept as a hidden attribute so external callers (main_window.py)
+        # can still connect its clicked signal without crashing.  It is NOT added to the
+        # layout — the bottom Settings button has been removed from the UI per design spec.
         self.settings_btn = AnimatedSquircleButton("⚙  Settings", radius=14.0, n=3.2, duration_ms=180)
         self.settings_btn.setObjectName("sidebar_action_btn")
-        self.layout.addWidget(self.settings_btn)
+        self.settings_btn.setParent(self)   # keeps widget alive, not in layout
+        self.settings_btn.hide()
 
         self._apply_theme()
 

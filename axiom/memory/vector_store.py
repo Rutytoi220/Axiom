@@ -303,7 +303,7 @@ class VectorMemoryEngine:
                 import urllib.request
                 import json
                 req = urllib.request.Request(
-                    'http://localhost:11434/api/pull', 
+                    'http://127.0.0.1:11434/api/pull', 
                     data=json.dumps({"name": "nomic-embed-text"}).encode('utf-8'),
                     headers={'Content-Type': 'application/json'},
                     method='POST'

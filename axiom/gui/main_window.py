@@ -21,6 +21,7 @@ from axiom.gui.styles.theme_manager import get_theme_manager
 from axiom.gui.widgets.swarm_pill import SwarmPill
 from axiom.gui.widgets.settings_dialog import SettingsDialog
 from axiom.gui.widgets.hub_dialog import AxiomHubDialog
+from axiom.gui.windows.project_dialog import ProjectDialog
 if TYPE_CHECKING:
     from axiom.gui.bridge import AxiomBridge
 logger = logging.getLogger(__name__)
@@ -322,7 +323,9 @@ class MainWindow(QMainWindow):
         
         self.splitter.setCollapsible(0, False)
         self.splitter.setCollapsible(1, False)
+        self.splitter.setHandleWidth(4)
         self.splitter.setSizes([280, 800])
+
         
         main_layout.addWidget(self.splitter, 1)
         
@@ -336,11 +339,13 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.settings_drawer)
         self._chat_display.settings_btn.clicked.connect(self.settings_drawer.toggle)
         
-        # Add toggle for Health Radar
+        # Radar sidebar button has been removed per design spec (v11.2 purge).
+        # The radar_btn stub is kept so any residual references don't raise AttributeError.
         self.radar_btn = QPushButton("📡 Radar")
         self.radar_btn.setCheckable(True)
         self.radar_btn.clicked.connect(self.health_radar.setVisible)
-        self.sidebar.layout.addWidget(self.radar_btn)
+        self.radar_btn.setParent(self)
+        self.radar_btn.hide()  # NOT added to sidebar layout
 
         # ── Swarm Client ──────────────────────────────────────────────── #
         from axiom.gui.swarm_client import SwarmClient
@@ -370,8 +375,7 @@ class MainWindow(QMainWindow):
         self._init_tray()
         QTimer.singleShot(0, self._init_hotkey)
         self._register_local_shortcuts()
-        self._chat_display.add_bubble('user', 'Verify Apple Squircle geometry and Notion animations.')
-        self._chat_display.add_bubble('assistant', 'Continuous Apple super-ellipse (n ≈ 3.2) curves active with Notion OutExpo transitions.')
+        # (geometry test bubbles removed — watermark shows cleanly on startup)
         
         # Init startup status
         self._startup_status = QLabel("⏳ Background services starting...")
@@ -423,9 +427,12 @@ class MainWindow(QMainWindow):
         self.sidebar.populate_projects(data)
 
     def _on_new_project_requested(self) -> None:
-        dialog = ProjectDialog(self)
-        dialog.project_created.connect(self._create_project)
-        dialog.exec()
+        try:
+            dialog = ProjectDialog(self)
+            dialog.project_created.connect(self._create_project)
+            dialog.exec()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Project creation stub — dialog failed: %s", exc)
 
     def _create_project(self, title: str, context: str, files: list) -> None:
         self._project_manager.create_project(title=title, context_text=context, attached_files=files)
@@ -451,7 +458,7 @@ class MainWindow(QMainWindow):
         else:
             if hasattr(self._chat_display, 'watermark'):
                 self._chat_display.watermark.show()
-            self._chat_display.add_bubble("assistant", "AXIOM v11.2")
+            # Watermark QLabel handles the empty-state display — no phantom bubble.
 
     def _on_new_chat(self) -> None:
         # Just clear the UI, don't create an empty chat file yet
@@ -466,7 +473,7 @@ class MainWindow(QMainWindow):
         
         if hasattr(self._chat_display, 'watermark'):
             self._chat_display.watermark.show()
-        self._chat_display.add_bubble("assistant", "AXIOM v11.2")
+        # Do NOT add_bubble here — the watermark QLabel IS the empty-state decoration.
 
     def _on_mode_changed(self, mode: str) -> None:
         if self._bridge and hasattr(self._bridge, 'set_auth_mode'):
@@ -531,8 +538,8 @@ class MainWindow(QMainWindow):
                 import socket
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                     s.settimeout(0.5)
-                    if s.connect_ex(('127.0.0.1', 9410)) == 0:
-                        logger.info("Daemon is running (port 9410 open). Skipping GUI local audio engine to prevent lock contention.")
+                    if s.connect_ex(('127.0.0.1', 8000)) == 0:
+                        logger.info("Daemon is running (port 8000 open). Skipping GUI local audio engine to prevent lock contention.")
                         self._audio = None
                         return
                         
@@ -925,14 +932,131 @@ class MainWindow(QMainWindow):
             })
             self._refresh_sidebar()
 
-        # Route: swarm node first, local engine as fallback
-        if self._swarm.is_connected:
+        # Route: FastAPI Bridge, Remote Server Engine, Swarm Node, or Local Engine
+        from axiom.config import get_config
+        config = get_config()
+        engine_mode = getattr(config, 'engine_mode', 'local')
+        if engine_mode == 'fastapi':
+            self._send_fastapi_inference_task(text if not attachment_path else str(route_payload))
+        elif engine_mode == 'remote':
+            self._send_remote_server_task(text if not attachment_path else str(route_payload))
+        elif self._swarm.is_connected:
             sent = self._swarm.send_prompt(text if not attachment_path else str(route_payload))
             if not sent:
                 self._streaming_bubble.set_text('')
                 self._bridge.submit_task(route_payload)
         else:
             self._bridge.submit_task(route_payload)
+
+    def _send_remote_server_task(self, prompt: str) -> None:
+        """Offload agentic execution to the centralized AXIOM Remote Server."""
+        import threading
+        import json
+        from urllib.request import Request, urlopen
+        from axiom.config import get_config
+        config = get_config()
+        server_addr = getattr(config, 'remote_server_ip', '127.0.0.1:9412')
+        if not server_addr.startswith("http://") and not server_addr.startswith("https://"):
+            url = f"http://{server_addr}/v1/orchestrate"
+        else:
+            url = f"{server_addr}/v1/orchestrate"
+
+        bubble = self._streaming_bubble
+
+        def _worker():
+            try:
+                payload = json.dumps({"prompt": prompt, "session_id": getattr(self, '_current_chat_id', None)}).encode('utf-8')
+                req = Request(url, data=payload, headers={'Content-Type': 'application/json'}, method='POST')
+                with urlopen(req, timeout=30) as resp:
+                    data = json.loads(resp.read().decode('utf-8'))
+                    answer = data.get("response", "Task completed.")
+                    QTimer.singleShot(0, lambda: self._on_remote_server_response(answer, bubble))
+            except Exception as e:
+                err_msg = f"[Remote Server Error]: {e} — Falling back to local engine..."
+                QTimer.singleShot(0, lambda: self._on_remote_server_error(prompt, bubble, err_msg))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_remote_server_response(self, response: str, bubble) -> None:
+        if bubble:
+            bubble.set_text(response)
+        self._streaming_bubble = None
+        self._streaming_text = ''
+        self._chat_display._scroll_to_bottom()
+        if hasattr(self, '_project_manager') and self._current_chat_id:
+            self._project_manager.append_message(self._current_project_id, self._current_chat_id, {
+                'role': 'assistant',
+                'content': response
+            })
+
+    def _on_remote_server_error(self, prompt: str, bubble, error_msg: str) -> None:
+        if bubble:
+            bubble.set_text(error_msg)
+        # Fallback to local engine
+        self._bridge.submit_task(prompt)
+
+    # ------------------------------------------------------------------
+    # FastAPI HTTP Bridge (QThread)
+    # ------------------------------------------------------------------
+
+    def _send_fastapi_inference_task(self, prompt: str) -> None:
+        """Post a chat-completion request to the local FastAPI backend.
+
+        Uses :class:`~axiom.gui.workers.InferenceWorker` (a ``QThread``
+        subclass) so the HTTP round-trip never blocks the Qt event loop.
+        A strong reference is kept in ``self._current_worker`` to prevent
+        the Python GC from destroying the thread before it finishes.
+        """
+        from axiom.gui.workers import InferenceWorker
+
+        bubble = self._streaming_bubble
+
+        worker = InferenceWorker(prompt, parent=self)
+        # Keep a strong reference — without this Qt/Python GC may destroy
+        # the thread object before run() has finished.
+        self._current_worker = worker
+
+        worker.response_received.connect(
+            lambda text: self._on_fastapi_response(text, bubble)
+        )
+        worker.error_received.connect(
+            lambda msg: self._on_fastapi_error(msg, bubble)
+        )
+        # Clean up the reference once the thread is done
+        worker.finished.connect(self._on_fastapi_worker_finished)
+
+        worker.start()
+
+    @Slot()
+    def _on_fastapi_worker_finished(self) -> None:
+        """Release the worker reference after the QThread exits."""
+        self._current_worker = None
+
+    @Slot(str)
+    def _on_fastapi_response(self, response: str, bubble) -> None:
+        """Inject the FastAPI assistant reply into the chat bubble."""
+        if bubble:
+            bubble.set_text(response)
+        self._streaming_bubble = None
+        self._streaming_text = ''
+        self._chat_display._scroll_to_bottom()
+        if hasattr(self, '_project_manager') and self._current_chat_id:
+            self._project_manager.append_message(
+                self._current_project_id,
+                self._current_chat_id,
+                {'role': 'assistant', 'content': response},
+            )
+
+    @Slot(str)
+    def _on_fastapi_error(self, error_msg: str, bubble) -> None:
+        """Display the FastAPI error inside the assistant bubble."""
+        if bubble:
+            bubble.set_text(error_msg)
+        self._streaming_bubble = None
+        self._streaming_text = ''
+        self._chat_display._scroll_to_bottom()
+
+
 
     @Slot(str)
     def _on_swarm_response(self, response: str) -> None:

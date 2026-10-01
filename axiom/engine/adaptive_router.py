@@ -91,7 +91,7 @@ class TelemetryDB:
 class NeuralRouter:
     """LLM-driven routing engine that uses Qwen to dynamically route tasks."""
     
-    def __init__(self, db: TelemetryDB = None, ollama_url: str = "http://localhost:11434"):
+    def __init__(self, db: TelemetryDB = None, ollama_url: str = "http://127.0.0.1:11434"):
         self.db = db or TelemetryDB()
         self.ollama_url = ollama_url
         

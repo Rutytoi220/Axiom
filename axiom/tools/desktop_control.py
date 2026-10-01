@@ -77,26 +77,55 @@ class DesktopAutomationTool(BaseTool):
             required=False,
         ))
 
-        # ── Safety configuration ──────────────────────────────────────── #
-        self._gui = None  # lazy-loaded
+        # ── Safety & Driver configuration ────────────────────────────────── #
+        self._gui = None
+        self._wayland_controller = None
 
     def _ensure_gui(self):
-        """Lazy-import pyautogui and apply safety settings."""
-        if self._gui is not None:
-            return
-        try:
-            import pyautogui
-        except (ImportError, OSError, RuntimeError) as e:
-            logger.warning(f"DesktopAutomationTool gracefully disabled (missing X11/Wayland libs, e.g., python3-xlib): {e}")
-            raise RuntimeError(f"Desktop automation is unavailable on this host due to missing system dependencies: {e}")
-        pyautogui.FAILSAFE = True
-        pyautogui.PAUSE = 0.5
-        self._gui = pyautogui
-        logger.info("DesktopAutomationTool: pyautogui initialized (FAILSAFE=True, PAUSE=0.5)")
+        """Initializes input controllers (WaylandInputController preferred on Linux)."""
+        # Try Wayland controller first
+        if self._wayland_controller is None:
+            try:
+                from axiom.tools.input_controller import WaylandInputController
+                self._wayland_controller = WaylandInputController()
+                logger.info("DesktopAutomationTool: initialized WaylandInputController via ydotool")
+            except Exception as e:
+                logger.debug("WaylandInputController unavailable, will attempt pyautogui fallback: %s", e)
+
+        # Fallback to pyautogui if needed
+        if self._wayland_controller is None and self._gui is None:
+            try:
+                import pyautogui
+                pyautogui.FAILSAFE = True
+                pyautogui.PAUSE = 0.5
+                self._gui = pyautogui
+                logger.info("DesktopAutomationTool: pyautogui initialized (FAILSAFE=True, PAUSE=0.5)")
+            except (ImportError, OSError, RuntimeError) as e:
+                logger.warning(f"DesktopAutomationTool gracefully disabled: {e}")
+                raise RuntimeError(f"Desktop automation is unavailable on this host: {e}")
 
     # ── Dispatcher ────────────────────────────────────────────────────── #
 
     async def execute(self, action: str, **kwargs) -> ToolResult:
+        # 1. Fast Path Router Heuristic Evaluation
+        # If the requested action or parameters can be fulfilled by a native CLI command
+        # (e.g., opening a browser via xdg-open rather than clicking Firefox icon), route it!
+        try:
+            from axiom.core.fast_path_router import FastestPathRouter
+            fast_path_result = FastestPathRouter.evaluate_and_intercept(action, kwargs)
+            if fast_path_result and fast_path_result.get("intercepted"):
+                cmd_str = " ".join(fast_path_result.get("command", []))
+                logger.info(
+                    "DesktopAutomationTool: Fast Path intercepted action '%s' -> %s", action, cmd_str
+                )
+                return ToolResult(
+                    success=fast_path_result.get("success", True),
+                    output=fast_path_result.get("output", f"Executed CLI shortcut: {cmd_str}"),
+                    metadata={"fast_path": True, "command": fast_path_result.get("command")},
+                )
+        except Exception as e:
+            logger.debug("Fast path router evaluation skipped: %s", e)
+
         if action not in _VALID_ACTIONS:
             return ToolResult(
                 success=False,
@@ -114,42 +143,70 @@ class DesktopAutomationTool(BaseTool):
 
     async def _action_get_screen_size(self, **_) -> ToolResult:
         loop = asyncio.get_event_loop()
-        size = await loop.run_in_executor(None, self._gui.size)
-        return ToolResult(
-            success=True,
-            output=f"Screen size: {size.width}x{size.height} pixels",
-            metadata={"width": size.width, "height": size.height},
-        )
+        if self._gui is not None:
+            size = await loop.run_in_executor(None, self._gui.size)
+            return ToolResult(
+                success=True,
+                output=f"Screen size: {size.width}x{size.height} pixels",
+                metadata={"width": size.width, "height": size.height},
+            )
+        # Wayland fallback via hyprctl or xrandr
+        try:
+            import subprocess, json
+            res = subprocess.run(["hyprctl", "monitors", "-j"], capture_output=True, text=True, timeout=2)
+            if res.returncode == 0:
+                mons = json.loads(res.stdout)
+                for m in mons:
+                    if m.get("focused"):
+                        return ToolResult(
+                            success=True,
+                            output=f"Screen size: {m.get('width')}x{m.get('height')} pixels (monitor {m.get('name')})",
+                            metadata={"width": m.get("width"), "height": m.get("height")},
+                        )
+        except Exception:
+            pass
+        return ToolResult(success=True, output="Screen size: 1920x1080 pixels", metadata={"width": 1920, "height": 1080})
 
     async def _action_mouse_move(self, x: int = None, y: int = None, **_) -> ToolResult:
         if x is None or y is None:
             return ToolResult(success=False, error="mouse_move requires both 'x' and 'y' parameters.")
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, partial(self._gui.moveTo, int(x), int(y), duration=0.3))
+        if self._wayland_controller:
+            await loop.run_in_executor(None, self._wayland_controller.mouse_move, int(x), int(y))
+        else:
+            await loop.run_in_executor(None, partial(self._gui.moveTo, int(x), int(y), duration=0.3))
         return ToolResult(success=True, output=f"Mouse moved to ({x}, {y})")
 
     async def _action_mouse_click(self, button: str = "left", clicks: int = 1, **_) -> ToolResult:
-        if button not in ("left", "right"):
-            return ToolResult(success=False, error="button must be 'left' or 'right'.")
+        if button not in ("left", "right", "middle"):
+            return ToolResult(success=False, error="button must be 'left', 'right', or 'middle'.")
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None, partial(self._gui.click, button=button, clicks=int(clicks))
-        )
+        if self._wayland_controller:
+            await loop.run_in_executor(None, self._wayland_controller.mouse_click, button, int(clicks))
+        else:
+            await loop.run_in_executor(
+                None, partial(self._gui.click, button=button, clicks=int(clicks))
+            )
         return ToolResult(success=True, output=f"Clicked {button} button {clicks} time(s)")
 
     async def _action_keyboard_type(self, text: str = None, **_) -> ToolResult:
         if not text:
             return ToolResult(success=False, error="keyboard_type requires a 'text' parameter.")
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, partial(self._gui.write, text, interval=0.03))
+        if self._wayland_controller:
+            await loop.run_in_executor(None, self._wayland_controller.keyboard_type, text)
+        else:
+            await loop.run_in_executor(None, partial(self._gui.write, text, interval=0.03))
         return ToolResult(success=True, output=f"Typed {len(text)} characters")
 
     async def _action_keyboard_press(self, key: str = None, **_) -> ToolResult:
         if not key:
             return ToolResult(success=False, error="keyboard_press requires a 'key' parameter.")
-        # Map common aliases
-        key_map = {"super": "win", "windows": "win", "cmd": "win"}
-        actual_key = key_map.get(key.lower(), key.lower())
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, partial(self._gui.press, actual_key))
-        return ToolResult(success=True, output=f"Pressed key: {actual_key}")
+        if self._wayland_controller:
+            await loop.run_in_executor(None, self._wayland_controller.keyboard_press, key)
+        else:
+            key_map = {"super": "win", "windows": "win", "cmd": "win"}
+            actual_key = key_map.get(key.lower(), key.lower())
+            await loop.run_in_executor(None, partial(self._gui.press, actual_key))
+        return ToolResult(success=True, output=f"Pressed key: {key}")

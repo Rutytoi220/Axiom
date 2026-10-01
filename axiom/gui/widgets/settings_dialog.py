@@ -80,9 +80,14 @@ class SettingsDialog(QDialog):
 
         self.engine_mode_combo = QComboBox()
         self.engine_mode_combo.setObjectName("settings_engine_mode_combo")
-        self.engine_mode_combo.addItems(["Local Engine", "Remote Server Engine"])
-        is_remote = getattr(config, 'engine_mode', 'local') == 'remote'
-        self.engine_mode_combo.setCurrentIndex(1 if is_remote else 0)
+        self.engine_mode_combo.addItems([
+            "Local Engine",
+            "Remote Server Engine",
+            "FastAPI Bridge (localhost:8000)",
+        ])
+        _mode = getattr(config, 'engine_mode', 'local')
+        _mode_idx = {"local": 0, "remote": 1, "fastapi": 2}.get(_mode, 0)
+        self.engine_mode_combo.setCurrentIndex(_mode_idx)
         engine_layout.addWidget(self.engine_mode_combo)
 
         ip_layout = QHBoxLayout()
@@ -91,7 +96,7 @@ class SettingsDialog(QDialog):
         self.server_ip_edit.setObjectName("settings_server_ip_input")
         self.server_ip_edit.setPlaceholderText("127.0.0.1:9412")
         self.server_ip_edit.setText(getattr(config, 'remote_server_ip', '127.0.0.1:9412'))
-        self.server_ip_edit.setEnabled(is_remote)
+        self.server_ip_edit.setEnabled(_mode_idx == 1)
         self.engine_mode_combo.currentIndexChanged.connect(
             lambda idx: self.server_ip_edit.setEnabled(idx == 1)
         )
@@ -133,8 +138,9 @@ class SettingsDialog(QDialog):
         from axiom.core.persona import PERSONA_PRESETS
         config.persona = PERSONA_PRESETS.get(config.persona_key, PERSONA_PRESETS["default"])
 
-        # Network compute mode
-        config.engine_mode = "remote" if self.engine_mode_combo.currentIndex() == 1 else "local"
+        # Network compute mode (0=local, 1=remote, 2=fastapi)
+        _idx_to_mode = {0: "local", 1: "remote", 2: "fastapi"}
+        config.engine_mode = _idx_to_mode.get(self.engine_mode_combo.currentIndex(), "local")
         config.remote_server_ip = self.server_ip_edit.text().strip() or "127.0.0.1:9412"
 
         config.save()

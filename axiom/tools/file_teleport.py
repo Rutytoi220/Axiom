@@ -62,4 +62,4 @@ class FileTeleportTool(BaseTool):
             return ToolResult(success=False, error=f"Network error communicating with {host}: {e}")
         except Exception as e:
             logger.error(f"Teleport error: {e}")
-            return ToolResult(success=False, error=str(e))
+            return ToolResult(success=False, error=f"Error communicating with {host}: {e}")

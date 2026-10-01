@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class HardwareTelemetryDaemon:
     """Background daemon that monitors hardware load and emits warnings."""
 
-    def __init__(self, event_bus: EventBus, ollama_url: str='http://localhost:11434'):
+    def __init__(self, event_bus: EventBus, ollama_url: str='http://127.0.0.1:11434'):
         """Auto-generated docstring.
 
 Args:

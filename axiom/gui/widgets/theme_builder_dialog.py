@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import json
 import logging
+from functools import partial
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtGui import QColor, QPainter, QBrush, QPen, QFont
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
@@ -128,11 +129,13 @@ class ColorSwatchButton(QPushButton):
     def __init__(self, color_hex: str, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._color = QColor(color_hex)
+        self.setText(self._color.name().upper())
         self.setFixedHeight(34)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def set_color(self, color: QColor | str) -> None:
         self._color = QColor(color) if isinstance(color, str) else color
+        self.setText(self._color.name().upper())
         self.update()
 
     def get_color(self) -> QColor:
@@ -180,7 +183,7 @@ class TokenRowWidget(QFrame):
     ):
         super().__init__(parent)
         self.token_key = token_key
-        self.setObjectName("token_row")
+        self.setObjectName(f"token_row_{token_key}")
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
 
         layout = QHBoxLayout(self)
@@ -203,21 +206,21 @@ class TokenRowWidget(QFrame):
 
         # Color Swatch Button
         self.swatch = ColorSwatchButton(initial_hex)
+        self.swatch.setObjectName(f"swatch_{token_key}")
         self.swatch.setFixedWidth(90)
-        self.swatch.clicked.connect(self._pick_color)
         layout.addWidget(self.swatch)
 
         # Explicit Pick Button
         self.pick_btn = AnimatedSquircleButton("Pick", radius=8.0, n=3.2, duration_ms=150)
+        self.pick_btn.setObjectName(f"pick_btn_{token_key}")
         self.pick_btn.setFixedSize(56, 32)
-        self.pick_btn.clicked.connect(self._pick_color)
         layout.addWidget(self.pick_btn)
 
+        # Reference to swatch which renders the hex label
+        self.hex_label = self.swatch
+
     def _pick_color(self) -> None:
-        initial = self.swatch.get_color()
-        picked = QColorDialog.getColor(initial, self, f"Select Color for {self.token_key}")
-        if picked.isValid():
-            self.set_color(picked.name().upper())
+        self.pick_btn.click()
 
     def set_color(self, hex_val: str) -> None:
         self.swatch.set_color(hex_val)
@@ -305,6 +308,8 @@ class ThemeBuilderDialog(QDialog):
 
             row_widget = TokenRowWidget(token_key, display_name, default_hex)
             row_widget.color_changed.connect(self._on_color_changed)
+            row_widget.pick_btn.clicked.connect(lambda *args, k=token_key: self._open_color_picker(k))
+            row_widget.swatch.clicked.connect(lambda *args, k=token_key: self._open_color_picker(k))
             self._token_widgets[token_key] = row_widget
             grid_layout.addWidget(row_widget, row_idx, col_idx)
 
@@ -326,13 +331,15 @@ class ThemeBuilderDialog(QDialog):
         btn_layout.setSpacing(12)
 
         self.reset_btn = AnimatedSquircleButton("Reset Default", radius=12.0, n=3.2, duration_ms=180)
+        self.reset_btn.setObjectName("reset_default_btn")
         self.reset_btn.setFixedSize(130, 38)
-        self.reset_btn.clicked.connect(self._on_reset)
+        self.reset_btn.clicked.connect(self._reset_default)
         btn_layout.addWidget(self.reset_btn)
 
         btn_layout.addStretch(1)
 
         self.cancel_btn = AnimatedSquircleButton("Cancel", radius=12.0, n=3.2, duration_ms=180)
+        self.cancel_btn.setObjectName("cancel_theme_btn")
         self.cancel_btn.setFixedSize(100, 38)
         self.cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(self.cancel_btn)
@@ -340,7 +347,7 @@ class ThemeBuilderDialog(QDialog):
         self.apply_btn = AnimatedSquircleButton("Apply & Save Theme", radius=12.0, n=3.2, duration_ms=180)
         self.apply_btn.setFixedSize(160, 38)
         self.apply_btn.setObjectName("apply_theme_btn")
-        self.apply_btn.clicked.connect(self.apply_theme_live)
+        self.apply_btn.clicked.connect(self._apply_theme)
         btn_layout.addWidget(self.apply_btn)
 
         main_layout.addLayout(btn_layout)
@@ -387,8 +394,41 @@ class ThemeBuilderDialog(QDialog):
         """)
         self.preview_lbl.setText(f"Active Palette: Primary {primary} · Surface {surface} · Text {text}")
 
-    def _on_reset(self) -> None:
+    @Slot(str)
+    def _open_color_picker(self, token_name: str, *args: Any, **kwargs: Any) -> None:
+        """Open QColorDialog for a token, update hex code display, and store new color in working dictionary."""
+        initial_hex = self._current_tokens.get(token_name, "#FAFAFA")
+        dialog = QColorDialog(QColor(initial_hex), self)
+        dialog.setWindowTitle(f"Select Color for {token_name}")
+        if dialog.exec():
+            color = dialog.selectedColor()
+            if not color.isValid():
+                color = dialog.currentColor()
+            if color.isValid():
+                hex_str = color.name().upper()
+                self._current_tokens[token_name] = hex_str
+                if token_name in self._token_widgets:
+                    self._token_widgets[token_name].set_color(hex_str)
+                self._update_preview_banner()
+
+    @Slot()
+    def _reset_default(self, *args: Any, **kwargs: Any) -> None:
+        """Reload the default schema tokens into the UI and local working dictionary."""
+        self.preset_combo.blockSignals(True)
         self.preset_combo.setCurrentText("Axiom Pro (Default)")
+        self.preset_combo.blockSignals(False)
+        for token_key, _, default_hex in SCHEMA_TOKENS:
+            self._current_tokens[token_key] = default_hex
+            if token_key in self._token_widgets:
+                self._token_widgets[token_key].set_color(default_hex)
+        self._update_preview_banner()
+
+    _on_reset = _reset_default
+
+    @Slot()
+    def _apply_theme(self, *args: Any, **kwargs: Any) -> None:
+        """Slot to save theme dictionary to themes/custom.json, apply live, and accept dialog."""
+        self.apply_theme_live(close_on_apply=True)
 
     def apply_theme_live(self, close_on_apply: bool = True) -> None:
         """Inject colors into base.qss.template, apply live to QApplication, and save themes/custom.json."""

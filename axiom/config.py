@@ -41,7 +41,7 @@ Returns:
 """
         if self.behavior is None:
             self.behavior = BehaviorConfig()
-    ollama_base_url: str = 'http://localhost:11434'
+    ollama_base_url: str = 'http://127.0.0.1:11434'
     ollama_model: str = 'qwen3:8b'
     power_saving_model: str = 'qwen2.5:1.5b'
     embedding_model: str = 'nomic-embed-text'
@@ -76,6 +76,9 @@ Returns:
     remote_endpoints: list[str] = field(default_factory=list)
     offload_strategy: str = 'thermal_trigger'
 
+    engine_mode: str = 'local'  # 'local', 'remote', 'fastapi'
+    remote_server_ip: str = '127.0.0.1:9412'
+
     # Plugins
     disabled_plugins: list[str] = field(default_factory=list)
 
@@ -92,6 +95,9 @@ Returns:
             if 'special_instructions' in config_dict and config_dict['special_instructions']:
                 filtered['persona']['directives'] = [config_dict['special_instructions']]
                 
+        if 'ollama_base_url' in filtered and isinstance(filtered['ollama_base_url'], str):
+            filtered['ollama_base_url'] = filtered['ollama_base_url'].replace("localhost", "127.0.0.1")
+
         if 'auth_mode' in filtered and isinstance(filtered['auth_mode'], str):
             try:
                 filtered['auth_mode'] = AuthMode(filtered['auth_mode'])
@@ -139,6 +145,8 @@ Returns:
             'swarm_enabled': self.swarm_enabled,
             'remote_endpoints': self.remote_endpoints,
             'offload_strategy': self.offload_strategy,
+            'engine_mode': self.engine_mode,
+            'remote_server_ip': self.remote_server_ip,
             'disabled_plugins': self.disabled_plugins
         }
 

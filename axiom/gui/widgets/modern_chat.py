@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, 
-    QTextBrowser, QPushButton, QScrollArea, QFrame, QLabel, QSizePolicy, QToolButton
+    QWidget, QVBoxLayout, QHBoxLayout, QTextEdit,
+    QTextBrowser, QPushButton, QScrollArea, QFrame, QLabel, QSizePolicy
 )
 from PySide6.QtCore import Qt, QSize, Signal
 from axiom.gui.styles.theme_manager import ThemeManager
@@ -17,12 +17,13 @@ class AutoExpandTextEdit(QTextEdit):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setPlaceholderText("Ask AXIOM...")
         self.textChanged.connect(self.adjust_height)
-        self.setFixedHeight(40) 
+        self.setFixedHeight(36) 
 
     def adjust_height(self):
         doc_height = self.document().size().height()
-        new_height = max(40, min(int(doc_height) + 4, 120))
+        new_height = max(36, min(int(doc_height) + 4, 120))
         self.setFixedHeight(new_height)
+
 
     def keyPressEvent(self, event):
         from PySide6.QtCore import Qt
@@ -42,12 +43,13 @@ class ModernInputBar(QFrame):
 
     def __init__(self, theme_manager: ThemeManager):
         super().__init__()
+        self.setObjectName("input_container")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setMinimumHeight(48)
         
         self.layout = QHBoxLayout(self)
-        self.layout.setContentsMargins(16, 0, 16, 0)
-        self.layout.setSpacing(12)
+        self.layout.setContentsMargins(8, 4, 8, 4)
+        self.layout.setSpacing(8)
         self.layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         from PySide6.QtGui import QIcon
@@ -62,32 +64,33 @@ class ModernInputBar(QFrame):
 
         from axiom.gui.styles.squircle import AnimatedSquircleButton
 
-        self.attach_btn = AnimatedSquircleButton(radius=20, n=3.2, duration_ms=180)
+        self.attach_btn = AnimatedSquircleButton(radius=18, n=3.2, duration_ms=150)
         self.attach_btn.setIcon(QIcon(str(icons_dir / "attach.svg")))
-        self.attach_btn.setIconSize(QSize(20, 20))
+        self.attach_btn.setIconSize(QSize(18, 18))
         self.attach_btn.setObjectName("attach_btn")
-        self.attach_btn.setFixedSize(40, 40)
+        self.attach_btn.setFixedSize(36, 36)
 
         self.input_area = AutoExpandTextEdit(theme_manager)
         self.input_edit = self.input_area  # ALIAS for main_window.py
-        self.input_area.setFixedHeight(40)
+        self.input_area.setFixedHeight(36)
         
-        self.mic_btn = AnimatedSquircleButton(radius=20, n=3.2, duration_ms=180)
+        self.mic_btn = AnimatedSquircleButton(radius=18, n=3.2, duration_ms=150)
         self.mic_btn.setObjectName("mic_btn")
         self.mic_btn.setIcon(QIcon(str(icons_dir / "mic.svg")))
-        self.mic_btn.setIconSize(QSize(20, 20))
+        self.mic_btn.setIconSize(QSize(18, 18))
         self.mic_btn.setCheckable(True)
-        self.mic_btn.setFixedSize(40, 40)
+        self.mic_btn.setFixedSize(36, 36)
         self.mic_btn.toggled.connect(self.mic_toggled.emit)
         
-        self.send_btn = AnimatedSquircleButton(radius=20, n=3.2, duration_ms=180)
+        self.send_btn = AnimatedSquircleButton(radius=18, n=3.2, duration_ms=150)
         self.send_btn.setObjectName("send_btn")
         self.send_btn.setIcon(QIcon(str(icons_dir / "send.svg")))
-        self.send_btn.setIconSize(QSize(20, 20))
-        self.send_btn.setFixedSize(40, 40)
-        self.send_btn.clicked.connect(self._on_send)
+        self.send_btn.setIconSize(QSize(18, 18))
+        self.send_btn.setFixedSize(36, 36)
+        self.send_btn.clicked.connect(self._on_send, Qt.ConnectionType.UniqueConnection)
+
         
-        self.input_area.return_pressed.connect(self.send_btn.click)
+        self.input_area.return_pressed.connect(self.send_btn.click, Qt.ConnectionType.UniqueConnection)
 
         self.layout.addWidget(self.attach_btn)
         self.layout.addWidget(self.input_area)
@@ -109,6 +112,7 @@ class ModernInputBar(QFrame):
 class ModernChatBubble(QFrame):
     def __init__(self, role: str, text: str, theme_manager: ThemeManager):
         super().__init__()
+        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setObjectName("chat_bubble")
         self.role = role
@@ -203,8 +207,10 @@ class ModernChatDisplay(QWidget):
         
         top_bar = QHBoxLayout()
         top_bar.addStretch()
-        self.settings_btn = QToolButton()
-        self.settings_btn.setText("Settings")
+        from axiom.gui.styles.squircle import AnimatedSquircleButton
+        self.settings_btn = AnimatedSquircleButton("⚙  Settings", radius=14.0, n=3.2, duration_ms=180)
+        self.settings_btn.setObjectName("sidebar_action_btn")
+        self.settings_btn.setFixedHeight(34)
         top_bar.addWidget(self.settings_btn)
         self.layout.addLayout(top_bar)
 
@@ -212,7 +218,6 @@ class ModernChatDisplay(QWidget):
         self.scroll_area.verticalScrollBar().setSingleStep(15)
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
-        self.scroll_area
         
         self.scroll_widget = QWidget()
         self.scroll_widget.setObjectName("chat_scroll_widget")
@@ -234,8 +239,74 @@ class ModernChatDisplay(QWidget):
         
         self.layout.addWidget(self.scroll_area)
 
+        # Image attached indicator
+        self.image_indicator = QLabel("📸 Screen Captured")
+        self.image_indicator.setStyleSheet("color: #A5B4FC; background: #312E81; padding: 4px 8px; border-radius: 8px; font-size: 11px;")
+        self.image_indicator.hide()
+        self.layout.addWidget(self.image_indicator, 0, Qt.AlignmentFlag.AlignLeft)
+
         self.input_bar = ModernInputBar(self.theme_manager)
         self.layout.addWidget(self.input_bar, 0, Qt.AlignmentFlag.AlignBottom)
+        self.input_bar.message_ready.connect(self._handle_user_message)
+        self.input_bar.attach_btn.clicked.connect(self._capture_screen)
+        self._current_worker = None
+        self._temp_bubble = None
+        self._current_image_b64 = None
+
+    def _capture_screen(self):
+        import subprocess
+        import base64
+        try:
+            result = subprocess.run(["grim", "-c", "-"], capture_output=True, check=True)
+            self._current_image_b64 = base64.b64encode(result.stdout).decode("utf-8")
+            self.image_indicator.show()
+        except Exception as e:
+            print(f"Screenshot failed: {e}")
+
+    def _handle_user_message(self, text: str):
+        # 1. Extract text and clear input box is handled by ModernInputBar._on_send
+        # 2. Render the 'user' bubble immediately
+        self.add_bubble("user", text)
+        
+        # 3. Render a temporary 'assistant' bubble with a loading state
+        self._temp_bubble = self.add_bubble("assistant", "Thinking...")
+        self._current_text = ""
+        self._first_token_received = False
+        
+        # 4. Instantiate the InferenceWorker, connect signals and start
+        from axiom.gui.workers import InferenceWorker
+        worker = InferenceWorker(text, image_b64=self._current_image_b64, parent=self)
+        self._current_worker = worker
+        
+        worker.response_received.connect(self._on_inference_response)
+        worker.error_received.connect(self._on_inference_error)
+        worker.token_received.connect(self._on_token_received)
+        
+        worker.start()
+        
+        # Cleanup
+        self._current_image_b64 = None
+        self.image_indicator.hide()
+
+    def _on_token_received(self, token: str):
+        if self._temp_bubble:
+            if not self._first_token_received:
+                self._current_text = ""
+                self._first_token_received = True
+            self._current_text += token
+            self._temp_bubble.set_text(self._current_text)
+
+    def _on_inference_response(self, text: str):
+        if self._temp_bubble:
+            self._temp_bubble.set_text(text)
+            self._temp_bubble = None
+        self._current_worker = None
+
+    def _on_inference_error(self, error_msg: str):
+        if self._temp_bubble:
+            self._temp_bubble.set_text(error_msg)
+            self._temp_bubble = None
+        self._current_worker = None
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -284,13 +355,15 @@ class ModernChatDisplay(QWidget):
 
         bubble = ModernChatBubble(role, text, self.theme_manager)
 
+        from PySide6.QtWidgets import QSpacerItem
+        
         wrapper = QHBoxLayout()
         if role == "user":
-            wrapper.addStretch()
+            wrapper.addSpacerItem(QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
             wrapper.addWidget(bubble)
         else:
             wrapper.addWidget(bubble)
-            wrapper.addStretch()
+            wrapper.addSpacerItem(QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
 
         # Insert before the sentinel stretch so bubbles don't expand vertically.
         self.scroll_layout.insertLayout(self.scroll_layout.count() - 1, wrapper)

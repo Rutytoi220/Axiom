@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class OllamaConfig:
     """Configuration for Ollama client."""
-    base_url: str = "http://localhost:11434"
+    base_url: str = "http://127.0.0.1:11434"
     model: str = "neural-chat"
     embedding_model: str = "nomic-embed-text"
     temperature: float = 0.7

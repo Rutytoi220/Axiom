@@ -9,13 +9,134 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# ── Primary Wayland Controller (ydotool) ──────────────────────────────────
+WAYLAND_CONTROLLER = None
+try:
+    from axiom.tools.input_controller import WaylandInputController
+    WAYLAND_CONTROLLER = WaylandInputController()
+    logger.info("actions/desktop: WaylandInputController (ydotool) initialized.")
+except Exception as e:
+    logger.debug("actions/desktop: WaylandInputController not initialized: %s", e)
+
 try:
     import pyautogui
     pyautogui.FAILSAFE = True  # Move mouse to corner to abort
     PYAUTOGUI_AVAILABLE = True
 except ImportError:
     PYAUTOGUI_AVAILABLE = False
-    logger.warning("pyautogui not installed, desktop control disabled")
+    logger.warning("pyautogui not installed, using WaylandInputController fallback")
+
+
+def _get_wayland_ctrl() -> Optional[WaylandInputController]:
+    global WAYLAND_CONTROLLER
+    if WAYLAND_CONTROLLER is None:
+        try:
+            from axiom.tools.input_controller import WaylandInputController
+            WAYLAND_CONTROLLER = WaylandInputController()
+        except Exception:
+            pass
+    return WAYLAND_CONTROLLER
+
+
+def click_mouse(x: int = None, y: int = None, button: str = 'left', clicks: int = 1) -> Tuple[bool, str]:
+    """Click the mouse at specified coordinates."""
+    ctrl = _get_wayland_ctrl()
+    if ctrl:
+        try:
+            if x is not None and y is not None:
+                ctrl.mouse_move(int(x), int(y))
+            ctrl.mouse_click(button=button, clicks=clicks)
+            logger.info("Clicked with button '%s' (x=%s, y=%s) via ydotool", button, x, y)
+            return True, f"Clicked at ({x}, {y})"
+        except Exception as e:
+            logger.exception("Failed to click mouse via ydotool")
+            return False, f"Click failed: {e}"
+
+    if not PYAUTOGUI_AVAILABLE:
+        return False, "Input simulation not available (neither ydotool nor pyautogui)"
+
+    try:
+        x, y = int(x), int(y)
+        pyautogui.click(x, y, clicks=clicks, button=button)
+        logger.info("Clicked at (%d, %d) with button '%s'", x, y, button)
+        return True, f"Clicked at ({x}, {y})"
+    except Exception as e:
+        logger.exception("Failed to click mouse")
+        return False, f"Click failed: {e}"
+
+
+def type_text(text: str, interval: float = 0.05) -> Tuple[bool, str]:
+    """Type text at current cursor position."""
+    ctrl = _get_wayland_ctrl()
+    if ctrl:
+        try:
+            ctrl.keyboard_type(text)
+            logger.info("Typed via ydotool: %s", text[:50])
+            return True, f"Typed: {text[:50]}"
+        except Exception as e:
+            logger.exception("Failed to type text via ydotool")
+            return False, f"Type failed: {e}"
+
+    if not PYAUTOGUI_AVAILABLE:
+        return False, "Input simulation not available (neither ydotool nor pyautogui)"
+
+    try:
+        pyautogui.typewrite(text, interval=interval)
+        logger.info("Typed: %s", text[:50])
+        return True, f"Typed: {text[:50]}"
+    except Exception as e:
+        logger.exception("Failed to type text")
+        return False, f"Type failed: {e}"
+
+
+def press_keys(keys: str) -> Tuple[bool, str]:
+    """Press keyboard keys."""
+    ctrl = _get_wayland_ctrl()
+    if ctrl:
+        try:
+            ctrl.keyboard_press(keys)
+            logger.info("Pressed keys via ydotool: %s", keys)
+            return True, f"Pressed: {keys}"
+        except Exception as e:
+            logger.exception("Failed to press keys via ydotool")
+            return False, f"Key press failed: {e}"
+
+    if not PYAUTOGUI_AVAILABLE:
+        return False, "Input simulation not available (neither ydotool nor pyautogui)"
+
+    try:
+        key_list = [k.strip().lower() for k in keys.split('+')]
+        pyautogui.hotkey(*key_list)
+        logger.info("Pressed keys: %s", keys)
+        return True, f"Pressed: {keys}"
+    except Exception as e:
+        logger.exception("Failed to press keys")
+        return False, f"Key press failed: {e}"
+
+
+def move_mouse(x: int, y: int, duration: float = 0.5) -> Tuple[bool, str]:
+    """Move mouse to specified coordinates."""
+    ctrl = _get_wayland_ctrl()
+    if ctrl:
+        try:
+            ctrl.mouse_move(int(x), int(y))
+            logger.info("Moved mouse to (%d, %d) via ydotool", x, y)
+            return True, f"Moved mouse to ({x}, {y})"
+        except Exception as e:
+            logger.exception("Failed to move mouse via ydotool")
+            return False, f"Move failed: {e}"
+
+    if not PYAUTOGUI_AVAILABLE:
+        return False, "Input simulation not available (neither ydotool nor pyautogui)"
+
+    try:
+        x, y = int(x), int(y)
+        pyautogui.moveTo(x, y, duration=duration)
+        logger.info("Moved mouse to (%d, %d)", x, y)
+        return True, f"Moved mouse to ({x}, {y})"
+    except Exception as e:
+        logger.exception("Failed to move mouse")
+        return False, f"Move failed: {e}"
 
 
 def take_screenshot(encode_base64: bool = True) -> Tuple[bool, str]:

@@ -65,7 +65,8 @@ def block_external_io(request, monkeypatch):
     # 4. Block Model Config Initialization to prevent CLI stall
     try:
         import axiom.core.config_service
-        monkeypatch.setattr(axiom.core.config_service, "initialize_model_config", lambda *args, **kwargs: None)
+        if hasattr(axiom.core.config_service, "initialize_model_config"):
+            monkeypatch.setattr(axiom.core.config_service, "initialize_model_config", lambda *args, **kwargs: None)
     except ImportError:
         pass
 

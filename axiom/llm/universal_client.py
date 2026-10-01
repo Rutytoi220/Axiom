@@ -91,7 +91,7 @@ Returns:
                             from axiom.core.swarm_router import SwarmRouter
                             kwargs['api_base'] = SwarmRouter.instance().get_ollama_base_url()
                         except Exception:
-                            kwargs['api_base'] = 'http://localhost:11434'
+                            kwargs['api_base'] = 'http://127.0.0.1:11434'
                     return litellm.completion(model=self.fallback_model, messages=messages, **kwargs)
                 raise e
 
@@ -133,7 +133,7 @@ Returns:
                 from axiom.core.swarm_router import SwarmRouter
                 kwargs['api_base'] = SwarmRouter.instance().get_ollama_base_url()
             except Exception:
-                kwargs['api_base'] = 'http://localhost:11434'
+                kwargs['api_base'] = 'http://127.0.0.1:11434'
             
         stream_callback = kwargs.pop('stream_callback', None)
         if stream_callback:
@@ -170,7 +170,7 @@ Returns:
                 from axiom.core.swarm_router import SwarmRouter
                 kwargs['api_base'] = SwarmRouter.instance().get_ollama_base_url()
             except Exception:
-                kwargs['api_base'] = 'http://localhost:11434'
+                kwargs['api_base'] = 'http://127.0.0.1:11434'
         litellm_tools = []
         for schema in tool_schemas:
             if 'type' in schema and 'function' in schema:
@@ -268,7 +268,7 @@ Returns:
         try:
             import urllib.request
             import urllib.error
-            req = urllib.request.Request('http://localhost:11434/api/tags', method='GET')
+            req = urllib.request.Request('http://127.0.0.1:11434/api/tags', method='GET')
             with urllib.request.urlopen(req, timeout=2) as response:
                 data = json.loads(response.read().decode())
                 for m in data.get('models', []):
@@ -294,7 +294,7 @@ Returns:
     def embed(self, text: Union[str, List[str]], model: str = "ollama/nomic-embed-text") -> Union[List[float], List[List[float]]]:
         """Compute embeddings for a string or list of strings in batch."""
         try:
-            api_base = 'http://localhost:11434' if model.startswith('ollama/') else None
+            api_base = 'http://127.0.0.1:11434' if model.startswith('ollama/') else None
             inputs = [text] if isinstance(text, str) else text
             response = litellm.embedding(model=model, input=inputs, api_base=api_base)
             if isinstance(text, str):

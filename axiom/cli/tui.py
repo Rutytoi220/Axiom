@@ -591,6 +591,8 @@ def create_tui_app() -> Application[None]:
             if cmd == "/model":
                 MODAL_VISIBLE = True
                 active_modal = "model"
+                input_field.text = ""
+                input_field.read_only = True
                 get_app().invalidate()
                 return False
             if cmd == "/effort":
@@ -826,7 +828,7 @@ def create_tui_app() -> Application[None]:
     def is_model_modal_open() -> bool:
         return MODAL_VISIBLE and active_modal == "model"
         
-    @kb.add("<any>", filter=is_model_modal_open)
+    @kb.add("<any>", filter=is_model_modal_open, eager=True)
     def _model_type(event: Any) -> None:
         global model_search_query, filtered_model_list, model_index
         char = event.key_sequence[0].data
@@ -836,7 +838,7 @@ def create_tui_app() -> Application[None]:
             model_index = max(0, min(model_index, len(filtered_model_list) - 1))
             event.app.invalidate()
             
-    @kb.add("backspace", filter=is_model_modal_open)
+    @kb.add("backspace", filter=is_model_modal_open, eager=True)
     def _model_backspace(event: Any) -> None:
         global model_search_query, filtered_model_list, model_index
         if model_search_query:
@@ -845,31 +847,31 @@ def create_tui_app() -> Application[None]:
             model_index = max(0, min(model_index, len(filtered_model_list) - 1))
             event.app.invalidate()
             
-    @kb.add("up", filter=is_model_modal_open)
+    @kb.add("up", filter=is_model_modal_open, eager=True)
     def _model_up(event: Any) -> None:
         global model_index
         model_index = max(0, model_index - 1)
         event.app.invalidate()
         
-    @kb.add("down", filter=is_model_modal_open)
+    @kb.add("down", filter=is_model_modal_open, eager=True)
     def _model_down(event: Any) -> None:
         global model_index
         model_index = min(len(filtered_model_list) - 1, model_index + 1)
         event.app.invalidate()
         
-    @kb.add("left", filter=is_model_modal_open)
+    @kb.add("left", filter=is_model_modal_open, eager=True)
     def _model_effort_left(event: Any) -> None:
         global effort_index
         effort_index = max(0, effort_index - 1)
         event.app.invalidate()
 
-    @kb.add("right", filter=is_model_modal_open)
+    @kb.add("right", filter=is_model_modal_open, eager=True)
     def _model_effort_right(event: Any) -> None:
         global effort_index
         effort_index = min(len(EFFORT_TIERS) - 1, effort_index + 1)
         event.app.invalidate()
         
-    @kb.add("enter", filter=is_model_modal_open)
+    @kb.add("enter", filter=is_model_modal_open, eager=True)
     def _model_confirm(event: Any) -> None:
         global CURRENT_EFFORT, CURRENT_COGNITIVE_MODE, MODAL_VISIBLE, active_modal
         
@@ -898,6 +900,8 @@ def create_tui_app() -> Application[None]:
                 
         MODAL_VISIBLE = False
         active_modal = None
+        input_field.read_only = False
+        input_field.text = ""
         event.app.layout.focus(input_field)
         event.app.invalidate()
 
@@ -915,6 +919,8 @@ def create_tui_app() -> Application[None]:
         global MODAL_VISIBLE, active_modal
         MODAL_VISIBLE = False
         active_modal = None
+        input_field.read_only = False
+        input_field.text = ""
         event.app.layout.focus(input_field)
         event.app.invalidate()
 

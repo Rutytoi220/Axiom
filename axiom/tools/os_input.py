@@ -1,8 +1,18 @@
 import os
 import sys
-import shutil
-import subprocess
+import logging
 from axiom.sdk.plugin import tool
+from axiom.tools.input_controller import WaylandInputController
+
+logger = logging.getLogger(__name__)
+
+_controller = None
+
+def _get_ctrl() -> WaylandInputController:
+    global _controller
+    if _controller is None:
+        _controller = WaylandInputController()
+    return _controller
 
 def _is_linux() -> bool:
     """Check if the current OS is Linux."""
@@ -15,14 +25,11 @@ def _is_linux() -> bool:
 def move_mouse(x: int, y: int) -> str:
     """Moves the mouse cursor to absolute (x, y)."""
     if _is_linux():
-        if not shutil.which("ydotool"):
-            return "Error: 'ydotool' is required on Linux for mouse control. Please install it and ensure the ydotool daemon (ydotoold) is running."
         try:
-            # -a for absolute positioning
-            subprocess.run(["ydotool", "mousemove", "-a", "-x", str(x), "-y", str(y)], check=True, capture_output=True, text=True)
+            _get_ctrl().mouse_move(x, y)
             return f"Mouse moved to ({x}, {y}) via ydotool."
-        except subprocess.CalledProcessError as e:
-            return f"Error executing ydotool: {e.stderr}"
+        except Exception as e:
+            return f"Error executing ydotool mouse_move: {e}"
     else:
         try:
             import pyautogui
@@ -40,20 +47,11 @@ def move_mouse(x: int, y: int) -> str:
 def click_mouse(button: str = 'left') -> str:
     """Clicks the mouse."""
     if _is_linux():
-        if not shutil.which("ydotool"):
-            return "Error: 'ydotool' is required on Linux for mouse control. Please install it and ensure the ydotool daemon (ydotoold) is running."
         try:
-            # ydotool uses hex codes for mouse buttons: 0xC0=left, 0xC1=right, 0xC2=middle
-            ydotool_btn = "0xC0"
-            if button.lower() == "right":
-                ydotool_btn = "0xC1"
-            elif button.lower() == "middle":
-                ydotool_btn = "0xC2"
-                
-            subprocess.run(["ydotool", "click", ydotool_btn], check=True, capture_output=True, text=True)
+            _get_ctrl().mouse_click(button)
             return f"Clicked {button} mouse button via ydotool."
-        except subprocess.CalledProcessError as e:
-            return f"Error executing ydotool: {e.stderr}"
+        except Exception as e:
+            return f"Error executing ydotool click: {e}"
     else:
         try:
             import pyautogui
@@ -71,13 +69,11 @@ def click_mouse(button: str = 'left') -> str:
 def type_text(text: str) -> str:
     """Types text on the keyboard."""
     if _is_linux():
-        if not shutil.which("ydotool"):
-            return "Error: 'ydotool' is required on Linux for keyboard control. Please install it and ensure the ydotool daemon (ydotoold) is running."
         try:
-            subprocess.run(["ydotool", "type", text], check=True, capture_output=True, text=True)
+            _get_ctrl().keyboard_type(text)
             return "Text typed successfully via ydotool."
-        except subprocess.CalledProcessError as e:
-            return f"Error executing ydotool: {e.stderr}"
+        except Exception as e:
+            return f"Error executing ydotool type: {e}"
     else:
         try:
             import pyautogui
@@ -87,3 +83,25 @@ def type_text(text: str) -> str:
             return "Error: 'pyautogui' is required on this platform for keyboard control. Please install it."
         except Exception as e:
             return f"Error typing text: {str(e)}"
+
+@tool(
+    name="press_key",
+    description="Presses a single key or key combination (e.g., 'enter', 'tab', 'super', 'ctrl+c')."
+)
+def press_key(key: str) -> str:
+    """Presses a key on the keyboard."""
+    if _is_linux():
+        try:
+            _get_ctrl().keyboard_press(key)
+            return f"Pressed key '{key}' via ydotool."
+        except Exception as e:
+            return f"Error executing ydotool key press: {e}"
+    else:
+        try:
+            import pyautogui
+            pyautogui.press(key)
+            return f"Pressed key '{key}' via pyautogui."
+        except ImportError:
+            return "Error: 'pyautogui' is required on this platform. Please install it."
+        except Exception as e:
+            return f"Error pressing key: {str(e)}"

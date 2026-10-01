@@ -93,4 +93,4 @@ class SwarmRouter:
                 endpoint = f"{endpoint}:11434"
             return endpoint
             
-        return "http://localhost:11434"
+        return "http://127.0.0.1:11434"

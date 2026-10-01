@@ -1179,6 +1179,21 @@ Returns:
                 True
             )
 
+        # ── Fastest Path CLI Router ──────────────────────────────────────────
+        try:
+            from axiom.core.fast_path_router import FastestPathRouter
+            fast_res = FastestPathRouter.evaluate_and_intercept(tool_name, arguments)
+            if fast_res and fast_res.get("intercepted"):
+                self._emit('tool.started', {
+                    'tool_name': tool_name,
+                    'status': '⚡ Fastest Path CLI',
+                    'message': f"Routing to native CLI: {' '.join(fast_res.get('command', []))}..."
+                })
+                payload = {'output': fast_res.get('output'), 'error': None if fast_res.get('success') else fast_res.get('output')}
+                return self._structured_tool_result(tool_name, arguments, payload, fast_res.get('success', True))
+        except Exception as e:
+            logger.debug(f"FastestPathRouter check skipped: {e}")
+
 
         def _scrub_jargon(err_msg: str) -> str:
             """Auto-generated docstring.

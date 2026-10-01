@@ -320,10 +320,10 @@ class AxiomDaemonServer:
         loop = asyncio.get_running_loop()
         self._loop = loop
         
-        logger.info("Starting AXIOM Daemon WebSocket server on ws://127.0.0.1:9410")
+        logger.info("Starting AXIOM Daemon WebSocket server on ws://127.0.0.1:8000")
         
         # We start the server in the background
-        start_server = websockets.serve(self.handle_client, "127.0.0.1", 9410)
+        start_server = websockets.serve(self.handle_client, "127.0.0.1", 8000)
         await start_server
         
         # Now spawn the heavy loading tasks in the background

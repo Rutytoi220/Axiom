@@ -7,7 +7,7 @@ from typing import Callable, Optional
 logger = logging.getLogger(__name__)
 
 class AxiomDaemonClient:
-    def __init__(self, uri="ws://127.0.0.1:9410"):
+    def __init__(self, uri="ws://127.0.0.1:8000"):
         self.uri = uri
         self.ws = None
         self.on_event: Optional[Callable[[dict], None]] = None
@@ -18,7 +18,7 @@ class AxiomDaemonClient:
 
     async def connect(self):
         try:
-            self.ws = await websockets.connect(self.uri)
+            self.ws = await websockets.connect(self.uri, extra_headers={"X-Protection-Ring": "0"})
             self._connected = True
             logger.info(f"Connected to daemon at {self.uri}")
             if self.on_connect:

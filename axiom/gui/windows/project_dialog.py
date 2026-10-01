@@ -24,24 +24,37 @@ class ProjectDialog(QDialog):
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(12)
 
+        _label_style = "font-size: 14px; font-weight: 500;"
+        _input_style = "font-size: 14px;"
+        _btn_style   = "font-size: 14px; border-radius: 8px; padding: 8px 16px;"
+
         # Title
-        layout.addWidget(QLabel("Project Name"))
+        lbl_name = QLabel("Project Name")
+        lbl_name.setStyleSheet(_label_style)
+        layout.addWidget(lbl_name)
         self.title_input = QLineEdit()
         self.title_input.setPlaceholderText("e.g. AXIOM Refactoring")
+        self.title_input.setStyleSheet(_input_style)
         layout.addWidget(self.title_input)
 
         # Context
-        layout.addWidget(QLabel("Custom Context Instructions (Optional)"))
+        lbl_ctx = QLabel("Custom Context Instructions (Optional)")
+        lbl_ctx.setStyleSheet(_label_style)
+        layout.addWidget(lbl_ctx)
         self.context_input = QTextEdit()
         self.context_input.setPlaceholderText("Provide any context, system prompts, or background information you want the AI to always know in this project...")
+        self.context_input.setStyleSheet(_input_style)
         layout.addWidget(self.context_input)
 
         # Attachments
         attach_layout = QHBoxLayout()
-        attach_layout.addWidget(QLabel("Attached Files"))
+        lbl_files = QLabel("Attached Files")
+        lbl_files.setStyleSheet(_label_style)
+        attach_layout.addWidget(lbl_files)
         attach_layout.addStretch()
         
         self.btn_attach = QPushButton("Browse Files")
+        self.btn_attach.setStyleSheet(_btn_style)
         self.btn_attach.setCursor(Qt.PointingHandCursor)
         self.btn_attach.clicked.connect(self._browse_files)
         attach_layout.addWidget(self.btn_attach)
@@ -56,11 +69,13 @@ class ProjectDialog(QDialog):
         btn_layout.addStretch()
         
         self.btn_cancel = QPushButton("Cancel")
+        self.btn_cancel.setStyleSheet(_btn_style)
         self.btn_cancel.setCursor(Qt.PointingHandCursor)
         self.btn_cancel.clicked.connect(self.reject)
         
         self.btn_create = QPushButton("Create Project")
         self.btn_create.setObjectName("createBtn")
+        self.btn_create.setStyleSheet(_btn_style)
         self.btn_create.setCursor(Qt.PointingHandCursor)
         self.btn_create.clicked.connect(self._on_create)
         
@@ -69,6 +84,7 @@ class ProjectDialog(QDialog):
         
         layout.addStretch()
         layout.addLayout(btn_layout)
+
 
     def _browse_files(self):
         files, _ = QFileDialog.getOpenFileNames(self, "Select Files to Attach", str(Path.home()))

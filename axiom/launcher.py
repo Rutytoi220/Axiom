@@ -11,7 +11,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("axiom.launcher")
 
-def is_daemon_running(port: int = 9410) -> bool:
+def is_daemon_running(port: int = 8000) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(0.5)
         return s.connect_ex(('127.0.0.1', port)) == 0
@@ -46,11 +46,11 @@ def main():
             time.sleep(0.5)
             
         if daemon_started:
-            logger.info("Daemon successfully spawned and listening on port 9410.")
+            logger.info("Daemon successfully spawned and listening on port 8000.")
         else:
-            logger.warning("Daemon did not respond on port 9410 within 5 seconds. GUI will continue without it.")
+            logger.warning("Daemon did not respond on port 8000 within 5 seconds. GUI will continue without it.")
     else:
-        logger.info("Found existing daemon running on port 9410.")
+        logger.info("Found existing daemon running on port 8000.")
         
     logger.info("Launching PySide6 App...")
     try:

@@ -82,7 +82,7 @@ Returns:
         async with httpx.AsyncClient() as client:
             for model_name in models:
                 try:
-                    r = await client.post('http://localhost:11434/api/show', json={"name": model_name}, timeout=2.0)
+                    r = await client.post('http://127.0.0.1:11434/api/show', json={"name": model_name}, timeout=2.0)
                     if r.status_code == 200:
                         results[model_name] = r.json()
                 except Exception as e:
@@ -213,7 +213,7 @@ Returns:
             
         system_prompt = "You are a semantic intent router. Classify the user's request into one of the following categories:\nCODE: For programming, refactoring, debugging, or execution.\nCHAT: For general conversation, greetings, or short chat.\nSYSTEM: For orchestrating tools, reading files, or complex multi-step OS tasks.\nREASONING: For deep logical puzzles, math, or complex analysis requiring advanced chain-of-thought.\nOutput strictly valid JSON conforming to the requested schema."
         try:
-            response = litellm.completion(model='ollama/qwen3:0.6b', api_base='http://localhost:11434', messages=[{'role': 'system', 'content': system_prompt}, {'role': 'user', 'content': f'User Request: {user_text}'}], temperature=0.0, max_tokens=60, response_format=RouterDecision)
+            response = litellm.completion(model='ollama/qwen3:0.6b', api_base='http://127.0.0.1:11434', messages=[{'role': 'system', 'content': system_prompt}, {'role': 'user', 'content': f'User Request: {user_text}'}], temperature=0.0, max_tokens=60, response_format=RouterDecision)
             content = response.choices[0].message.content
             import json
             decision = RouterDecision.model_validate_json(content)
