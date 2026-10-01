@@ -780,21 +780,14 @@ def create_tui_app() -> Application[None]:
 
     modal_search_field.control.key_bindings = modal_kb
 
-    modal_content_window = Window(
-        content=FormattedTextControl(get_modal_content, focusable=True),
-        width=82,
-        height=lambda: 21 if active_modal == "model" else 11,
-        dont_extend_width=True,
-        dont_extend_height=True,
-        style="class:modal",
+    modal_frame = Frame(
+        body=HSplit([
+            modal_search_field,
+            Window(content=FormattedTextControl(get_modal_content))
+        ]),
+        title=get_modal_title, 
+        style="class:modal-frame"
     )
-    
-    modal_layout = HSplit([
-        ConditionalContainer(modal_search_field, filter=is_model_modal_open),
-        modal_content_window
-    ])
-    
-    modal_frame = Frame(modal_layout, title=get_modal_title, style="class:modal-frame")
 
     modal_float = Float(
         content=ConditionalContainer(modal_frame, filter=is_modal_open)
@@ -1036,8 +1029,10 @@ def create_tui_app() -> Application[None]:
 async def fetch_local_models():
     global model_list, filtered_model_list, model_index
     try:
+        config = get_config()
+        url = f"{config.ollama_base_url}/api/tags"
         async with httpx.AsyncClient() as client:
-            resp = await client.get("http://127.0.0.1:11434/api/tags", timeout=2.0)
+            resp = await client.get(url, timeout=5.0)
             if resp.status_code == 200:
                 data = resp.json()
                 model_list = [m["name"] for m in data.get("models", [])]
