@@ -31,6 +31,7 @@ from prompt_toolkit.layout.containers import (
     HSplit,
     Window,
 )
+from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.styles import Style
@@ -309,8 +310,6 @@ def get_modal_title() -> str:
 
 def get_modal_content() -> Any:
     """Return the content for the active modal."""
-    if active_modal == "model":
-        return "Model & Effort Selection"
     if active_modal == "model":
         return render_model_modal_content()
     elif active_modal == "effort":
@@ -771,7 +770,11 @@ def create_tui_app() -> Application[None]:
 
     root_container = FloatContainer(
         content=main_body,
-        floats=[modal_float, ask_human_float],
+        floats=[
+            modal_float, 
+            ask_human_float,
+            Float(xcursor=True, ycursor=True, content=CompletionsMenu(max_height=10, scroll_offset=1))
+        ],
     )
 
     # -----------------------------------------------------------------------
