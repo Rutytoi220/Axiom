@@ -547,7 +547,7 @@ def create_tui_app() -> Application[None]:
 
     # 3. TextArea (Input field for user prompt)
     def handle_accept(buff: Any) -> bool:
-        global last_ai_response, CURRENT_EFFORT, CURRENT_COGNITIVE_MODE, active_modal, effort_index
+        global last_ai_response, CURRENT_EFFORT, CURRENT_COGNITIVE_MODE, active_modal, effort_index, MODAL_VISIBLE
         text = buff.text.strip()
         buff.text = ""
         if not text:
@@ -792,7 +792,7 @@ def create_tui_app() -> Application[None]:
 
     modal_frame = Frame(
         body=HSplit([
-            ConditionalContainer(modal_search_field, filter=Condition(lambda: active_modal != "trace")),
+            ConditionalContainer(modal_search_field, filter=Condition(lambda: active_modal == "model")),
             ConditionalContainer(Window(content=FormattedTextControl(get_modal_content)), filter=Condition(lambda: active_modal != "trace")),
             ConditionalContainer(trace_field, filter=Condition(lambda: active_modal == "trace"))
         ]),
@@ -965,6 +965,9 @@ def create_tui_app() -> Application[None]:
     def _effort_confirm_key(event: Any) -> None:
         global CURRENT_EFFORT, CURRENT_COGNITIVE_MODE, MODAL_VISIBLE, active_modal
         tier = EFFORT_TIERS[effort_index]
+        config = get_config()
+        setattr(config, "effort_tier", tier["id"])
+        config.save()
         if tier["category"] == "compute":
             CURRENT_EFFORT = tier["label"] if tier["id"] == "ultra" else tier["label"].capitalize()
             CURRENT_COGNITIVE_MODE = "Standard"
