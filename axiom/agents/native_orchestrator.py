@@ -26,6 +26,9 @@ class NativeOrchestrator:
                 payload["messages"][0]["content"] += f"\n\n{system_prompt['content']}"
 
 
+        from axiom.config import get_config
+        payload["model"] = get_config().ollama_model
+
         timeout_config = httpx.Timeout(connect=10.0, read=300.0, write=20.0, pool=20.0)
         async with httpx.AsyncClient(timeout=timeout_config) as client:
             async with client.stream(
@@ -35,7 +38,8 @@ class NativeOrchestrator:
             ) as resp:
                 if resp.status_code != 200:
                     await resp.aread()
-                    raise httpx.HTTPStatusError(f"HTTP {resp.status_code}: {resp.text}", request=resp.request, response=resp)
+                    yield {"content": f"\n⚠️ [API Error] HTTP {resp.status_code}: {resp.text}\n"}
+                    return
 
                 pending_tool_calls = []
                 is_reasoning = False
