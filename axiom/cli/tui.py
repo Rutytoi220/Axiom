@@ -593,6 +593,7 @@ def create_tui_app() -> Application[None]:
                 active_modal = "model"
                 input_field.text = ""
                 input_field.read_only = True
+                get_app().layout.focus(modal_window)
                 get_app().invalidate()
                 return False
             if cmd == "/effort":
@@ -696,7 +697,7 @@ def create_tui_app() -> Application[None]:
         return MODAL_VISIBLE or active_modal == "effort"
 
     modal_window = Window(
-        content=FormattedTextControl(get_modal_content),
+        content=FormattedTextControl(get_modal_content, focusable=True),
         width=82,
         height=lambda: 22 if active_modal == "model" else 11,
         dont_extend_width=True,
