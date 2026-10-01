@@ -777,26 +777,22 @@ def create_tui_app() -> Application[None]:
 
     modal_frame = Frame(
         body=HSplit([
-            modal_search_field,
-            Window(content=FormattedTextControl(get_modal_content))
+            ConditionalContainer(modal_search_field, filter=Condition(lambda: active_modal != "trace")),
+            ConditionalContainer(Window(content=FormattedTextControl(get_modal_content)), filter=Condition(lambda: active_modal != "trace")),
+            ConditionalContainer(trace_field, filter=Condition(lambda: active_modal == "trace"))
         ]),
         title=get_modal_title, 
-        style="class:modal-frame"
+        style="class:modal-frame",
+        height=lambda: 22 if active_modal in ["model", "trace"] else 11,
+        width=lambda: 100 if active_modal == "trace" else None
     )
 
     modal_float = Float(
-        content=ConditionalContainer(modal_frame, filter=Condition(lambda: is_modal_open() and active_modal != "trace"))
+        content=ConditionalContainer(modal_frame, filter=is_modal_open)
     )
 
-    trace_field = TextArea(text="", read_only=True, scrollbar=True)
-    trace_frame = Frame(
-        body=trace_field,
-        title="AXIOM Debug Trace",
-        style="class:modal-frame"
-    )
-    trace_float = Float(
-        content=ConditionalContainer(trace_frame, filter=Condition(lambda: active_modal == "trace"))
-    )
+    trace_field = TextArea(text="", read_only=True, scrollbar=True, height=20, width=100)
+
 
     ask_human_visible = False
     ask_human_prompt_id = ""
@@ -864,7 +860,6 @@ def create_tui_app() -> Application[None]:
         content=main_body,
         floats=[
             modal_float, 
-            trace_float,
             ask_human_float,
             Float(xcursor=True, ycursor=True, content=CompletionsMenu(max_height=10, scroll_offset=1))
         ],
