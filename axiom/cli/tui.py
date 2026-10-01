@@ -486,8 +486,21 @@ def create_tui_app() -> Application[None]:
             payload["tools"] = get_tool_schemas(0)
             orchestrator = NativeOrchestrator()
             
+            tool_chunk_counter = 0
             async for delta in orchestrator.generate_stream(payload):
                 if "tool_calls" in delta:
+                    if is_loading:
+                        is_loading = False
+                        spinner_task.cancel()
+                        clean_spinner()
+                        chat_history.text += "\n[🧠 Generating tool payload]"
+                        
+                    tool_chunk_counter += 1
+                    if tool_chunk_counter % 10 == 0:
+                        chat_history.text += "."
+                        chat_history.buffer.cursor_position = len(chat_history.text)
+                        app.invalidate()
+                        
                     execution_trace.append(delta["tool_calls"])
                     for tc in delta["tool_calls"]:
                         if "function" in tc and tc["function"].get("name"):
