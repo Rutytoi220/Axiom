@@ -113,23 +113,28 @@ class CaptureSomScreenTool(BaseTool):
         # Wayland: try grim first.
         if os.environ.get("WAYLAND_DISPLAY"):
             if _which("grim"):
-                ok = await loop.run_in_executor(
-                    None,
-                    partial(
-                        subprocess.run,
-                        ["grim", out_path],
-                        capture_output=True,
-                    ),
+                logger.info("Triggering grim screenshot...")
+                try:
+                    ok = await loop.run_in_executor(
+                        None,
+                        partial(
+                            subprocess.run,
+                            ["grim", "-c", out_path],
+                            capture_output=True,
+                            timeout=3.0
+                        ),
                 )
-                if ok.returncode == 0:
-                    return out_path
+                    if ok.returncode == 0:
+                        return out_path
+                except subprocess.TimeoutExpired:
+                    logger.error("TimeoutExpired: grim screenshot hung")
 
         # X11 / generic: try scrot, then ImageMagick import.
         for cmd in (["scrot", out_path], ["import", "-window", "root", out_path]):
             if _which(cmd[0]):
                 ok = await loop.run_in_executor(
                     None,
-                    partial(subprocess.run, cmd, capture_output=True),
+                    partial(subprocess.run, cmd, capture_output=True, timeout=3.0),
                 )
                 if ok.returncode == 0:
                     return out_path
@@ -162,7 +167,33 @@ class CaptureSomScreenTool(BaseTool):
         except OSError as exc:
             return ToolResult(success=False, error=f"Could not read overlay file: {exc}")
 
-        b64 = base64.b64encode(raw_bytes).decode("utf-8")
+        logger.info("Screenshot captured. Resizing image...")
+        try:
+            from PIL import Image
+            import io
+            img = Image.open(io.BytesIO(raw_bytes))
+            img = img.convert("RGB")
+            
+            max_size = 1024
+            width, height = img.size
+            if max(width, height) > max_size:
+                if width > height:
+                    new_width = max_size
+                    new_height = int((height / width) * max_size)
+                else:
+                    new_height = max_size
+                    new_width = int((width / height) * max_size)
+                img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                
+            logger.info("Image resized. Sending payload to Ollama VLM...")
+            out_buffer = io.BytesIO()
+            img.save(out_buffer, format="JPEG", quality=85)
+            jpeg_bytes = out_buffer.getvalue()
+            b64 = base64.b64encode(jpeg_bytes).decode("utf-8")
+            logger.info("VLM response received.")
+        except Exception as e:
+            logger.error(f"Failed to process image: {e}")
+            b64 = base64.b64encode(raw_bytes).decode("utf-8")
         tags = sorted(_som.active_tags.keys())   # e.g. ["AA", "AB", "AC", …]
 
         return ToolResult(
