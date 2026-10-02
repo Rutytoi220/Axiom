@@ -487,13 +487,19 @@ def create_tui_app() -> Application[None]:
             orchestrator = NativeOrchestrator()
             
             tool_chunk_counter = 0
-            async for delta in orchestrator.generate_stream(payload):
-                if "tool_calls" in delta:
+            async for chunk in orchestrator.generate_stream(payload):
+                delta = chunk.get("choices", [{}])[0].get("delta", {}) if isinstance(chunk, dict) and "choices" in chunk else chunk
+                if not isinstance(delta, dict):
+                    continue
+
+                if delta.get("tool_calls"):
                     if is_loading:
                         is_loading = False
                         spinner_task.cancel()
                         clean_spinner()
                         chat_history.text += "\n[🧠 Generating tool payload]"
+                        chat_history.buffer.cursor_position = len(chat_history.text)
+                        app.invalidate()
                         
                     tool_chunk_counter += 1
                     if tool_chunk_counter % 10 == 0:
@@ -508,23 +514,23 @@ def create_tui_app() -> Application[None]:
                             chat_history.text += f"\n[🛠️ Executing tool: {func_name}...]\n"
                             chat_history.buffer.cursor_position = len(chat_history.text)
                             app.invalidate()
-                elif "content" in delta:
+                elif delta.get("content"):
                     if is_loading:
                         is_loading = False
                         spinner_task.cancel()
                         clean_spinner()
                     current_tool_status = ""
-                    chunk = delta["content"]
-                    full_response += chunk
+                    text_chunk = delta["content"]
+                    full_response += text_chunk
                     
-                    if "<think>" in chunk:
+                    if "<think>" in text_chunk:
                         IN_THOUGHT = True
-                        chunk = chunk.replace("<think>", "\u200b")
-                    if "</think>" in chunk:
+                        text_chunk = text_chunk.replace("<think>", "\u200b")
+                    if "</think>" in text_chunk:
                         IN_THOUGHT = False
-                        chunk = chunk.replace("</think>", "\u200c\n\n───\n\n")
+                        text_chunk = text_chunk.replace("</think>", "\u200c\n\n───\n\n")
                         
-                    chat_history.text += chunk
+                    chat_history.text += text_chunk
                     chat_history.buffer.cursor_position = len(chat_history.text)
                     app.invalidate()
             last_ai_response = full_response
@@ -594,13 +600,17 @@ def create_tui_app() -> Application[None]:
                 chat_history.buffer.cursor_position = len(chat_history.text)
                 return False
             
-            if cmd == "/model":
+            if text == "/model" or cmd == "/model":
                 MODAL_VISIBLE = True
                 active_modal = "model"
                 input_field.text = ""
                 input_field.read_only = True
-                get_app().layout.focus(modal_search_field)
-                get_app().invalidate()
+                app = get_app()
+                try:
+                    app.layout.focus(modal_search_field)
+                except Exception:
+                    pass
+                app.invalidate()
                 return False
             if cmd == "/effort":
                 if len(parts) > 1:
@@ -777,7 +787,7 @@ def create_tui_app() -> Application[None]:
         event.app.layout.focus(input_field)
         event.app.invalidate()
 
-    @modal_kb.add("escape")
+    @modal_kb.add("escape", eager=True)
     def _model_escape(event: Any) -> None:
         global MODAL_VISIBLE, active_modal
         MODAL_VISIBLE = False
@@ -798,8 +808,8 @@ def create_tui_app() -> Application[None]:
         ]),
         title=get_modal_title, 
         style="class:modal-frame",
-        height=lambda: 22 if active_modal in ["model", "trace"] else 11,
-        width=lambda: 100 if active_modal == "trace" else None
+        height=lambda: 22 if active_modal in ["model", "trace"] else 14,
+        width=lambda: 100 if active_modal in ["trace", "model"] else 80
     )
 
     modal_float = Float(
@@ -938,7 +948,7 @@ def create_tui_app() -> Application[None]:
             event.app.layout.focus(input_field)
         event.app.invalidate()
 
-    @kb.add("escape", filter=is_modal_open)
+    @kb.add("escape", filter=is_modal_open, eager=True)
     def _close_modal_key(event: Any) -> None:
         global MODAL_VISIBLE, active_modal
         MODAL_VISIBLE = False

@@ -6,7 +6,7 @@ from axiom.core.plugins import get_tool_schemas, execute_tool
 class NativeOrchestrator:
     async def generate_stream(self, payload: dict, depth: int = 0) -> AsyncGenerator[dict, None]:
         if depth > 10:
-            yield {"content": "\n[Error: Exceeded max tool execution depth]"}
+            yield {"choices": [{"delta": {"content": "\n[Error: Exceeded max tool execution depth]"}}]}
             return
 
         if depth == 0:
@@ -39,7 +39,7 @@ class NativeOrchestrator:
             ) as resp:
                 if resp.status_code != 200:
                     await resp.aread()
-                    yield {"content": f"\n⚠️ [API Error] HTTP {resp.status_code}: {resp.text}\n"}
+                    yield {"choices": [{"delta": {"content": f"\n⚠️ [API Error] HTTP {resp.status_code}: {resp.text}\n"}}]}
                     return
 
                 pending_tool_calls = []
@@ -85,7 +85,7 @@ class NativeOrchestrator:
                                         if "arguments" in tc["function"] and tc["function"]["arguments"]:
                                             pending_tool_calls[idx]["function"]["arguments"] += tc["function"]["arguments"]
 
-                            yield delta
+                            yield data
                         except json.JSONDecodeError:
                             pass
 
