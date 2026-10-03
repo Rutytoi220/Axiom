@@ -81,6 +81,7 @@ Returns:
 
     # Plugins
     disabled_plugins: list[str] = field(default_factory=list)
+    model_usage_counts: dict = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, config_dict: dict) -> 'AxiomConfig':
@@ -147,7 +148,8 @@ Returns:
             'offload_strategy': self.offload_strategy,
             'engine_mode': self.engine_mode,
             'remote_server_ip': self.remote_server_ip,
-            'disabled_plugins': self.disabled_plugins
+            'disabled_plugins': self.disabled_plugins,
+            'model_usage_counts': self.model_usage_counts
         }
 
     def save(self) -> None:

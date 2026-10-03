@@ -158,6 +158,8 @@ COMMAND_REGISTRY: dict[str, str] = {
     "/help": "Show this help message.",
     "/clear": "Clear the chat history.",
     "/new": "Start a new conversation session.",
+    "/session": "Switch to or create a session (Usage: /session <name>).",
+    "/resume": "Reload the full chat history of the current session.",
     "/quit": "Exit AXIOM TUI.",
     "/exit": "Exit AXIOM TUI.",
     "/cwd": "Print the current working directory.",
@@ -638,6 +640,21 @@ def create_tui_app() -> Application[None]:
             await flush_ui(force=True)
 
             last_ai_response = strip_xml_tags(full_response)
+            
+            tool_calls_for_db = []
+            for t in execution_trace:
+                if t.get("name"):
+                    tool_calls_for_db.append({
+                        "id": f"call_{t['name']}",
+                        "type": "function",
+                        "function": {
+                            "name": t["name"],
+                            "arguments": t["arguments"]
+                        }
+                    })
+            from axiom.db.memory import add_message
+            add_message(CURRENT_SESSION_ID, "assistant", full_response, tool_calls_for_db if tool_calls_for_db else None)
+
             chat_history.text += "\n"
             chat_history.buffer.cursor_position = len(chat_history.text)
             app.invalidate()
@@ -680,6 +697,45 @@ def create_tui_app() -> Application[None]:
                 CURRENT_SESSION_ID = f"session_{uuid.uuid4().hex[:12]}"
                 create_session(CURRENT_SESSION_ID, title="New Session")
                 chat_history.text = f"[Started new session {CURRENT_SESSION_ID[:8]}]\n"
+                chat_history.buffer.cursor_position = len(chat_history.text)
+                get_app().invalidate()
+                return False
+            if cmd == "/session":
+                if len(parts) > 1:
+                    session_name = " ".join(parts[1:])
+                    CURRENT_SESSION_ID = session_name
+                    create_session(CURRENT_SESSION_ID, title=session_name)
+                    chat_history.text += f"\n[Session] Switched to session '{session_name}'. Use /resume to load history.\n"
+                else:
+                    chat_history.text += f"\n[Session] Current session is '{CURRENT_SESSION_ID}'. Usage: /session <name>\n"
+                chat_history.buffer.cursor_position = len(chat_history.text)
+                get_app().invalidate()
+                return False
+            if cmd == "/resume":
+                from axiom.db.memory import get_session_messages
+                historical = get_session_messages(CURRENT_SESSION_ID)
+                if historical:
+                    chat_lines = [f"[Resumed session {CURRENT_SESSION_ID[:8]} with {len(historical)} messages]\n"]
+                    for msg in historical:
+                        role = msg["role"]
+                        content = msg.get("content", "")
+                        if role == "user":
+                            chat_lines.append(f"\n❯ User:\n{content}\n")
+                        elif role == "assistant":
+                            chat_lines.append(f"\n◈ Axiom:\n{content}\n")
+                            if msg.get("tool_calls"):
+                                try:
+                                    tc_list = json.loads(msg["tool_calls"]) if isinstance(msg["tool_calls"], str) else msg["tool_calls"]
+                                    for tc in tc_list:
+                                        fname = tc.get("function", {}).get("name", "")
+                                        chat_lines.append(f"[🛠️ Executing tool: {fname}...]\n")
+                                except:
+                                    pass
+                        elif role == "system":
+                            chat_lines.append(f"\n[System]\n{content}\n")
+                    chat_history.text = "".join(chat_lines) + "\n"
+                else:
+                    chat_history.text += f"\n[Resume] No history found for session '{CURRENT_SESSION_ID}'.\n"
                 chat_history.buffer.cursor_position = len(chat_history.text)
                 get_app().invalidate()
                 return False
@@ -768,6 +824,8 @@ def create_tui_app() -> Application[None]:
 
         chat_history.text += f"\n❯ User:\n{text}\n\n◈ Axiom:\n"
         chat_history.buffer.cursor_position = len(chat_history.text)
+        from axiom.db.memory import add_message
+        add_message(CURRENT_SESSION_ID, "user", text)
         app = get_app()
         app.create_background_task(send_to_backend(text, app))
         return False
@@ -884,6 +942,7 @@ def create_tui_app() -> Application[None]:
             selected_model = filtered_model_list[model_index]
             config = get_config()
             config.ollama_model = selected_model
+            config.model_usage_counts[selected_model] = config.model_usage_counts.get(selected_model, 0) + 1
             tier = EFFORT_TIERS[effort_index]
             setattr(config, "effort_tier", tier["id"])
             config.save()
@@ -1240,7 +1299,18 @@ async def fetch_local_models():
             resp = await client.get(url, timeout=5.0)
             if resp.status_code == 200:
                 data = resp.json()
-                model_list = [m["name"] for m in data.get("models", [])]
+                raw_models = [m["name"] for m in data.get("models", [])]
+                
+                # Smart Sorting
+                active_model = config.ollama_model
+                usage_counts = getattr(config, 'model_usage_counts', {})
+                
+                def sort_key(model_name: str):
+                    is_active = (model_name == active_model)
+                    count = usage_counts.get(model_name, 0)
+                    return (not is_active, -count, model_name.lower())
+                
+                model_list = sorted(raw_models, key=sort_key)
             else:
                 model_list = ["Error: Could not fetch models"]
     except Exception:

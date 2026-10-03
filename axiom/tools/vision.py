@@ -4,13 +4,36 @@ import shutil
 import logging
 import io
 import time
+import json
+import httpx
 from typing import Any, Dict, Optional
 from PIL import Image
 
 from axiom.tools.core import BaseTool, ToolResult, ToolParameter
 from axiom.core.vision_engine.singleton import get_grounding_engine
+from axiom.config import get_config
 
 logger = logging.getLogger(__name__)
+
+async def get_hyprland_scale() -> float:
+    """Gets the scale factor of the focused monitor in Hyprland."""
+    import asyncio
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            "hyprctl monitors -j",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode == 0:
+            monitors = json.loads(stdout.decode('utf-8'))
+            for monitor in monitors:
+                if monitor.get('focused', False):
+                    return float(monitor.get('scale', 1.0))
+    except Exception as e:
+        logger.warning(f"Failed to get hyprland scale: {e}")
+    return 1.0
+
 
 class InteractWithUITool(BaseTool):
     """Interacts with the UI using the AXIOM Grounding Engine."""
@@ -102,6 +125,20 @@ class InteractWithUITool(BaseTool):
         try:
             img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
             
+            # VRAM Juggling: Evict Ollama model from VRAM before loading the 6GB grounding engine
+            logger.info("Evicting Ollama model from VRAM...")
+            try:
+                config = get_config()
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        "http://127.0.0.1:11434/api/generate",
+                        json={"model": config.ollama_model, "keep_alive": 0},
+                        timeout=5.0
+                    )
+                await asyncio.sleep(1.0) # Allow GPU memory to clear
+            except Exception as e:
+                logger.warning(f"Failed to evict Ollama model from VRAM: {e}")
+
             engine = get_grounding_engine()
             
             start_time = time.time()
@@ -119,10 +156,17 @@ class InteractWithUITool(BaseTool):
             x, y = point[0], point[1]
             logger.info(f"Engine returned action '{action}' at ({x}, {y}) in {latency:.2f}ms")
             
+            # Scale coordinates for ydotool in Hyprland
+            scale = await get_hyprland_scale()
+            if scale != 1.0:
+                logger.info(f"Applying Hyprland scale factor: {scale}")
+            logical_x = int(x / scale)
+            logical_y = int(y / scale)
+            
             # Execute via ydotool
             if action == "click" or action == "hover":
                 # Move mouse
-                proc = await asyncio.create_subprocess_shell(f"ydotool mousemove --absolute {x} {y}")
+                proc = await asyncio.create_subprocess_shell(f"ydotool mousemove --absolute {logical_x} {logical_y}")
                 await proc.wait()
                 await asyncio.sleep(0.1)
                 
@@ -130,11 +174,11 @@ class InteractWithUITool(BaseTool):
                     proc = await asyncio.create_subprocess_shell("ydotool click 0xC0")
                     await proc.wait()
                     
-                msg = f"Action '{action}' executed at coordinates [{x}, {y}]."
+                msg = f"Action '{action}' executed at coordinates [{x}, {y}] (scaled to [{logical_x}, {logical_y}])."
                 return ToolResult(True, output=msg)
                 
             elif action == "type":
-                proc = await asyncio.create_subprocess_shell(f"ydotool mousemove --absolute {x} {y}")
+                proc = await asyncio.create_subprocess_shell(f"ydotool mousemove --absolute {logical_x} {logical_y}")
                 await proc.wait()
                 await asyncio.sleep(0.1)
                 proc = await asyncio.create_subprocess_shell("ydotool click 0xC0") # Focus
@@ -148,7 +192,7 @@ class InteractWithUITool(BaseTool):
                     proc = await asyncio.create_subprocess_shell(f"ydotool type {safe_text}")
                     await proc.wait()
                 
-                msg = f"Action 'type' executed at coordinates [{x}, {y}] with text '{text}'."
+                msg = f"Action 'type' executed at coordinates [{x}, {y}] (scaled to [{logical_x}, {logical_y}]) with text '{text}'."
                 return ToolResult(True, output=msg)
                 
             else:
