@@ -460,7 +460,7 @@ def create_tui_app() -> Application[None]:
         text=initial_chat_text,
         read_only=True,
         scrollbar=True,
-        wrap_lines=True,
+        wrap_lines=False,
         style="class:chat-history",
         lexer=CognitiveLexer(),
     )
@@ -526,12 +526,31 @@ def create_tui_app() -> Application[None]:
             
             tool_chunk_counter = 0
             tag_filter = StreamingTagFilter()
+            token_counter = 0
+            pending_text = ""
+            last_invalidate_time = 0.0
+
+            async def flush_ui(force: bool = False) -> None:
+                nonlocal pending_text, token_counter, last_invalidate_time
+                if not pending_text and not force:
+                    return
+                now = asyncio.get_event_loop().time()
+                if force or (token_counter % 5 == 0) or (now - last_invalidate_time >= 0.05):
+                    if pending_text:
+                        chat_history.text += pending_text
+                        pending_text = ""
+                    chat_history.buffer.cursor_position = len(chat_history.text)
+                    app.invalidate()
+                    last_invalidate_time = now
+                    await asyncio.sleep(0.01)
+
             async for chunk in orchestrator.generate_stream(payload):
                 delta = chunk.get("choices", [{}])[0].get("delta", {}) if isinstance(chunk, dict) and "choices" in chunk else chunk
                 if not isinstance(delta, dict):
                     continue
 
                 if delta.get("tool_calls"):
+                    await flush_ui(force=True)
                     if is_loading:
                         is_loading = False
                         spinner_task.cancel()
@@ -567,13 +586,13 @@ def create_tui_app() -> Application[None]:
                         clean_spinner()
                     if not IN_THOUGHT:
                         IN_THOUGHT = True
-                        chat_history.text += "\u200b"
+                        pending_text += "\u200b"
                     
                     r_text = delta["reasoning"]
                     full_response += r_text
-                    chat_history.text += r_text
-                    chat_history.buffer.cursor_position = len(chat_history.text)
-                    app.invalidate()
+                    pending_text += r_text
+                    token_counter += 1
+                    await flush_ui(force=False)
 
                 if "content" in delta and delta["content"]:
                     if is_loading:
@@ -583,7 +602,8 @@ def create_tui_app() -> Application[None]:
                     
                     if IN_THOUGHT and "reasoning" not in delta and "<think>" not in delta["content"]:
                         IN_THOUGHT = False
-                        chat_history.text += "\u200c\n\n───\n\n"
+                        pending_text += "\u200c\n\n───\n\n"
+                        await flush_ui(force=True)
                         
                     current_tool_status = ""
                     raw_chunk = delta["content"]
@@ -600,9 +620,9 @@ def create_tui_app() -> Application[None]:
                         IN_THOUGHT = False
                         text_chunk = text_chunk.replace("</think>", "\u200c\n\n───\n\n")
                         
-                    chat_history.text += text_chunk
-                    chat_history.buffer.cursor_position = len(chat_history.text)
-                    app.invalidate()
+                    pending_text += text_chunk
+                    token_counter += 1
+                    await flush_ui(force=False)
 
             remaining_text = tag_filter.flush()
             if remaining_text:
@@ -613,20 +633,24 @@ def create_tui_app() -> Application[None]:
                 if "</think>" in remaining_text:
                     IN_THOUGHT = False
                     remaining_text = remaining_text.replace("</think>", "\u200c\n\n───\n\n")
-                chat_history.text += remaining_text
-                chat_history.buffer.cursor_position = len(chat_history.text)
-                app.invalidate()
+                pending_text += remaining_text
+
+            await flush_ui(force=True)
 
             last_ai_response = strip_xml_tags(full_response)
             chat_history.text += "\n"
             chat_history.buffer.cursor_position = len(chat_history.text)
             app.invalidate()
         except httpx.RequestError as exc:
+            await flush_ui(force=True)
             chat_history.text += f"\n⚠️ [FastAPI Error] Could not reach local compute node: {exc}\n"
             chat_history.buffer.cursor_position = len(chat_history.text)
+            app.invalidate()
         except Exception as exc:
+            await flush_ui(force=True)
             chat_history.text += f"\n⚠️ [Error] Unexpected error: {exc}\n"
             chat_history.buffer.cursor_position = len(chat_history.text)
+            app.invalidate()
         finally:
             is_loading = False
             if 'spinner_task' in locals():
