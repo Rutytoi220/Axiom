@@ -36,10 +36,47 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import Frame, TextArea
+import re
 from prompt_toolkit.layout.margins import ScrollbarMargin
 from prompt_toolkit.lexers import Lexer
 from prompt_toolkit.completion import Completer, Completion
 from axiom.config import get_config
+
+TAG_REGEX = re.compile(r'</?(?:function|highlight)(?:\s+[^>]*)?>', re.IGNORECASE)
+
+class StreamingTagFilter:
+    """Filter that strips <function>, </function>, and <highlight...> tags from streaming chunks."""
+    PARTIAL_TAG_PREFIXES = ('<f', '<F', '</f', '</F', '<h', '<H', '</h', '</H', '<', '</')
+
+    def __init__(self):
+        self._buffer = ""
+
+    def filter(self, chunk: str) -> str:
+        self._buffer += chunk
+        self._buffer = TAG_REGEX.sub('', self._buffer)
+        
+        last_lt = self._buffer.rfind('<')
+        if last_lt != -1 and '>' not in self._buffer[last_lt:]:
+            tail = self._buffer[last_lt:]
+            if any(tail.lower().startswith(p.lower()) for p in self.PARTIAL_TAG_PREFIXES) and len(tail) < 150:
+                to_emit = self._buffer[:last_lt]
+                self._buffer = tail
+                return to_emit
+        
+        to_emit = self._buffer
+        self._buffer = ""
+        return to_emit
+
+    def flush(self) -> str:
+        res = TAG_REGEX.sub('', self._buffer)
+        self._buffer = ""
+        return res
+
+def strip_xml_tags(text: str) -> str:
+    """Strip <function>, </function>, and <highlight...> tags while preserving inner text."""
+    if not text:
+        return text
+    return TAG_REGEX.sub('', text)
 
 # ---------------------------------------------------------------------------
 
@@ -488,6 +525,7 @@ def create_tui_app() -> Application[None]:
             orchestrator = NativeOrchestrator()
             
             tool_chunk_counter = 0
+            tag_filter = StreamingTagFilter()
             async for chunk in orchestrator.generate_stream(payload):
                 delta = chunk.get("choices", [{}])[0].get("delta", {}) if isinstance(chunk, dict) and "choices" in chunk else chunk
                 if not isinstance(delta, dict):
@@ -548,7 +586,11 @@ def create_tui_app() -> Application[None]:
                         chat_history.text += "\u200c\n\n───\n\n"
                         
                     current_tool_status = ""
-                    text_chunk = delta["content"]
+                    raw_chunk = delta["content"]
+                    text_chunk = tag_filter.filter(raw_chunk)
+                    if not text_chunk:
+                        continue
+
                     full_response += text_chunk
                     
                     if "<think>" in text_chunk:
@@ -561,7 +603,21 @@ def create_tui_app() -> Application[None]:
                     chat_history.text += text_chunk
                     chat_history.buffer.cursor_position = len(chat_history.text)
                     app.invalidate()
-            last_ai_response = full_response
+
+            remaining_text = tag_filter.flush()
+            if remaining_text:
+                full_response += remaining_text
+                if "<think>" in remaining_text:
+                    IN_THOUGHT = True
+                    remaining_text = remaining_text.replace("<think>", "\u200b")
+                if "</think>" in remaining_text:
+                    IN_THOUGHT = False
+                    remaining_text = remaining_text.replace("</think>", "\u200c\n\n───\n\n")
+                chat_history.text += remaining_text
+                chat_history.buffer.cursor_position = len(chat_history.text)
+                app.invalidate()
+
+            last_ai_response = strip_xml_tags(full_response)
             chat_history.text += "\n"
             chat_history.buffer.cursor_position = len(chat_history.text)
             app.invalidate()

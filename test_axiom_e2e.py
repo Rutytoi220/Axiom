@@ -115,6 +115,21 @@ async def main():
     coord_match = re.search(r'\[(\d+),\s*(\d+)\]', tool_result)
     assert coord_match, "Test Failed: AxiomGroundingEngine did not return integer coordinate array [x, y]."
     
+    # Check 4: Strict assertion that final parsed output string contains absolutely no <function> or <highlight> tags
+    from axiom.cli.tui import strip_xml_tags
+    final_parsed_output = strip_xml_tags(stream_content)
+    assert not re.search(r'</?(?:function|highlight)', final_parsed_output, re.IGNORECASE), \
+        f"Test Failed: Final parsed output string contains <function> or <highlight> tags: {final_parsed_output}"
+
+    # Verify tag purger against raw XML leak samples (preserving inner conversational response)
+    synthetic_sample = "<function name=\"click_ui\">Click</function> the <highlight id=\"gemini_btn\">Gemini button</highlight>."
+    purged_sample = strip_xml_tags(synthetic_sample)
+    assert not re.search(r'</?(?:function|highlight)', purged_sample, re.IGNORECASE), \
+        f"Test Failed: XML tag purger failed to remove tags from synthetic sample: {purged_sample}"
+    assert "Click the Gemini button." == purged_sample.strip(), \
+        f"Test Failed: Inner text was corrupted during XML tag purge: {purged_sample}"
+    print("✓ Check 4: Final parsed output contains zero <function> or <highlight> tags, and tag purger verified.")
+
     print("All E2E checks passed successfully.")
 
 if __name__ == "__main__":
