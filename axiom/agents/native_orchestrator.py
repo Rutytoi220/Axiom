@@ -30,6 +30,15 @@ class NativeOrchestrator:
         from axiom.config import get_config
         payload["model"] = get_config().ollama_model
 
+        # Scrub images from payload to prevent context-window collapse
+        for msg in payload.get("messages", []):
+            if "images" in msg:
+                del msg["images"]
+            if isinstance(msg.get("content"), list):
+                # Filter out image_url items
+                text_parts = [c.get("text", "") for c in msg["content"] if c.get("type") == "text"]
+                msg["content"] = "\n".join(text_parts)
+
         timeout_config = httpx.Timeout(connect=10.0, read=300.0, write=20.0, pool=20.0)
         async with httpx.AsyncClient(timeout=timeout_config) as client:
             async with client.stream(

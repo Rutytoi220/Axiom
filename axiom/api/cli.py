@@ -187,8 +187,7 @@ Returns:
     def _init_plugins(self) -> None:
         """Initialize plugins."""
         from axiom.plugins import NXBTPlugin, AutomationPlugin
-        from axiom.plugins.visual_automation import VisualAutomationPlugin
-        plugins = [NXBTPlugin(), AutomationPlugin(engine=self.engine), VisualAutomationPlugin(engine=self.engine)]
+        plugins = [NXBTPlugin(), AutomationPlugin(engine=self.engine)]
         for plugin in plugins:
             if plugin.initialize():
                 plugin.enable()

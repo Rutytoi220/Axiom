@@ -507,18 +507,45 @@ def create_tui_app() -> Application[None]:
                         chat_history.buffer.cursor_position = len(chat_history.text)
                         app.invalidate()
                         
-                    execution_trace.append(delta["tool_calls"])
                     for tc in delta["tool_calls"]:
-                        if "function" in tc and tc["function"].get("name"):
-                            func_name = tc["function"]["name"]
-                            chat_history.text += f"\n[🛠️ Executing tool: {func_name}...]\n"
-                            chat_history.buffer.cursor_position = len(chat_history.text)
-                            app.invalidate()
-                elif delta.get("content"):
+                        idx = tc.get("index", 0)
+                        while len(execution_trace) <= idx:
+                            execution_trace.append({"name": "", "arguments": ""})
+                        if "function" in tc:
+                            if tc["function"].get("name"):
+                                func_name = tc["function"]["name"]
+                                execution_trace[idx]["name"] = func_name
+                                chat_history.text += f"\n[🛠️ Executing tool: {func_name}...]\n"
+                                chat_history.buffer.cursor_position = len(chat_history.text)
+                                app.invalidate()
+                            if tc["function"].get("arguments"):
+                                execution_trace[idx]["arguments"] += tc["function"]["arguments"]
+                            
+                if "reasoning" in delta and delta["reasoning"]:
                     if is_loading:
                         is_loading = False
                         spinner_task.cancel()
                         clean_spinner()
+                    if not IN_THOUGHT:
+                        IN_THOUGHT = True
+                        chat_history.text += "\u200b"
+                    
+                    r_text = delta["reasoning"]
+                    full_response += r_text
+                    chat_history.text += r_text
+                    chat_history.buffer.cursor_position = len(chat_history.text)
+                    app.invalidate()
+
+                if "content" in delta and delta["content"]:
+                    if is_loading:
+                        is_loading = False
+                        spinner_task.cancel()
+                        clean_spinner()
+                    
+                    if IN_THOUGHT and "reasoning" not in delta and "<think>" not in delta["content"]:
+                        IN_THOUGHT = False
+                        chat_history.text += "\u200c\n\n───\n\n"
+                        
                     current_tool_status = ""
                     text_chunk = delta["content"]
                     full_response += text_chunk

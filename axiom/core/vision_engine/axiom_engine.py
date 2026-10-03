@@ -81,6 +81,13 @@ class AxiomGroundingEngine:
                 token_id = torch.argmax(next_logits[:, -1, :], dim=-1, keepdim=True)
                 generated_ids.append(token_id.item())
                 
+                del token_embeds, out, normed, next_logits
+                
+            del logits, pkv, data, _, token_id
+            
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            
         latency_ms = (time.time() - start_time) * 1000
         
         response = self.processor.tokenizer.decode(generated_ids, skip_special_tokens=True).strip()

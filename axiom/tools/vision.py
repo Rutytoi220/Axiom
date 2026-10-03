@@ -19,30 +19,40 @@ class InteractWithUITool(BaseTool):
         super().__init__(
             tool_id="interact_with_ui",
             name="interact_with_ui",
-            description="Autonomously finds and interacts with a UI element on the screen based on a text instruction. Used for clicking buttons, typing into fields, etc.",
-            parameters=[
-                ToolParameter(
-                    name="instruction",
-                    type="string",
-                    description="Precise text instruction of what to interact with (e.g., 'Click the submit button', 'Type \"hello\" into the search bar').",
-                    required=True
-                )
-            ]
+            description="Autonomously finds and interacts with a UI element on the screen based on a text instruction. Used for clicking buttons, typing into fields, etc."
         )
+        self.parameters = [
+            ToolParameter(
+                name="instruction",
+                type="string",
+                description="Precise text instruction of what to interact with (e.g., 'Click the submit button', 'Type \"hello\" into the search bar').",
+                required=True
+            )
+        ]
 
-    def _capture_wayland_grim(self, cmd: str) -> Optional[bytes]:
+    async def _capture_wayland_grim(self, cmd: str) -> Optional[bytes]:
         logger.info(f"Triggering grim screenshot... ({cmd})")
+        import asyncio
         try:
-            result = subprocess.run(f"{cmd} -c -", shell=True, capture_output=True, check=True, timeout=3.0)
-            return result.stdout
-        except subprocess.TimeoutExpired:
+            proc = await asyncio.create_subprocess_shell(
+                f"{cmd} -c -", 
+                stdout=asyncio.subprocess.PIPE, 
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=3.0)
+            if proc.returncode != 0:
+                logger.warning(f"Failed to capture with {cmd}: {stderr.decode()}")
+                return None
+            return stdout
+        except asyncio.TimeoutError:
             logger.error(f"TimeoutExpired: grim screenshot hung for command {cmd}")
             raise RuntimeError(f"grim screenshot timeout for command {cmd}")
         except Exception as e:
             logger.warning(f"Failed to capture with {cmd}: {e}")
             return None
 
-    def execute(self, params: Dict[str, Any]) -> ToolResult:
+    async def execute(self, params: Dict[str, Any]) -> ToolResult:
+        import asyncio
         instruction = params.get("instruction")
         if not instruction:
             return ToolResult(False, error="instruction is required.")
@@ -52,10 +62,14 @@ class InteractWithUITool(BaseTool):
         # 1. Capture screen
         if shutil.which("distrobox-host-exec"):
             try:
-                res = subprocess.run("distrobox-host-exec which grim", shell=True, capture_output=True, text=True)
-                if res.returncode == 0:
+                proc = await asyncio.create_subprocess_shell(
+                    "distrobox-host-exec which grim", 
+                    stdout=asyncio.subprocess.PIPE
+                )
+                await proc.communicate()
+                if proc.returncode == 0:
                     try:
-                        image_bytes = self._capture_wayland_grim("distrobox-host-exec grim")
+                        image_bytes = await self._capture_wayland_grim("distrobox-host-exec grim")
                     except RuntimeError as e:
                         return ToolResult(False, error=str(e))
             except Exception:
@@ -63,7 +77,7 @@ class InteractWithUITool(BaseTool):
                 
         if image_bytes is None and shutil.which("grim"):
             try:
-                image_bytes = self._capture_wayland_grim("grim")
+                image_bytes = await self._capture_wayland_grim("grim")
             except RuntimeError as e:
                 return ToolResult(False, error=str(e))
             
@@ -73,9 +87,13 @@ class InteractWithUITool(BaseTool):
             if os.path.exists(screenshot_path):
                 os.remove(screenshot_path)
             try:
-                subprocess.run(["grim", screenshot_path], check=True)
-                with open(screenshot_path, "rb") as f:
-                    image_bytes = f.read()
+                proc = await asyncio.create_subprocess_exec("grim", screenshot_path)
+                await proc.communicate()
+                if proc.returncode == 0:
+                    with open(screenshot_path, "rb") as f:
+                        image_bytes = f.read()
+                else:
+                    return ToolResult(False, error="grim fallback returned non-zero exit code")
             except Exception as e:
                 return ToolResult(False, error=f"Failed to capture screen: {e}")
 
@@ -87,7 +105,8 @@ class InteractWithUITool(BaseTool):
             engine = get_grounding_engine()
             
             start_time = time.time()
-            result = engine.predict_action(img, instruction, k=4)
+            import asyncio
+            result = await asyncio.to_thread(engine.predict_action, img, instruction, 4)
             latency = (time.time() - start_time) * 1000
             
             action = result.get("action")
@@ -103,26 +122,31 @@ class InteractWithUITool(BaseTool):
             # Execute via ydotool
             if action == "click" or action == "hover":
                 # Move mouse
-                os.system(f"ydotool mousemove --absolute {x} {y}")
-                time.sleep(0.1)
+                proc = await asyncio.create_subprocess_shell(f"ydotool mousemove --absolute {x} {y}")
+                await proc.wait()
+                await asyncio.sleep(0.1)
                 
                 if action == "click":
-                    os.system("ydotool click 0xC0") # Left click
+                    proc = await asyncio.create_subprocess_shell("ydotool click 0xC0")
+                    await proc.wait()
                     
                 msg = f"Action '{action}' executed at coordinates [{x}, {y}]."
                 return ToolResult(True, output=msg)
                 
             elif action == "type":
-                os.system(f"ydotool mousemove --absolute {x} {y}")
-                time.sleep(0.1)
-                os.system("ydotool click 0xC0") # Focus
-                time.sleep(0.1)
+                proc = await asyncio.create_subprocess_shell(f"ydotool mousemove --absolute {x} {y}")
+                await proc.wait()
+                await asyncio.sleep(0.1)
+                proc = await asyncio.create_subprocess_shell("ydotool click 0xC0") # Focus
+                await proc.wait()
+                await asyncio.sleep(0.1)
                 
                 # Type text
                 if text:
                     import shlex
                     safe_text = shlex.quote(text)
-                    os.system(f"ydotool type {safe_text}")
+                    proc = await asyncio.create_subprocess_shell(f"ydotool type {safe_text}")
+                    await proc.wait()
                 
                 msg = f"Action 'type' executed at coordinates [{x}, {y}] with text '{text}'."
                 return ToolResult(True, output=msg)
