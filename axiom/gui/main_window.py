@@ -14,7 +14,7 @@ import os
 from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt, QSize, Slot, QTimer, Signal
 from PySide6.QtGui import QAction, QFont, QIcon, QKeySequence, QShortcut
-from PySide6.QtWidgets import QButtonGroup, QDockWidget, QFrame, QHBoxLayout, QLabel, QMainWindow, QPushButton, QScrollArea, QSizePolicy, QStatusBar, QTextEdit, QToolBar, QToolButton, QVBoxLayout, QWidget, QSystemTrayIcon, QMenu, QApplication, QSplitter, QFileDialog
+from PySide6.QtWidgets import QButtonGroup, QDockWidget, QFrame, QHBoxLayout, QLabel, QMainWindow, QPushButton, QScrollArea, QSizePolicy, QStatusBar, QTextEdit, QToolBar, QToolButton, QVBoxLayout, QWidget, QSystemTrayIcon, QMenu, QApplication, QSplitter, QFileDialog, QDialog
 from axiom.config import get_config, AuthMode
 from axiom.core.shortcuts import SHORTCUTS
 from axiom.gui.styles.theme_manager import get_theme_manager

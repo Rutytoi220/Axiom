@@ -9,6 +9,11 @@ class AxiomTool(ABC):
         pass
 
     @property
+    def tool_id(self) -> str:
+        """Alias for tool name/identifier."""
+        return self.name
+
+    @property
     @abstractmethod
     def description(self) -> str:
         """The tool description."""

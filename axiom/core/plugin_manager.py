@@ -16,6 +16,11 @@ class PluginManager:
     def __init__(self):
         self.active_tools: Dict[str, AxiomTool] = {}
 
+    def load_user_tools(self) -> list[AxiomTool]:
+        """Load and return all user-defined third-party tools."""
+        self.load_plugins()
+        return list(self.active_tools.values())
+
     def load_plugins(self):
         self.active_tools.clear()
         config = get_config()
