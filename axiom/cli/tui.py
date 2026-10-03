@@ -36,10 +36,10 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import Frame, TextArea
+from prompt_toolkit.layout.margins import ScrollbarMargin
 from prompt_toolkit.lexers import Lexer
 from prompt_toolkit.completion import Completer, Completion
 from axiom.config import get_config
-import httpx
 
 # ---------------------------------------------------------------------------
 
@@ -427,6 +427,7 @@ def create_tui_app() -> Application[None]:
         style="class:chat-history",
         lexer=CognitiveLexer(),
     )
+    chat_history.window.right_margins = [ScrollbarMargin(display_arrows=True)]
     chat_history.buffer.cursor_position = len(initial_chat_text)
 
     # Forward declaration for background sender
@@ -1021,11 +1022,38 @@ def create_tui_app() -> Application[None]:
 
     @kb.add("pageup")
     def _page_up_key(event: Any) -> None:
-        chat_history.buffer.cursor_up(count=10)
+        if active_modal == "trace":
+            trace_field.buffer.cursor_up(count=10)
+            event.app.invalidate()
+            return
+        info = chat_history.window.render_info
+        if info:
+            current_scroll = chat_history.window.vertical_scroll or 0
+            target_scroll = max(0, current_scroll - 10)
+            chat_history.window.vertical_scroll = target_scroll
+            target_row = max(0, min(chat_history.buffer.document.cursor_position_row - 10, target_scroll))
+            chat_history.buffer.cursor_position = chat_history.buffer.document.translate_row_col_to_index(target_row, 0)
+        else:
+            chat_history.buffer.cursor_up(count=10)
+        event.app.invalidate()
 
     @kb.add("pagedown")
     def _page_down_key(event: Any) -> None:
-        chat_history.buffer.cursor_down(count=10)
+        if active_modal == "trace":
+            trace_field.buffer.cursor_down(count=10)
+            event.app.invalidate()
+            return
+        info = chat_history.window.render_info
+        if info:
+            current_scroll = chat_history.window.vertical_scroll or 0
+            max_scroll = max(0, info.content_height - info.window_height)
+            target_scroll = min(max_scroll, current_scroll + 10)
+            chat_history.window.vertical_scroll = target_scroll
+            target_row = min(chat_history.buffer.document.line_count - 1, target_scroll + info.window_height - 1)
+            chat_history.buffer.cursor_position = chat_history.buffer.document.translate_row_col_to_index(target_row, 0)
+        else:
+            chat_history.buffer.cursor_down(count=10)
+        event.app.invalidate()
 
     # -----------------------------------------------------------------------
     # Styling
@@ -1054,6 +1082,7 @@ def create_tui_app() -> Application[None]:
         key_bindings=kb,
         style=style,
         full_screen=True,
+        mouse_support=True,
     )
     
     async def listen_to_bus():
