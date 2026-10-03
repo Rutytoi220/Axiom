@@ -388,7 +388,7 @@ def create_tui_app() -> Application[None]:
     async def poll_compute_node(app: Application[None]) -> None:
         nonlocal COMPUTE_NODE_STATUS
         from axiom.services.ollama_monitor import OllamaHealthMonitor
-        OllamaHealthMonitor.spawn_ollama_service()
+        await asyncio.to_thread(OllamaHealthMonitor.spawn_ollama_service)
         
         while True:
             try:
@@ -675,13 +675,23 @@ def create_tui_app() -> Application[None]:
             if cmd == "/copy":
                 if not last_ai_response:
                     chat_history.text += "\n[Copy] No response to copy.\n"
+                    chat_history.buffer.cursor_position = len(chat_history.text)
                 else:
-                    try:
-                        subprocess.run(["wl-copy"], input=last_ai_response.encode("utf-8"), check=True)
-                        chat_history.text += "\n[Copy] ✓ Copied last response to clipboard.\n"
-                    except Exception as e:
-                        chat_history.text += f"\n[Copy] Failed: {e}\n"
-                chat_history.buffer.cursor_position = len(chat_history.text)
+                    async def _async_copy():
+                        try:
+                            proc = await asyncio.create_subprocess_exec(
+                                "wl-copy",
+                                stdin=asyncio.subprocess.PIPE,
+                                stdout=asyncio.subprocess.DEVNULL,
+                                stderr=asyncio.subprocess.DEVNULL,
+                            )
+                            await asyncio.wait_for(proc.communicate(last_ai_response.encode("utf-8")), timeout=3.0)
+                            chat_history.text += "\n[Copy] ✓ Copied last response to clipboard.\n"
+                        except Exception as e:
+                            chat_history.text += f"\n[Copy] Failed: {e}\n"
+                        chat_history.buffer.cursor_position = len(chat_history.text)
+                        get_app().invalidate()
+                    get_app().create_background_task(_async_copy())
                 return False
             
             if text == "/model" or cmd == "/model":
@@ -815,7 +825,7 @@ def create_tui_app() -> Application[None]:
         style="class:system-alert",
     )
 
-    trace_field = TextArea(text="", read_only=True, scrollbar=True, height=20, width=100)
+    trace_field = TextArea(text="", read_only=True, scrollbar=True, wrap_lines=True)
     modal_search_field.buffer.on_text_changed += handle_modal_search_change
 
     modal_kb = KeyBindings()
@@ -884,6 +894,22 @@ def create_tui_app() -> Application[None]:
 
     modal_search_field.control.key_bindings = modal_kb
 
+    def get_modal_width() -> int:
+        try:
+            cols = get_app().output.get_size().columns
+            preferred = 100 if active_modal in ["trace", "model"] else 80
+            return max(30, min(preferred, cols - 4))
+        except Exception:
+            return 80
+
+    def get_modal_height() -> int:
+        try:
+            rows = get_app().output.get_size().rows
+            preferred = 22 if active_modal in ["model", "trace"] else 14
+            return max(8, min(preferred, rows - 4))
+        except Exception:
+            return 14
+
     modal_frame = Frame(
         body=HSplit([
             ConditionalContainer(modal_search_field, filter=Condition(lambda: active_modal == "model")),
@@ -892,8 +918,8 @@ def create_tui_app() -> Application[None]:
         ]),
         title=get_modal_title, 
         style="class:modal-frame",
-        height=lambda: 22 if active_modal in ["model", "trace"] else 14,
-        width=lambda: 100 if active_modal in ["trace", "model"] else 80
+        height=get_modal_height,
+        width=get_modal_width
     )
 
     modal_float = Float(
@@ -1014,6 +1040,14 @@ def create_tui_app() -> Application[None]:
             trace_str = json.dumps(execution_trace, indent=2) if execution_trace else "No tools executed yet."
             trace_field.text = trace_str
             event.app.layout.focus(trace_field)
+        event.app.invalidate()
+
+    @kb.add("q", filter=Condition(lambda: active_modal == "trace"), eager=True)
+    def _trace_q_key(event: Any) -> None:
+        global active_modal, MODAL_VISIBLE
+        active_modal = None
+        MODAL_VISIBLE = False
+        event.app.layout.focus(input_field)
         event.app.invalidate()
 
     @kb.add("c-t")
