@@ -3,8 +3,26 @@ import json
 import torch
 from typing import Dict, Any
 from PIL import Image
-from transformers import AutoModel, AutoProcessor, BitsAndBytesConfig
+from transformers import AutoModel, AutoProcessor, BitsAndBytesConfig, PreTrainedModel
 from axiom.core.vision_engine.models.spotless_vlm import SpotlessLatentAdapter, SpotlessMiniCPMV
+
+class _TiedKeysDescriptor:
+    def __get__(self, obj, objtype=None):
+        if obj is None:
+            return self
+        val = obj.__dict__.get("_all_tied_weights_keys", None)
+        if val is None:
+            val = getattr(obj, "_tied_weights_keys", None)
+        return val if val is not None else {}
+
+    def __set__(self, obj, value):
+        obj.__dict__["_all_tied_weights_keys"] = value if value is not None else {}
+
+PreTrainedModel.all_tied_weights_keys = _TiedKeysDescriptor()
+
+# Disable caching_allocator_warmup to prevent false-positive CUDA OOM on shared GPUs
+import transformers.modeling_utils
+transformers.modeling_utils.caching_allocator_warmup = lambda *args, **kwargs: None
 
 class AxiomGroundingEngine:
     def __init__(self, model_id: str = "openbmb/MiniCPM-V-2_6", adapter_path: str = "/home/rutytoi/qwen_experiments/checkpoints/best_vlm_adapter.pt", device: str = "cuda"):

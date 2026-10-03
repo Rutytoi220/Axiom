@@ -19,56 +19,46 @@ async def main():
         }
     }
     
-    # Mock the grounding engine to simulate PyTorch inference in CI
-    class MockEngine:
-        def predict_action(self, img, instruction, k):
-            import time
-            time.sleep(0.5)
-            return {"action": "click", "point": [100, 200], "text": None, "raw_output": '{"action": "click", "point": [100, 200]}'}
-            
-    import axiom.core.vision_engine.singleton
-    axiom.core.vision_engine.singleton.get_grounding_engine = lambda: MockEngine()
-    
-    # Mock image capture and ydotool execution to prevent headless CI failures
-    import PIL.Image
-    import io
-    dummy_img = PIL.Image.new('RGB', (224, 224), color='white')
-    dummy_bytes = io.BytesIO()
-    dummy_img.save(dummy_bytes, format='PNG')
-    
-    async def mock_tool_execute(params):
-        import time
-        from axiom.tools.core import ToolResult
-        instruction = params.get("instruction")
-        img = PIL.Image.new('RGB', (224, 224), color='white')
-        engine = axiom.core.vision_engine.singleton.get_grounding_engine()
-        import asyncio
-        result = await asyncio.to_thread(engine.predict_action, img, instruction, 4)
-        x, y = result['point'][0], result['point'][1]
-        msg = f"Action 'click' executed at coordinates [{x}, {y}]."
-        return ToolResult(True, output=msg)
-        
-    tool.execute = mock_tool_execute
-    
-    # Override execute_tool to hook our tool in for the test
+    # Import and pre-warm resident AxiomGroundingEngine into CUDA memory
+    from axiom.core.vision_engine.axiom_engine import AxiomGroundingEngine
+    from axiom.core.vision_engine.singleton import get_grounding_engine
+
+    # Free any active Ollama models from VRAM so the resident grounding engine can load cleanly
+    import httpx
+    try:
+        from axiom.config import get_config
+        cfg = get_config()
+        with httpx.Client(timeout=5.0) as client:
+            client.post(
+                f"{cfg.ollama_base_url}/api/generate",
+                json={"model": cfg.ollama_model, "keep_alive": 0}
+            )
+    except Exception:
+        pass
+
+    print("Pre-warming resident AxiomGroundingEngine into CUDA memory...")
+    get_grounding_engine()
+
+    # Wire execute_tool directly to the live InteractWithUITool
     original_execute_tool = axiom.core.plugins.execute_tool
     
-    async def mock_execute_tool(name: str, **kwargs):
+    async def live_execute_tool(name: str, **kwargs):
         if name == tool.name:
-            print(f"Executing tool {name} with args: {kwargs}")
+            print(f"\n[LIVE EXECUTION] Executing live tool '{name}' with args: {kwargs}")
             res = await tool.execute(kwargs)
+            print(f"[LIVE EXECUTION] Live tool execution returned: {res}")
             return json.dumps(res.to_dict())
         return await original_execute_tool(name, **kwargs)
         
-    axiom.core.plugins.execute_tool = mock_execute_tool
+    axiom.core.plugins.execute_tool = live_execute_tool
     import axiom.agents.native_orchestrator as nat_orch
-    nat_orch.execute_tool = mock_execute_tool
+    nat_orch.execute_tool = live_execute_tool
     
     payload = {
         "stream": True,
         "tools": [schema],
         "messages": [
-            {"role": "user", "content": "Click the Gemini button"}
+            {"role": "user", "content": "I have two Gemini windows open. Can you click the '+' button on the left Gemini window for me?"}
         ]
     }
     
