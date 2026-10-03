@@ -17,7 +17,7 @@ class NativeOrchestrator:
                     "CRITICAL DIRECTIVE: You have access to dedicated API tools (e.g., fetch_weather) and raw shell/system tools (e.g., shell_exec, ssh, distrobox). "
                     "You MUST ALWAYS prefer dedicated API tools. DO NOT attempt to use shell_exec, SSH, or Distrobox to run commands (like curl or python scripts) if a dedicated tool exists for the task. "
                     "Never guess tool parameters. If a tool fails, explain the error; do not aggressively retry shell commands. "
-                    "CRITICAL RULE: NEVER use the ask_human tool to ask the user for screen coordinates, visual layouts, or UI element locations. You MUST use your screen_perception and vision tools to find visual elements autonomously."
+                    "CRITICAL RULE: NEVER use the ask_human tool to ask the user for screen coordinates, visual layouts, or UI element locations. To interact with the screen, call the `interact_with_ui` tool and provide a precise text instruction of what you want to click or type. The dedicated vision subsystem will handle the spatial coordinates."
                 )
             }
             
@@ -107,32 +107,9 @@ class NativeOrchestrator:
                 except Exception:
                     func_args = {}
 
-                extracted_b64 = None
                 try:
                     tool_result = await execute_tool(func_name, **func_args)
                     
-                    if isinstance(tool_result, str) and tool_result.startswith("SCREENSHOT_BASE64:"):
-                        extracted_b64 = tool_result.replace("SCREENSHOT_BASE64:", "")
-                        tool_result = "[SCREENSHOT CAPTURED AND ATTACHED TO VISION PAYLOAD]"
-                    else:
-                        import ast
-                        parsed_dict = None
-                        if isinstance(tool_result, str):
-                            try:
-                                parsed_dict = json.loads(tool_result)
-                            except Exception:
-                                try:
-                                    parsed_dict = ast.literal_eval(tool_result)
-                                except Exception:
-                                    pass
-                        elif isinstance(tool_result, dict):
-                            parsed_dict = tool_result
-                            
-                        if isinstance(parsed_dict, dict) and "image_b64" in parsed_dict:
-                            extracted_b64 = parsed_dict.pop("image_b64")
-                            parsed_dict["message"] = parsed_dict.get("message", "") + " [SCREENSHOT CAPTURED AND ATTACHED TO VISION PAYLOAD]"
-                            tool_result = json.dumps(parsed_dict, indent=2)
-
                     if not isinstance(tool_result, str):
                         tool_result = json.dumps(tool_result, indent=2)
                     res_str = tool_result
@@ -146,17 +123,6 @@ class NativeOrchestrator:
                     "content": res_str
                 }
                 payload["messages"].append(tool_msg)
-                
-                if extracted_b64:
-                    if "," in extracted_b64:
-                        extracted_b64 = extracted_b64.split(",", 1)[1]
-                    payload["messages"].append({
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": "Here is the requested screenshot. Please analyze it and output the tool call to interact with it if requested."},
-                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{extracted_b64}"}}
-                        ]
-                    })
 
             async for chunk in self.generate_stream(payload, depth=depth + 1):
                 yield chunk
