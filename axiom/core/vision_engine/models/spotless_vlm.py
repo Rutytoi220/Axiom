@@ -110,6 +110,7 @@ class SpotlessMiniCPMV(nn.Module):
             )
             pkv = out.past_key_values
             h = out.last_hidden_state[:, -1:, :]
+            del h_ref, norm_val, e_lat, out
 
         # 3. Verbalizer Projection
         h_verb = self.adapter.verbalize(h)

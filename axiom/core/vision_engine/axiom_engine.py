@@ -57,36 +57,43 @@ class AxiomGroundingEngine:
         start_time = time.time()
         
         data = self.model.prepare_multimodal_data(image, instruction)
-        
-        with torch.no_grad():
-            logits, pkv, _ = self.model.forward_latent(data, K=k)
-            
-            token_id = torch.argmax(logits[:, -1, :], dim=-1, keepdim=True)
-            generated_ids = [token_id.item()]
-            
-            for _ in range(max_tokens - 1):
-                if token_id.item() in [self.processor.tokenizer.eos_token_id, 151645]: # <|im_end|>
-                    break
+        logits = None
+        pkv = None
+        _ = None
+        token_id = None
+        generated_ids = []
+
+        try:
+            with torch.no_grad():
+                logits, pkv, _ = self.model.forward_latent(data, K=k)
                 
-                token_embeds = self.model.vlm.llm.model.embed_tokens(token_id)
-                out = self.model.vlm.llm.model(
-                    inputs_embeds=token_embeds,
-                    past_key_values=pkv,
-                    use_cache=True
-                )
-                pkv = out.past_key_values
+                token_id = torch.argmax(logits[:, -1, :], dim=-1, keepdim=True)
+                generated_ids = [token_id.item()]
                 
-                normed = self.model.vlm.llm.model.norm(out.last_hidden_state[:, -1:, :])
-                next_logits = self.model.vlm.llm.lm_head(normed)
-                token_id = torch.argmax(next_logits[:, -1, :], dim=-1, keepdim=True)
-                generated_ids.append(token_id.item())
-                
-                del token_embeds, out, normed, next_logits
-                
+                for _ in range(max_tokens - 1):
+                    if token_id.item() in [self.processor.tokenizer.eos_token_id, 151645]: # <|im_end|>
+                        break
+                    
+                    token_embeds = self.model.vlm.llm.model.embed_tokens(token_id)
+                    out = self.model.vlm.llm.model(
+                        inputs_embeds=token_embeds,
+                        past_key_values=pkv,
+                        use_cache=True
+                    )
+                    pkv = out.past_key_values
+                    
+                    normed = self.model.vlm.llm.model.norm(out.last_hidden_state[:, -1:, :])
+                    next_logits = self.model.vlm.llm.lm_head(normed)
+                    token_id = torch.argmax(next_logits[:, -1, :], dim=-1, keepdim=True)
+                    generated_ids.append(token_id.item())
+                    
+                    del token_embeds, out, normed, next_logits
+        finally:
             del logits, pkv, data, _, token_id
-            
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+            import gc
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             
         latency_ms = (time.time() - start_time) * 1000
         
