@@ -8,17 +8,20 @@ import axiom.core.plugins
 async def main():
     orchestrator = NativeOrchestrator()
     
-    # 1. Setup the tool
-    tool = InteractWithUITool()
-    schema = {
-        "type": "function",
-        "function": {
-            "name": tool.name,
-            "description": tool.description,
-            "parameters": tool.schema
-        }
-    }
+    # 1. Verify the tool registry is purged of legacy tools and contains interact_with_ui
+    from axiom.core.plugins import get_tool_schemas, load_plugins
+    load_plugins()
+    dynamic_tools = get_tool_schemas(0)
+    tool_names = [s["function"]["name"] for s in dynamic_tools]
+    print(f"Loaded dynamic tools: {tool_names}")
     
+    assert "capture_desktop_vision" not in tool_names, "CRITICAL: Legacy tool capture_desktop_vision found in tool registry!"
+    assert "ydotool_click" not in tool_names, "CRITICAL: Legacy tool ydotool_click found in tool registry!"
+    assert "ydotool_type" not in tool_names, "CRITICAL: Legacy tool ydotool_type found in tool registry!"
+    assert "wayland_input" not in tool_names, "CRITICAL: Legacy tool wayland_input found in tool registry!"
+    assert "interact_with_ui" in tool_names, "CRITICAL: interact_with_ui tool is missing from tool registry!"
+    print("✓ Tool registry verified: Zero legacy vision/input tools present, interact_with_ui active.")
+
     # Import and pre-warm resident AxiomGroundingEngine into CUDA memory
     from axiom.core.vision_engine.axiom_engine import AxiomGroundingEngine
     from axiom.core.vision_engine.singleton import get_grounding_engine
@@ -39,15 +42,15 @@ async def main():
     print("Pre-warming resident AxiomGroundingEngine into CUDA memory...")
     get_grounding_engine()
 
-    # Wire execute_tool directly to the live InteractWithUITool
+    # Wire execute_tool directly to the dynamic plugin system with logging
     original_execute_tool = axiom.core.plugins.execute_tool
     
     async def live_execute_tool(name: str, **kwargs):
-        if name == tool.name:
-            print(f"\n[LIVE EXECUTION] Executing live tool '{name}' with args: {kwargs}")
-            res = await tool.execute(kwargs)
+        if name == "interact_with_ui":
+            print(f"\n[LIVE EXECUTION] Executing live tool '{name}' via plugin registry with args: {kwargs}")
+            res = await original_execute_tool(name, **kwargs)
             print(f"[LIVE EXECUTION] Live tool execution returned: {res}")
-            return json.dumps(res.to_dict())
+            return res
         return await original_execute_tool(name, **kwargs)
         
     axiom.core.plugins.execute_tool = live_execute_tool
@@ -56,7 +59,7 @@ async def main():
     
     payload = {
         "stream": True,
-        "tools": [schema],
+        "tools": dynamic_tools,
         "messages": [
             {"role": "user", "content": "I have two Gemini windows open. Can you click the '+' button on the left Gemini window for me?"}
         ]
