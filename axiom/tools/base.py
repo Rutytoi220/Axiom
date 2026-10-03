@@ -22,7 +22,10 @@ class AxiomPlugin(BaseTool):
         
     @property
     def schema(self) -> Dict[str, Any]:
-        return self.plugin_parameters
+        params = self.plugin_parameters
+        if not params or not isinstance(params, dict) or params.get("type") in ("", None) or params.get("properties") is None:
+            return {"type": "object", "properties": {}}
+        return params
         
     async def execute(self, **kwargs) -> ToolResult:
         raise NotImplementedError("Plugins must implement execute(**kwargs)")
@@ -62,7 +65,10 @@ class DecoratorTool(BaseTool):
         
     @property
     def schema(self) -> dict:
-        return self._tool_parameters
+        params = self._tool_parameters
+        if not params or not isinstance(params, dict) or params.get("type") in ("", None) or params.get("properties") is None:
+            return {"type": "object", "properties": {}}
+        return params
         
     async def execute(self, params: dict) -> ToolResult:
         import inspect

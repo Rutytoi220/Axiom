@@ -1,4 +1,5 @@
 import json
+import re
 import httpx
 from typing import AsyncGenerator
 from axiom.core.plugins import get_tool_schemas, execute_tool
@@ -98,6 +99,80 @@ class NativeOrchestrator:
                             yield data
                         except json.JSONDecodeError:
                             pass
+
+        if not pending_tool_calls and collected_assistant_text:
+            full_text = "".join(collected_assistant_text).strip()
+            candidate = full_text
+            if candidate.startswith("```json"):
+                candidate = candidate[7:]
+            elif candidate.startswith("```"):
+                candidate = candidate[3:]
+            if candidate.endswith("```"):
+                candidate = candidate[:-3]
+            candidate = candidate.strip()
+
+            known_tools = set()
+            if payload.get("tools"):
+                for t in payload["tools"]:
+                    if isinstance(t, dict) and "function" in t and "name" in t["function"]:
+                        known_tools.add(t["function"]["name"])
+
+            parsed_candidates = []
+            try:
+                parsed = json.loads(candidate)
+                if isinstance(parsed, dict) and "name" in parsed:
+                    if not known_tools or parsed["name"] in known_tools:
+                        parsed_candidates.append(parsed)
+                elif isinstance(parsed, list):
+                    for item in parsed:
+                        if isinstance(item, dict) and "name" in item:
+                            if not known_tools or item["name"] in known_tools:
+                                parsed_candidates.append(item)
+            except Exception:
+                pass
+
+            if not parsed_candidates:
+                match = re.search(r'\{[\s\S]*"name"\s*:\s*"([^"]+)"[\s\S]*\}', candidate)
+                if match:
+                    try:
+                        extracted = json.loads(match.group(0).rstrip('`').strip())
+                        if isinstance(extracted, dict) and "name" in extracted:
+                            if not known_tools or extracted["name"] in known_tools:
+                                parsed_candidates.append(extracted)
+                    except Exception:
+                        pass
+
+            for idx, candidate_dict in enumerate(parsed_candidates):
+                func_name = candidate_dict.get("name")
+                func_args = candidate_dict.get("arguments", candidate_dict.get("parameters", {}))
+                func_args_str = json.dumps(func_args) if isinstance(func_args, dict) else str(func_args)
+                call_id = f"call_native_{idx}"
+                pending_tool_calls.append({
+                    "id": call_id,
+                    "type": "function",
+                    "function": {
+                        "name": func_name,
+                        "arguments": func_args_str
+                    }
+                })
+                yield {
+                    "choices": [{
+                        "delta": {
+                            "tool_calls": [{
+                                "index": idx,
+                                "id": call_id,
+                                "type": "function",
+                                "function": {
+                                    "name": func_name,
+                                    "arguments": func_args_str
+                                }
+                            }]
+                        }
+                    }]
+                }
+
+            if parsed_candidates:
+                collected_assistant_text = []
 
         if pending_tool_calls:
             assistant_msg = {

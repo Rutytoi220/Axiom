@@ -127,7 +127,7 @@ Returns:
                 if p.required:
                     required.append(p.name)
             return {'type': 'object', 'properties': properties, 'required': required}
-        return {}
+        return {'type': 'object', 'properties': {}}
 
     def add_parameter(self, param: ToolParameter) -> None:
         """Auto-generated docstring.
