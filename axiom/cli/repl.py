@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
@@ -31,6 +33,28 @@ from axiom.agents.native_orchestrator import NativeOrchestrator
 from axiom.config import get_config
 from axiom.core.plugins import get_tool_schemas, load_plugins
 from axiom.db.memory import add_message, create_session, get_session_messages
+
+# ---------------------------------------------------------------------------
+# Slash Command Registry & Autocompletion
+# ---------------------------------------------------------------------------
+
+COMMANDS = {
+    "/help": "Show available commands and usage guide",
+    "/model": "Switch the active language or vision model",
+    "/session": "Create or switch to a different conversation session",
+    "/resume": "Reload and resume the previous session history",
+    "/clear": "Clear the screen and reset the current viewport",
+    "/effort": "Adjust reasoning effort tier (low -> adhd)",
+    "/tools": "List active Three-Tier tools in registry",
+    "/exit": "Quit the AXIOM REPL cleanly",
+}
+
+slash_completer = WordCompleter(
+    list(COMMANDS.keys()),
+    meta_dict=COMMANDS,
+    sentence=True,
+    ignore_case=True,
+)
 
 # ---------------------------------------------------------------------------
 # Tokyo Night / Slate Theme Palette (High Contrast)
@@ -68,6 +92,11 @@ PROMPT_STYLE = Style.from_dict({
     "prompt-glyph": "#7aa2f7 bold",
     "prompt-prefix": "#a9b1d6",
     "": "#c0caf5",
+    "completion-menu": "bg:#1a1b26 #c0caf5",
+    "completion-menu.completion": "bg:#1a1b26 #a9b1d6",
+    "completion-menu.completion.current": "bg:#283457 #7aa2f7 bold",
+    "completion-menu.meta": "bg:#16161e #565f89 italic",
+    "completion-menu.meta.current": "bg:#283457 #7dcfff italic",
 })
 
 BANNER = (
@@ -90,6 +119,36 @@ def clear_screen() -> None:
     sys.stdout.flush()
 
 
+def ensure_ollama_running(base_url: str = "http://127.0.0.1:11434") -> bool:
+    """Checks if Ollama daemon is responsive; if not, attempts to spawn it."""
+    import urllib.request
+    clean_url = (base_url or "http://127.0.0.1:11434").rstrip("/")
+    try:
+        req = urllib.request.Request(f"{clean_url}/api/version", method="GET")
+        with urllib.request.urlopen(req, timeout=1.0) as resp:
+            if resp.status == 200:
+                return True
+    except Exception:
+        pass
+
+    try:
+        from axiom.services.ollama_monitor import OllamaHealthMonitor
+        OllamaHealthMonitor.spawn_ollama_service()
+        import time
+        for _ in range(6):
+            time.sleep(0.5)
+            try:
+                req = urllib.request.Request(f"{clean_url}/api/version", method="GET")
+                with urllib.request.urlopen(req, timeout=1.0) as resp:
+                    if resp.status == 200:
+                        return True
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return False
+
+
 class InlineRepl:
     """Manages the interactive inline terminal REPL session."""
 
@@ -107,8 +166,12 @@ class InlineRepl:
         self.prompt_session: PromptSession = PromptSession(
             history=FileHistory(str(self.history_file)),
             style=PROMPT_STYLE,
+            completer=slash_completer,
+            complete_while_typing=True,
+            auto_suggest=AutoSuggestFromHistory(),
         )
         self.is_running = True
+        ensure_ollama_running(self.config.ollama_base_url)
 
     def print_banner(self) -> None:
         console.print(BANNER)
@@ -120,13 +183,9 @@ class InlineRepl:
 
     def print_help(self) -> None:
         console.print("\n[title]Available Commands:[/title]")
-        console.print("  [#e0af68]/help[/]             [label]Show this command reference[/label]")
-        console.print("  [#e0af68]/clear[/]            [label]Clear the terminal screen[/label]")
-        console.print("  [#e0af68]/session <name>[/]   [label]Switch or create conversation session[/label]")
-        console.print("  [#e0af68]/resume[/]           [label]Display history of active session[/label]")
-        console.print("  [#e0af68]/model[/]            [label]List and select active Ollama model[/label]")
-        console.print("  [#e0af68]/tools[/]            [label]List active Three-Tier tools in registry[/label]")
-        console.print("  [#e0af68]/exit[/], [#e0af68]/quit[/]      [label]Exit AXIOM REPL[/label]\n")
+        for cmd, desc in COMMANDS.items():
+            console.print(f"  [#e0af68]{cmd:<16}[/#e0af68] [label]{desc}[/label]")
+        console.print()
 
     def handle_command(self, cmd_text: str) -> bool:
         """Handles slash commands. Returns True if handled, False otherwise."""
@@ -147,6 +206,17 @@ class InlineRepl:
 
         elif cmd == "/help":
             self.print_help()
+            return True
+
+        elif cmd == "/effort":
+            if len(parts) > 1:
+                tier = parts[1].lower()
+                setattr(self.config, "effort_tier", tier)
+                self.config.save()
+                console.print(f"[success]✓ Reasoning effort tier set to '{tier}'.[/success]\n")
+            else:
+                current = getattr(self.config, "effort_tier", "medium")
+                console.print(f"[label]Current effort tier:[/label] [value]{current}[/value]. [label]Usage: /effort <low|medium|high|ultra|adhd>[/label]\n")
             return True
 
         elif cmd == "/session":
@@ -207,6 +277,9 @@ class InlineRepl:
 
     async def stream_response(self, user_prompt: str) -> None:
         """Streams LLM tokens and reasoning blocks directly to stdout."""
+        # 0. Ensure local AI engine is responsive
+        ensure_ollama_running(self.config.ollama_base_url)
+
         # 1. Commit user message to DB
         add_message(self.session_id, "user", user_prompt)
 

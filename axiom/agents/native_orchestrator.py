@@ -43,7 +43,9 @@ class NativeOrchestrator:
             payload["tools"] = get_tool_schemas(0)
 
         from axiom.config import get_config
-        payload["model"] = get_config().ollama_model
+        config = get_config()
+        payload["model"] = config.ollama_model
+        base_url = getattr(config, "ollama_base_url", "http://127.0.0.1:11434").rstrip("/")
 
         # Scrub images from payload to prevent context-window collapse
         for msg in payload.get("messages", []):
@@ -55,63 +57,70 @@ class NativeOrchestrator:
                 msg["content"] = "\n".join(text_parts)
 
         timeout_config = httpx.Timeout(connect=10.0, read=300.0, write=20.0, pool=20.0)
-        async with httpx.AsyncClient(timeout=timeout_config) as client:
-            async with client.stream(
-                "POST",
-                "http://127.0.0.1:11434/v1/chat/completions",
-                json=payload
-            ) as resp:
-                if resp.status_code != 200:
-                    await resp.aread()
-                    yield {"choices": [{"delta": {"content": f"\n⚠️ [API Error] HTTP {resp.status_code}: {resp.text}\n"}}]}
-                    return
+        try:
+            async with httpx.AsyncClient(timeout=timeout_config) as client:
+                async with client.stream(
+                    "POST",
+                    f"{base_url}/v1/chat/completions",
+                    json=payload
+                ) as resp:
+                    if resp.status_code != 200:
+                        await resp.aread()
+                        yield {"choices": [{"delta": {"content": f"\n⚠️ [API Error] HTTP {resp.status_code}: {resp.text}\n"}}]}
+                        return
 
-                pending_tool_calls = []
-                is_reasoning = False
-                collected_assistant_text = []
+                    pending_tool_calls = []
+                    is_reasoning = False
+                    collected_assistant_text = []
 
-                async for line in resp.aiter_lines():
-                    if not line:
-                        continue
-                    if line.startswith("data: "):
-                        data_str = line[6:]
-                        if data_str == "[DONE]":
-                            break
-                        try:
-                            data = json.loads(data_str)
-                            delta = data.get("choices", [{}])[0].get("delta", {})
-                            
-                            if "reasoning_content" in delta:
-                                r_content = delta.pop("reasoning_content")
-                                if not is_reasoning:
-                                    delta["content"] = "<think>" + r_content
-                                    is_reasoning = True
-                                else:
-                                    delta["content"] = r_content
-                                    
-                            if "content" in delta and is_reasoning and not "reasoning_content" in data.get("choices", [{}])[0].get("delta", {}):
-                                delta["content"] = "</think>" + delta["content"]
-                                is_reasoning = False
+                    async for line in resp.aiter_lines():
+                        if not line:
+                            continue
+                        if line.startswith("data: "):
+                            data_str = line[6:]
+                            if data_str == "[DONE]":
+                                break
+                            try:
+                                data = json.loads(data_str)
+                                delta = data.get("choices", [{}])[0].get("delta", {})
+                                
+                                if "reasoning_content" in delta:
+                                    r_content = delta.pop("reasoning_content")
+                                    if not is_reasoning:
+                                        delta["content"] = "<think>" + r_content
+                                        is_reasoning = True
+                                    else:
+                                        delta["content"] = r_content
+                                        
+                                if "content" in delta and is_reasoning and not "reasoning_content" in data.get("choices", [{}])[0].get("delta", {}):
+                                    delta["content"] = "</think>" + delta["content"]
+                                    is_reasoning = False
 
-                            if "content" in delta and delta["content"]:
-                                collected_assistant_text.append(delta["content"])
+                                if "content" in delta and delta["content"]:
+                                    collected_assistant_text.append(delta["content"])
 
-                            if "tool_calls" in delta:
-                                for tc in delta["tool_calls"]:
-                                    idx = tc["index"]
-                                    while len(pending_tool_calls) <= idx:
-                                        pending_tool_calls.append({"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
-                                    if "id" in tc and tc["id"]:
-                                        pending_tool_calls[idx]["id"] = tc["id"]
-                                    if "function" in tc:
-                                        if "name" in tc["function"] and tc["function"]["name"]:
-                                            pending_tool_calls[idx]["function"]["name"] = tc["function"]["name"]
-                                        if "arguments" in tc["function"] and tc["function"]["arguments"]:
-                                            pending_tool_calls[idx]["function"]["arguments"] += tc["function"]["arguments"]
+                                if "tool_calls" in delta:
+                                    for tc in delta["tool_calls"]:
+                                        idx = tc["index"]
+                                        while len(pending_tool_calls) <= idx:
+                                            pending_tool_calls.append({"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+                                        if "id" in tc and tc["id"]:
+                                            pending_tool_calls[idx]["id"] = tc["id"]
+                                        if "function" in tc:
+                                            if "name" in tc["function"] and tc["function"]["name"]:
+                                                pending_tool_calls[idx]["function"]["name"] = tc["function"]["name"]
+                                            if "arguments" in tc["function"] and tc["function"]["arguments"]:
+                                                pending_tool_calls[idx]["function"]["arguments"] += tc["function"]["arguments"]
 
-                            yield data
-                        except json.JSONDecodeError:
-                            pass
+                                yield data
+                            except json.JSONDecodeError:
+                                pass
+        except httpx.ConnectError as exc:
+            yield {"choices": [{"delta": {"content": f"\n⚠️ [Connection Error] Could not connect to local AI engine at {base_url}: {exc}. Ensure Ollama is running.\n"}}]}
+            return
+        except httpx.RequestError as exc:
+            yield {"choices": [{"delta": {"content": f"\n⚠️ [Request Error] Communication failure with {base_url}: {exc}\n"}}]}
+            return
 
         if not pending_tool_calls and collected_assistant_text:
             full_text = "".join(collected_assistant_text).strip()
