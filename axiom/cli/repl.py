@@ -33,10 +33,12 @@ from axiom.core.plugins import get_tool_schemas, load_plugins
 from axiom.db.memory import add_message, create_session, get_session_messages
 
 # ---------------------------------------------------------------------------
-# Tokyo Night / Slate Theme Palette
+# Tokyo Night / Slate Theme Palette (High Contrast)
 # ---------------------------------------------------------------------------
 # Prompt glyph:         #7aa2f7 (Soft Blue)
-# Thought/Reasoning:    #565f89 (Muted Slate / Italic)
+# Labels / Subtitles:   #a9b1d6 (Crisp Readable Slate)
+# Values / Active:      #7dcfff (Vibrant Cyan)
+# Session:              #bb9af7 (Soft Lavender)
 # Tool execution badge: #e0af68 (Warm Amber)
 # Tool outputs/Success: #9ece6a (Subtle Emerald)
 # User input:           #c0caf5 (Crisp Foreground)
@@ -44,15 +46,18 @@ from axiom.db.memory import add_message, create_session, get_session_messages
 
 TOKYO_NIGHT_THEME = Theme({
     "prompt.glyph": "#7aa2f7 bold",
-    "prompt.prefix": "#565f89",
+    "prompt.prefix": "#a9b1d6",
     "user.input": "#c0caf5",
-    "reasoning": "#565f89 italic",
+    "reasoning": "#a9b1d6 italic",
     "tool.badge": "#e0af68 bold",
     "tool.name": "#e0af68",
     "tool.output": "#9ece6a",
     "success": "#9ece6a bold",
     "error": "#f7768e bold",
-    "dim": "#565f89",
+    "dim": "#a9b1d6",
+    "label": "#a9b1d6",
+    "value": "#7dcfff bold",
+    "session": "#bb9af7",
     "title": "#7aa2f7 bold",
     "accent": "#bb9af7",
 })
@@ -61,17 +66,28 @@ console = Console(theme=TOKYO_NIGHT_THEME, highlight=False)
 
 PROMPT_STYLE = Style.from_dict({
     "prompt-glyph": "#7aa2f7 bold",
-    "prompt-prefix": "#565f89",
+    "prompt-prefix": "#a9b1d6",
     "": "#c0caf5",
 })
 
-BANNER = """[#7aa2f7 bold]    _   _  _____ ___  __  __
-   / \\ \\ \\/ /_ _/ _ \\|  \\/  |
-  / _ \\ \\  / | | | | | |\\/| |
- / ___ \\/  \\ | | |_| | |  | |
-/_/   \\_/_/\\_\\___\\___/|_|  |_|[/#7aa2f7 bold]
-[#565f89]Local-First AI Orchestrator  ·  Three-Tier Semantic Automation  ·  Tokyo Night[/#565f89]
+BANNER = (
+    r"[#7aa2f7 bold]"
+    r"""
+     _   __  _____ ___  __  __ 
+    / \  \ \/ /_ _/ _ \|  \/  |
+   / _ \  \  / | | | | | |\/| |
+  / ___ \ /  \ | | |_| | |  | |
+ /_/   \_\_/\_\___\___/|_|  |_|
 """
+    r"[/#7aa2f7 bold]"
+    "\n[#a9b1d6]Local-First AI Orchestrator  ·  Three-Tier Semantic Automation  ·  Tokyo Night[/#a9b1d6]\n"
+)
+
+
+def clear_screen() -> None:
+    """Clear terminal viewport using standard ANSI escape codes."""
+    sys.stdout.write("\033[2J\033[H")
+    sys.stdout.flush()
 
 
 class InlineRepl:
@@ -97,20 +113,20 @@ class InlineRepl:
     def print_banner(self) -> None:
         console.print(BANNER)
         console.print(
-            f"[dim]Model: [/][#7dcfff]{self.config.ollama_model}[/]  ·  "
-            f"[dim]Session: [/][#9ece6a]{self.session_id[:8]}[/]  ·  "
-            f"[dim]Type [/][#e0af68]/help[/] [dim]for commands or [/][#e0af68]/exit[/] [dim]to quit.[/]\n"
+            f"[label]Model:[/label] [value]{self.config.ollama_model}[/value]  ·  "
+            f"[label]Session:[/label] [session]{self.session_id[:8]}[/session]  ·  "
+            f"[label]Type[/label] [#e0af68]/help[/#e0af68] [label]for commands or[/label] [#e0af68]/exit[/#e0af68] [label]to quit.[/label]\n"
         )
 
     def print_help(self) -> None:
         console.print("\n[title]Available Commands:[/title]")
-        console.print("  [#e0af68]/help[/]             Show this command reference")
-        console.print("  [#e0af68]/clear[/]            Clear the terminal screen")
-        console.print("  [#e0af68]/session <name>[/]   Switch or create conversation session")
-        console.print("  [#e0af68]/resume[/]           Display history of active session")
-        console.print("  [#e0af68]/model[/]            List and select active Ollama model")
-        console.print("  [#e0af68]/tools[/]            List active Three-Tier tools in registry")
-        console.print("  [#e0af68]/exit[/], [#e0af68]/quit[/]      Exit AXIOM REPL\n")
+        console.print("  [#e0af68]/help[/]             [label]Show this command reference[/label]")
+        console.print("  [#e0af68]/clear[/]            [label]Clear the terminal screen[/label]")
+        console.print("  [#e0af68]/session <name>[/]   [label]Switch or create conversation session[/label]")
+        console.print("  [#e0af68]/resume[/]           [label]Display history of active session[/label]")
+        console.print("  [#e0af68]/model[/]            [label]List and select active Ollama model[/label]")
+        console.print("  [#e0af68]/tools[/]            [label]List active Three-Tier tools in registry[/label]")
+        console.print("  [#e0af68]/exit[/], [#e0af68]/quit[/]      [label]Exit AXIOM REPL[/label]\n")
 
     def handle_command(self, cmd_text: str) -> bool:
         """Handles slash commands. Returns True if handled, False otherwise."""
@@ -125,7 +141,7 @@ class InlineRepl:
             return True
 
         elif cmd == "/clear":
-            os.system("clear")
+            clear_screen()
             self.print_banner()
             return True
 
@@ -251,7 +267,7 @@ class InlineRepl:
                 reasoning = delta.get("reasoning_content") or delta.get("reasoning")
                 if reasoning:
                     if not in_think:
-                        sys.stdout.write("\n\n  \033[38;2;86;95;137m\033[3m[Thinking] ")
+                        sys.stdout.write("\n\n  \033[38;2;169;177;214m\033[3m[Thinking] ")
                         in_think = True
                     sys.stdout.write(reasoning)
                     sys.stdout.flush()
@@ -263,7 +279,7 @@ class InlineRepl:
                         parts = content.split("<think>")
                         if parts[0]:
                             sys.stdout.write(f"\033[38;2;192;202;245m{parts[0]}")
-                        sys.stdout.write("\n\n  \033[38;2;86;95;137m\033[3m[Thinking] ")
+                        sys.stdout.write("\n\n  \033[38;2;169;177;214m\033[3m[Thinking] ")
                         in_think = True
                         if len(parts) > 1 and parts[1]:
                             sys.stdout.write(parts[1])
@@ -304,6 +320,7 @@ class InlineRepl:
 
     async def run_loop(self) -> None:
         """Main non-blocking interactive loop."""
+        clear_screen()
         self.print_banner()
 
         while self.is_running:
