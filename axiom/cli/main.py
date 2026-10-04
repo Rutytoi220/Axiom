@@ -105,6 +105,12 @@ def cmd_chat(_args: argparse.Namespace) -> None:
         server_proc.wait()
 
 
+def cmd_repl(_args: argparse.Namespace) -> None:
+    """Launch the modern inline streaming CLI (Tokyo Night theme)."""
+    from axiom.cli.repl import run_repl
+    run_repl()
+
+
 def cmd_ui(_args: argparse.Namespace) -> None:
     """Launch the AXIOM PySide6 desktop UI."""
     _panel(
@@ -299,6 +305,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", metavar="<command>")
 
     # ── Primary commands ────────────────────────────────────────────────────
+    sub.add_parser("repl",   help="Modern inline streaming CLI (Tokyo Night)")
     sub.add_parser("chat",   help="Opencode-tier TUI (default)")
     sub.add_parser("ui",     help="Launch the PySide6 desktop UI")
     sub.add_parser("server", help="Print AXIOM Distributed Server panel (stub)")
@@ -337,6 +344,7 @@ def main() -> None:
     args = parser.parse_args()
 
     dispatch = {
+        "repl":   cmd_repl,
         "chat":   cmd_chat,
         "ui":     cmd_ui,
         "server": cmd_server,

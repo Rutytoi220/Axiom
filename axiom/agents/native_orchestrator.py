@@ -14,12 +14,23 @@ class NativeOrchestrator:
             system_prompt = {
                 "role": "system",
                 "content": (
-                    "You are AXIOM, a local-first AI orchestrator. "
-                    "CRITICAL DIRECTIVE: You have access to dedicated API tools (e.g., fetch_weather) and raw shell/system tools (e.g., shell_exec, ssh, distrobox). "
-                    "You MUST ALWAYS prefer dedicated API tools. DO NOT attempt to use shell_exec, SSH, or Distrobox to run commands (like curl or python scripts) if a dedicated tool exists for the task. "
-                    "Never guess tool parameters. If a tool fails, explain the error; do not aggressively retry shell commands. "
-                    "CRITICAL: You are a text-only orchestrator and do not have the ability to view raw screenshots or calculate pixel coordinates. To interact with the desktop UI, you MUST use the 'interact_with_ui' tool and pass a semantic description of the target. The dedicated vision subsystem will handle the math. "
-                    "CRITICAL RULE: NEVER use the ask_human tool to ask the user for screen coordinates, visual layouts, or UI element locations. To interact with the screen, call the `interact_with_ui` tool and provide a precise text instruction of what you want to click or type. The dedicated vision subsystem will handle the spatial coordinates."
+                    "You are AXIOM, a local-first AI orchestrator with a strict Three-Tier Automation Hierarchy.\n\n"
+                    "THREE-TIER AUTOMATION DIRECTIVES:\n"
+                    "1. TIER 1 (System IPC - hyprctl): For managing windows, switching workspaces, focusing applications, "
+                    "querying window geometry, or window state, ALWAYS use the 'manage_desktop_window' tool. "
+                    "NEVER simulate mouse clicks or visual coordinates for window/workspace management.\n"
+                    "2. TIER 2 (Semantic UI - Chrome DevTools Protocol): For interacting with web browsers (Zen Browser, "
+                    "Chrome, Brave, Chromium) or web applications (e.g. Monkeytype, Gemini web, YouTube, web forms) and "
+                    "Electron apps, ALWAYS use the 'interact_with_browser' tool. It executes sub-10ms deterministic "
+                    "clicks, typing, and JS evaluations via DOM selectors.\n"
+                    "3. TIER 3 (Vision Fallback - Grounding Engine): If and ONLY if the target application has NO DOM or IPC "
+                    "interface (e.g., native non-accessible binaries, games, raw canvas, or legacy applications), use the "
+                    "'interact_with_ui' tool. It captures a screen buffer and calculates spatial coordinates.\n\n"
+                    "GENERAL DIRECTIVES:\n"
+                    "- ALWAYS prefer dedicated API tools over raw shell commands. DO NOT attempt to use shell_exec, SSH, or Distrobox "
+                    "if a dedicated tool exists for the task.\n"
+                    "- Never guess tool parameters. If a tool fails, explain the error; do not aggressively retry shell commands.\n"
+                    "- CRITICAL RULE: NEVER use the ask_human tool to ask the user for screen coordinates or UI element locations."
                 )
             }
             
@@ -28,6 +39,8 @@ class NativeOrchestrator:
             else:
                 payload["messages"][0]["content"] += f"\n\n{system_prompt['content']}"
 
+        if not payload.get("tools"):
+            payload["tools"] = get_tool_schemas(0)
 
         from axiom.config import get_config
         payload["model"] = get_config().ollama_model
@@ -211,3 +224,58 @@ class NativeOrchestrator:
 
             async for chunk in self.generate_stream(payload, depth=depth + 1):
                 yield chunk
+
+    @staticmethod
+    def route_tier(task_description: str) -> str:
+        """Determines the automation tier based on task description.
+
+        Returns:
+            'tier1_ipc': For window/workspace management -> manage_desktop_window
+            'tier2_browser': For browser/web/DOM interaction -> interact_with_browser
+            'tier3_vision': Fallback for non-accessible canvas/games -> interact_with_ui
+        """
+        task_lower = task_description.lower().strip()
+
+        # Tier 3 explicit overrides (no DOM, canvas, game, pixel, screen coordinates, legacy)
+        tier3_overrides = [
+            r"\b(no dom|without dom|non-accessible|canvas|opengl|vulkan|game|spaceship|pixel|coordinates|legacy binary)\b",
+            r"\b(grounding|vision engine|screenshot)\b",
+        ]
+        for pattern in tier3_overrides:
+            if re.search(pattern, task_lower):
+                return "tier3_vision"
+
+        # Tier 1 indicators (Window management & Hyprland IPC)
+        tier1_patterns = [
+            r"\b(window|windows|workspace|workspaces|fullscreen|floating|tile|tiling)\b",
+            r"\b(focus|switch to|move to|close)\s+(window|workspace)\b",
+            r"\b(active window|list windows|hyprctl|hyprland)\b",
+        ]
+        for pattern in tier1_patterns:
+            if re.search(pattern, task_lower):
+                return "tier1_ipc"
+
+        # Tier 2 indicators (Web browser, DOM, CDP, web apps)
+        tier2_patterns = [
+            r"\b(browser|chrome|chromium|brave|zen|firefox|monkeytype|gemini|youtube|electron)\b",
+            r"\b(dom|html|css selector|website|webpage|web page|web app|tab|url|href)\b",
+            r"\b(inspect|evaluate|javascript|js)\b",
+        ]
+        for pattern in tier2_patterns:
+            if re.search(pattern, task_lower):
+                return "tier2_browser"
+
+        # Tier 3 (Vision fallback)
+        return "tier3_vision"
+
+    @classmethod
+    def get_tier_tool(cls, task_description: str) -> str:
+        """Returns the primary tool name corresponding to the routed tier."""
+        tier = cls.route_tier(task_description)
+        tier_map = {
+            "tier1_ipc": "manage_desktop_window",
+            "tier2_browser": "interact_with_browser",
+            "tier3_vision": "interact_with_ui",
+        }
+        return tier_map.get(tier, "interact_with_ui")
+
