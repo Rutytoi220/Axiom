@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -471,7 +472,7 @@ def create_tui_app() -> Application[None]:
 
     # Forward declaration for background sender
     async def send_to_backend(content_payload: str, app: Application[None]) -> None:
-        global last_ai_response, current_tool_status
+        global CURRENT_SESSION_ID, last_ai_response, current_tool_status
         system_messages = []
         if CURRENT_COGNITIVE_MODE != "Standard":
             mode_key = CURRENT_COGNITIVE_MODE.replace(" [BETA]", "").lower()
@@ -678,7 +679,7 @@ def create_tui_app() -> Application[None]:
 
     # 3. TextArea (Input field for user prompt)
     def handle_accept(buff: Any) -> bool:
-        global last_ai_response, CURRENT_EFFORT, CURRENT_COGNITIVE_MODE, active_modal, effort_index, MODAL_VISIBLE
+        global CURRENT_SESSION_ID, last_ai_response, CURRENT_EFFORT, CURRENT_COGNITIVE_MODE, active_modal, effort_index, MODAL_VISIBLE
         text = buff.text.strip()
         buff.text = ""
         if not text:
