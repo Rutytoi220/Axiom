@@ -785,6 +785,7 @@ def create_tui_app() -> Application[None]:
                     app.layout.focus(modal_search_field)
                 except Exception:
                     pass
+                app.create_background_task(fetch_local_models())
                 app.invalidate()
                 return False
             if cmd == "/effort":
@@ -1319,6 +1320,11 @@ async def fetch_local_models():
     
     filtered_model_list = model_list.copy()
     model_index = 0
+    try:
+        from prompt_toolkit.application.current import get_app
+        get_app().invalidate()
+    except Exception:
+        pass
 
 
 async def background_animation_loop(app: Application[None]) -> None:
@@ -1332,7 +1338,6 @@ async def background_animation_loop(app: Application[None]) -> None:
 async def async_run_tui() -> None:
     """Run the TUI application asynchronously."""
     app = create_tui_app()
-    app.create_background_task(fetch_local_models())
     app.create_background_task(background_animation_loop(app))
     await app.run_async()
 

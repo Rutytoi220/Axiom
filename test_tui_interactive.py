@@ -43,7 +43,18 @@ def test_tui_interactive_flow():
         # Let the interface settle for 1 second
         time.sleep(1.0)
 
-        # 4. Exit cleanly via Ctrl+C
+        # 4. Test /model JIT fetching
+        print("\n>>> Testing /model command (JIT Fetching)...")
+        child.send("/model\r")
+        child.expect(r"Available Models:", timeout=5)
+        print("\n>>> /model modal successfully opened!")
+        
+        # Test escape key to close modal
+        print("\n>>> Testing modal escape...")
+        child.send("\x1b")
+        time.sleep(0.5)
+
+        # 5. Exit cleanly via Ctrl+C
         print("\n>>> Sending Ctrl+C to terminate TUI cleanly...")
         child.send("\x03")
         child.expect(pexpect.EOF, timeout=5)
