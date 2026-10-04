@@ -125,16 +125,31 @@ class InteractWithUITool(BaseTool):
         try:
             img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
             
-            # VRAM Juggling: Evict Ollama model from VRAM before loading the 6GB grounding engine
+            # VRAM Juggling: Evict Ollama models from VRAM before loading the 6GB grounding engine
             logger.info("Evicting Ollama model from VRAM...")
             try:
                 config = get_config()
+                base_url = getattr(config, "ollama_base_url", "http://127.0.0.1:11434").rstrip("/")
                 async with httpx.AsyncClient() as client:
                     await client.post(
-                        "http://127.0.0.1:11434/api/generate",
+                        f"{base_url}/api/generate",
                         json={"model": config.ollama_model, "keep_alive": 0},
                         timeout=5.0
                     )
+                    # Check and evict any other running models
+                    try:
+                        ps_resp = await client.get(f"{base_url}/api/ps", timeout=2.0)
+                        if ps_resp.status_code == 200:
+                            for m in ps_resp.json().get("models", []):
+                                m_name = m.get("name") or m.get("model")
+                                if m_name and m_name != config.ollama_model:
+                                    await client.post(
+                                        f"{base_url}/api/generate",
+                                        json={"model": m_name, "keep_alive": 0},
+                                        timeout=3.0
+                                    )
+                    except Exception:
+                        pass
                 await asyncio.sleep(1.0) # Allow GPU memory to clear
             except Exception as e:
                 logger.warning(f"Failed to evict Ollama model from VRAM: {e}")

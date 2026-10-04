@@ -149,6 +149,78 @@ def ensure_ollama_running(base_url: str = "http://127.0.0.1:11434") -> bool:
     return False
 
 
+def select_model_interactive(models: List[str], active_model: str) -> Optional[str]:
+    """Interactive inline model selector using Tokyo Night palette and ANSI cursor keys."""
+    import select
+    import termios
+    import tty
+
+    if not models or not sys.stdin.isatty():
+        return models[0] if models else None
+
+    idx = 0
+    if active_model in models:
+        idx = models.index(active_model)
+
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    num_lines = len(models)
+
+    def render_list(current_idx: int) -> None:
+        for i, m in enumerate(models):
+            is_active = (m == active_model)
+            if i == current_idx:
+                tag = " \033[38;2;187;154;247m(active)\033[0m" if is_active else ""
+                sys.stdout.write(f"  \033[38;2;122;162;247m\033[1m▶ \033[0m\033[38;2;125;207;255m\033[1m{m}\033[0m{tag}\r\n")
+            else:
+                tag = " \033[38;2;169;177;214m\033[2m(active)\033[0m" if is_active else ""
+                sys.stdout.write(f"    \033[38;2;169;177;214m{m}\033[0m{tag}\r\n")
+        sys.stdout.flush()
+
+    try:
+        tty.setraw(fd)
+        sys.stdout.write("\033[?25l")  # Hide cursor
+        sys.stdout.write("\r\n\033[38;2;122;162;247m\033[1mSelect Model\033[0m \033[38;2;169;177;214m(↑/↓: navigate, Enter: confirm, Esc: cancel)\033[0m\r\n")
+        render_list(idx)
+
+        while True:
+            r, _, _ = select.select([sys.stdin], [], [], None)
+            ch = sys.stdin.read(1)
+
+            if ch == "\x1b":
+                r2, _, _ = select.select([sys.stdin], [], [], 0.05)
+                if r2:
+                    c2 = sys.stdin.read(1)
+                    if c2 in ("[", "O"):
+                        c3 = sys.stdin.read(1)
+                        if c3 == "A":  # Up
+                            idx = (idx - 1) % num_lines
+                        elif c3 == "B":  # Down
+                            idx = (idx + 1) % num_lines
+                    sys.stdout.write(f"\033[{num_lines}A\r")
+                    render_list(idx)
+                else:
+                    return None  # Standalone Esc
+            elif ch in ("\r", "\n"):
+                return models[idx]
+            elif ch == "\x03":  # Ctrl+C
+                return None
+            elif ch in ("k", "K"):
+                idx = (idx - 1) % num_lines
+                sys.stdout.write(f"\033[{num_lines}A\r")
+                render_list(idx)
+            elif ch in ("j", "J"):
+                idx = (idx + 1) % num_lines
+                sys.stdout.write(f"\033[{num_lines}A\r")
+                render_list(idx)
+    finally:
+        # Erase the selection lines and restore cursor
+        sys.stdout.write(f"\033[{num_lines + 2}A\r\033[J")
+        sys.stdout.write("\033[?25h")
+        sys.stdout.flush()
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+
 class InlineRepl:
     """Manages the interactive inline terminal REPL session."""
 
@@ -246,17 +318,30 @@ class InlineRepl:
             return True
 
         elif cmd == "/model":
+            if len(parts) > 1:
+                target_model = parts[1].strip()
+                self.config.ollama_model = target_model
+                self.config.save()
+                console.print(f"[success]✓ Switched model to: {target_model}[/success]\n")
+                return True
+
             import httpx
             try:
+                base_url = getattr(self.config, "ollama_base_url", "http://127.0.0.1:11434").rstrip("/")
                 with httpx.Client(timeout=3.0) as client:
-                    resp = client.get(f"{self.config.ollama_base_url}/api/tags")
+                    resp = client.get(f"{base_url}/api/tags")
                     if resp.status_code == 200:
                         models = [m["name"] for m in resp.json().get("models", [])]
-                        console.print(f"\n[title]Available Models on {self.config.ollama_base_url}:[/title]")
-                        for m in models:
-                            active = " [success](active)[/success]" if m == self.config.ollama_model else ""
-                            console.print(f"  · [#c0caf5]{m}[/]{active}")
-                        console.print()
+                        if not models:
+                            console.print("[error]No models found in Ollama.[/error]\n")
+                            return True
+                        selected = select_model_interactive(models, self.config.ollama_model)
+                        if selected:
+                            self.config.ollama_model = selected
+                            self.config.save()
+                            console.print(f"[success]✓ Switched model to: {selected}[/success]\n")
+                        else:
+                            console.print("[dim]Model selection cancelled.[/dim]\n")
                         return True
             except Exception as e:
                 console.print(f"[error]Could not connect to Ollama: {e}[/error]\n")

@@ -56,6 +56,20 @@ class NativeOrchestrator:
                 text_parts = [c.get("text", "") for c in msg["content"] if c.get("type") == "text"]
                 msg["content"] = "\n".join(text_parts)
 
+        # Enforce Two-Brain VRAM Eviction: Evict vision engine from CUDA memory before text streaming
+        try:
+            from axiom.core.vision_engine.singleton import evict_grounding_engine
+            evict_grounding_engine()
+        except Exception:
+            pass
+
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        # Enforce 100% GPU layer offload in Ollama
+        payload.setdefault("options", {})["num_gpu"] = 99
+
         timeout_config = httpx.Timeout(connect=10.0, read=300.0, write=20.0, pool=20.0)
         try:
             async with httpx.AsyncClient(timeout=timeout_config) as client:

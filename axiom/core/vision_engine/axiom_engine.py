@@ -25,6 +25,8 @@ import transformers.modeling_utils
 transformers.modeling_utils.caching_allocator_warmup = lambda *args, **kwargs: None
 
 class AxiomGroundingEngine:
+    _instance: Any = None
+
     def __init__(self, model_id: str = "openbmb/MiniCPM-V-2_6", adapter_path: str = "/home/rutytoi/qwen_experiments/checkpoints/best_vlm_adapter.pt", device: str = "cuda"):
         self.device = device
         
@@ -63,7 +65,20 @@ class AxiomGroundingEngine:
         self.model = SpotlessMiniCPMV(base_vlm, adapter, processor=self.processor)
         self.model.eval()
 
+        AxiomGroundingEngine._instance = self
         self._warmup()
+
+    def unload(self):
+        """Unload vision model tensors from CUDA memory."""
+        import gc
+        if hasattr(self, "model"):
+            del self.model
+        if hasattr(self, "processor"):
+            del self.processor
+        AxiomGroundingEngine._instance = None
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def _warmup(self):
         print(">>> Warming up engine...")
