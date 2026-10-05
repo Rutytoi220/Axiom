@@ -12,14 +12,17 @@ import os
 import re
 import sys
 import uuid
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.history import FileHistory
+from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style
 from rich.console import Console
 from rich.markdown import Markdown
@@ -45,6 +48,7 @@ COMMANDS = {
     "/resume": "Reload and resume the previous session history",
     "/clear": "Clear the screen and reset the current viewport",
     "/effort": "Adjust reasoning effort tier (low -> adhd)",
+    "/thought": "Display the last reasoning trace (or toggle with Ctrl+O)",
     "/tools": "List active Three-Tier tools in registry",
     "/memory": "Manage persistent semantic memories (/memory list, /memory add <fact>)",
     "/rules": "Display active global and local project instructions",
@@ -52,9 +56,10 @@ COMMANDS = {
 }
 
 slash_completer = WordCompleter(
-    list(COMMANDS.keys()) + ["/memory list", "/memory add"],
+    list(COMMANDS.keys()) + ["/memory list", "/memory add", "/thought toggle"],
     meta_dict={
         **COMMANDS,
+        "/thought toggle": "Toggle reasoning visibility (Expanded <-> Collapsed)",
         "/memory list": "Display all stored semantic memories",
         "/memory add": "Store a permanent fact in semantic memory",
     },
@@ -241,21 +246,41 @@ class InlineRepl:
         self.orchestrator = NativeOrchestrator()
         load_plugins()
 
+        self.last_thought: str = ""
+        kb = KeyBindings()
+
+        @kb.add("c-o")
+        def _toggle_thinking(event):
+            run_in_terminal(self.toggle_thinking)
+
         self.prompt_session: PromptSession = PromptSession(
             history=FileHistory(str(self.history_file)),
             style=PROMPT_STYLE,
             completer=slash_completer,
             complete_while_typing=True,
             auto_suggest=AutoSuggestFromHistory(),
+            key_bindings=kb,
         )
         self.is_running = True
         ensure_ollama_running(self.config.ollama_base_url)
 
+    def toggle_thinking(self) -> bool:
+        """Toggles thinking visibility between expanded and collapsed, and saves to config."""
+        self.config.show_thinking = not getattr(self.config, "show_thinking", True)
+        self.config.save()
+        state_label = "EXPANDED" if self.config.show_thinking else "COLLAPSED"
+        console.print(f"\n[#7aa2f7]🧠 Thinking visibility set to:[/] [#7dcfff]{state_label}[/] [dim](saved to config)[/dim]")
+        if self.config.show_thinking and self.last_thought:
+            console.print(f"[dim italic #7982a9]▾ Last Thought Trace:\n{self.last_thought}[/]\n[dim #3b4261]───[/]\n")
+        return self.config.show_thinking
+
     def print_banner(self) -> None:
         console.print(BANNER)
+        think_mode = "Expanded" if getattr(self.config, "show_thinking", True) else "Collapsed"
         console.print(
             f"[label]Model:[/label] [value]{self.config.ollama_model}[/value]  ·  "
             f"[label]Session:[/label] [session]{self.session_id[:8]}[/session]  ·  "
+            f"[label]Thinking:[/label] [value]{think_mode}[/value] [dim](Ctrl+O)[/dim]  ·  "
             f"[label]Type[/label] [#e0af68]/help[/#e0af68] [label]for commands or[/label] [#e0af68]/exit[/#e0af68] [label]to quit.[/label]\n"
         )
 
@@ -416,6 +441,16 @@ class InlineRepl:
                 console.print("[dim](None defined: create AXIOM.md or .axiomrules in workspace)[/dim]\n")
             return True
 
+        elif cmd in ("/thought", "/think"):
+            if len(parts) > 1 and parts[1].lower() in ("toggle", "t"):
+                self.toggle_thinking()
+                return True
+            if self.last_thought:
+                console.print(f"\n[dim italic #7982a9]▾ Last Thought Trace:\n{self.last_thought}[/]\n[dim #3b4261]───[/]\n")
+            else:
+                console.print("[dim]No thought trace stored from the last response.[/dim]\n")
+            return True
+
         return False
 
     async def stream_response(self, user_prompt: str) -> None:
@@ -443,6 +478,8 @@ class InlineRepl:
         original_execute = nat_orch.execute_tool
 
         async def inline_execute_tool(name: str, **kwargs):
+            if in_think:
+                end_thought()
             hint = f"Executing {name}..."
             console.print(f"\n  [tool.badge]⚡ Tool Dispatch:[/tool.badge] [tool.name]{name}[/tool.name] [dim]{json.dumps(kwargs)}[/dim]")
             with console.status(f"  [#e0af68]{hint}[/#e0af68]", spinner="dots"):
@@ -456,13 +493,77 @@ class InlineRepl:
 
         nat_orch.execute_tool = inline_execute_tool
 
-        # 4. Stream tokens
+        # 4. Stream tokens & manage collapsible reasoning
+        show_thinking = getattr(self.config, "show_thinking", True)
         in_think = False
+        think_source: Optional[str] = None
+        thought_start_time: Optional[float] = None
+        thought_token_count = 0
+        last_thought_buffer: List[str] = []
+        axiom_header_printed = False
         full_content: List[str] = []
         tool_calls_emitted: List[Dict[str, Any]] = []
 
-        console.print("\n[#7aa2f7]◈ Axiom:[/#7aa2f7] ", end="")
-        sys.stdout.flush()
+        def ensure_axiom_header(for_thinking: bool = False) -> None:
+            nonlocal axiom_header_printed
+            if not axiom_header_printed:
+                if for_thinking:
+                    console.print("\n[#7aa2f7]◈ Axiom:[/#7aa2f7]")
+                else:
+                    console.print("\n[#7aa2f7]◈ Axiom:[/#7aa2f7] ", end="")
+                    sys.stdout.flush()
+                axiom_header_printed = True
+
+        def start_thought(source: str = "tag") -> None:
+            nonlocal in_think, thought_start_time, think_source
+            if not in_think:
+                in_think = True
+                think_source = source
+                if thought_start_time is None:
+                    thought_start_time = time.time()
+                ensure_axiom_header(for_thinking=True)
+                if show_thinking:
+                    console.print("[dim italic #7982a9]▾ Thinking:[/]")
+                else:
+                    sys.stdout.write(f"\r  \033[38;2;121;130;169m\033[3mThinking... ({thought_token_count} tokens)\033[0m")
+                    sys.stdout.flush()
+
+        def append_thought(text: str) -> None:
+            nonlocal thought_token_count
+            if not text:
+                return
+            last_thought_buffer.append(text)
+            words = re.findall(r"\w+|[^\w\s]", text)
+            thought_token_count += len(words) if words else (1 if text.strip() else 0)
+            if show_thinking:
+                sys.stdout.write(f"\033[38;2;121;130;169m\033[3m{text}\033[0m")
+                sys.stdout.flush()
+            else:
+                sys.stdout.write(f"\r\033[K  \033[38;2;121;130;169m\033[3mThinking... ({thought_token_count} tokens)\033[0m")
+                sys.stdout.flush()
+
+        def end_thought() -> None:
+            nonlocal in_think, think_source
+            if in_think:
+                in_think = False
+                think_source = None
+                elapsed = max(0.1, time.time() - (thought_start_time or time.time()))
+                if show_thinking:
+                    console.print("\n[dim #3b4261]───[/]\n")
+                else:
+                    sys.stdout.write("\r\033[K")
+                    sys.stdout.flush()
+                    console.print(f"[dim italic #7982a9]▾ Thought for {elapsed:.1f}s ({thought_token_count} tokens) [Ctrl+O to view][/]\n")
+
+        def append_content(text: str) -> None:
+            if not text:
+                return
+            if in_think:
+                end_thought()
+            ensure_axiom_header(for_thinking=False)
+            sys.stdout.write(f"\033[38;2;192;202;245m{text}")
+            sys.stdout.flush()
+            full_content.append(text)
 
         try:
             async for chunk in self.orchestrator.generate_stream(payload):
@@ -474,62 +575,67 @@ class InlineRepl:
 
                 # Tool calls capture
                 if "tool_calls" in delta:
+                    if in_think:
+                        end_thought()
                     for tc in delta["tool_calls"]:
                         fn = tc.get("function", {})
                         if fn.get("name"):
                             tool_calls_emitted.append(fn)
 
-                # Reasoning delta capture
+                # Reasoning delta capture (field-based)
                 reasoning = delta.get("reasoning_content") or delta.get("reasoning")
                 if reasoning:
                     if not in_think:
-                        sys.stdout.write("\n\n  \033[38;2;169;177;214m\033[3m[Thinking] ")
-                        in_think = True
-                    sys.stdout.write(reasoning)
-                    sys.stdout.flush()
+                        start_thought(source="field")
+                    append_thought(reasoning)
+                elif in_think and think_source == "field":
+                    end_thought()
 
-                content = delta.get("content", "")
-                if content:
-                    # Check if transitioning out of <think> tag
-                    if "<think>" in content:
-                        parts = content.split("<think>")
-                        if parts[0]:
-                            sys.stdout.write(f"\033[38;2;192;202;245m{parts[0]}")
-                        sys.stdout.write("\n\n  \033[38;2;169;177;214m\033[3m[Thinking] ")
-                        in_think = True
-                        if len(parts) > 1 and parts[1]:
-                            sys.stdout.write(parts[1])
-                        sys.stdout.flush()
-                        continue
+                raw_content = delta.get("content", "")
+                if raw_content:
+                    if in_think and think_source == "field":
+                        end_thought()
 
-                    if "</think>" in content:
-                        parts = content.split("</think>")
-                        if in_think and parts[0]:
-                            sys.stdout.write(parts[0])
-                        sys.stdout.write("\033[0m\n\n\033[38;2;192;202;245m")
-                        in_think = False
-                        if len(parts) > 1 and parts[1]:
-                            sys.stdout.write(parts[1])
-                            full_content.append(parts[1])
-                        sys.stdout.flush()
-                        continue
-
-                    if in_think:
-                        sys.stdout.write(content)
-                    else:
-                        sys.stdout.write(f"\033[38;2;192;202;245m{content}")
-                        full_content.append(content)
-                    sys.stdout.flush()
+                    cursor = 0
+                    while cursor < len(raw_content):
+                        if not in_think:
+                            if "<think>" in raw_content[cursor:]:
+                                idx = raw_content.find("<think>", cursor)
+                                before = raw_content[cursor:idx]
+                                if before:
+                                    append_content(before)
+                                start_thought(source="tag")
+                                cursor = idx + len("<think>")
+                            else:
+                                append_content(raw_content[cursor:])
+                                break
+                        else:
+                            if "</think>" in raw_content[cursor:]:
+                                idx = raw_content.find("</think>", cursor)
+                                thought_chunk = raw_content[cursor:idx]
+                                if thought_chunk:
+                                    append_thought(thought_chunk)
+                                end_thought()
+                                cursor = idx + len("</think>")
+                            else:
+                                append_thought(raw_content[cursor:])
+                                break
 
         except Exception as e:
             console.print(f"\n[error]Streaming error: {e}[/error]")
         finally:
+            if in_think:
+                end_thought()
             # Reset formatting
             sys.stdout.write("\033[0m\n\n")
             sys.stdout.flush()
             nat_orch.execute_tool = original_execute
 
-        # 5. Persist assistant output to DB
+        # 5. Store accumulated reasoning trace for inspection / Ctrl+O
+        if last_thought_buffer:
+            self.last_thought = "".join(last_thought_buffer).strip()
+
+        # 6. Persist assistant output to DB
         final_text = "".join(full_content).strip()
         if final_text:
             add_message(self.session_id, "assistant", final_text)

@@ -54,6 +54,7 @@ Returns:
     sandbox_mode: bool = True
     allow_system_tools: bool = True
     max_vector_memories: int = 5000
+    show_thinking: bool = True
     
     # UI / GUI Settings
     first_launch: bool = True
@@ -149,43 +150,50 @@ Returns:
             'engine_mode': self.engine_mode,
             'remote_server_ip': self.remote_server_ip,
             'disabled_plugins': self.disabled_plugins,
-            'model_usage_counts': self.model_usage_counts
+            'model_usage_counts': self.model_usage_counts,
+            'show_thinking': self.show_thinking,
         }
 
     def save(self) -> None:
-        """Save configuration to ~/.config/ChienGPT/config.json."""
+        """Save configuration to ~/.config/axiom/config.json and ~/.config/ChienGPT/config.json."""
         import json
         from pathlib import Path
-        config_dir = CONFIG_DIR
-        config_dir.mkdir(parents=True, exist_ok=True)
-        config_path = config_dir / "config.json"
-        
-        try:
-            with open(config_path, 'w', encoding='utf-8') as f:
-                json.dump(self.to_dict(), f, indent=4)
-        except Exception as e:
-            print(f"Failed to save AXIOM config: {e}")
+        data = self.to_dict()
+        paths = [
+            Path.home() / ".config" / "axiom" / "config.json",
+            CONFIG_DIR / "config.json",
+        ]
+        for p in paths:
+            try:
+                p.parent.mkdir(parents=True, exist_ok=True)
+                with open(p, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=4)
+            except Exception as e:
+                print(f"Failed to save AXIOM config to {p}: {e}")
 
     @classmethod
     def load(cls) -> 'AxiomConfig':
-        """Load configuration from ~/.config/ChienGPT/config.json."""
+        """Load configuration from ~/.config/axiom/config.json or ~/.config/ChienGPT/config.json."""
         import json
         from pathlib import Path
-        config_path = CONFIG_DIR / "config.json"
-        
-        if config_path.exists():
-            try:
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                if 'oobe_completed' not in data:
-                    # Migrating a pre-v11 install: if the legacy UI config already
-                    # exists, this user was already onboarded once and should not
-                    # be forced through the new wizard again.
-                    legacy_ui_config = CONFIG_DIR / "ui_config.json"
-                    data['oobe_completed'] = legacy_ui_config.exists()
-                return cls.from_dict(data)
-            except Exception as e:
-                print(f"Failed to load AXIOM config: {e}")
+        paths = [
+            Path.home() / ".config" / "axiom" / "config.json",
+            CONFIG_DIR / "config.json",
+        ]
+        for config_path in paths:
+            if config_path.exists():
+                try:
+                    with open(config_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    if 'oobe_completed' not in data:
+                        # Migrating a pre-v11 install: if the legacy UI config already
+                        # exists, this user was already onboarded once and should not
+                        # be forced through the new wizard again.
+                        legacy_ui_config = config_path.parent / "ui_config.json"
+                        data['oobe_completed'] = legacy_ui_config.exists()
+                    return cls.from_dict(data)
+                except Exception as e:
+                    print(f"Failed to load AXIOM config from {config_path}: {e}")
         return cls()
 
 _config = AxiomConfig.load()
