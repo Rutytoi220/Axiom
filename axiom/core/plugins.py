@@ -20,6 +20,33 @@ def load_plugins() -> None:
 
     TOOLS_DIR.mkdir(parents=True, exist_ok=True)
     
+    # Ensure core semantic memory tool is provisioned
+    rem_fact_file = TOOLS_DIR / "remember_fact.py"
+    if not rem_fact_file.exists():
+        rem_fact_code = (
+            "import json\n"
+            "from axiom.tools.memory import RememberFactTool\n\n"
+            "_tool = RememberFactTool()\n\n"
+            "TOOL_SCHEMA = {\n"
+            '    "type": "function",\n'
+            '    "function": {\n'
+            '        "name": _tool.name,\n'
+            '        "description": _tool.description,\n'
+            '        "parameters": _tool.schema,\n'
+            "    }\n"
+            "}\n"
+            'TUI_HINT = "🧠 Remembering fact in semantic memory..."\n'
+            "REQUIRED_RING = 0\n\n"
+            "async def execute(fact: str = '', **kwargs) -> str:\n"
+            '    params = {"fact": fact, **kwargs}\n'
+            "    res = await _tool.execute(params)\n"
+            "    return json.dumps(res.to_dict(tool=_tool.name, arguments=params))\n"
+        )
+        try:
+            rem_fact_file.write_text(rem_fact_code, encoding="utf-8")
+        except Exception:
+            pass
+
     for path in TOOLS_DIR.glob("*.py"):
         if path.name.startswith("__"):
             continue

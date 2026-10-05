@@ -39,19 +39,25 @@ from axiom.db.memory import add_message, create_session, get_session_messages
 # ---------------------------------------------------------------------------
 
 COMMANDS = {
-    "/help": "Show available commands and usage guide",
+    "/help": "Show this command reference and usage guide",
     "/model": "Switch the active language or vision model",
     "/session": "Create or switch to a different conversation session",
     "/resume": "Reload and resume the previous session history",
     "/clear": "Clear the screen and reset the current viewport",
     "/effort": "Adjust reasoning effort tier (low -> adhd)",
     "/tools": "List active Three-Tier tools in registry",
+    "/memory": "Manage persistent semantic memories (/memory list, /memory add <fact>)",
+    "/rules": "Display active global and local project instructions",
     "/exit": "Quit the AXIOM REPL cleanly",
 }
 
 slash_completer = WordCompleter(
-    list(COMMANDS.keys()),
-    meta_dict=COMMANDS,
+    list(COMMANDS.keys()) + ["/memory list", "/memory add"],
+    meta_dict={
+        **COMMANDS,
+        "/memory list": "Display all stored semantic memories",
+        "/memory add": "Store a permanent fact in semantic memory",
+    },
     sentence=True,
     ignore_case=True,
 )
@@ -356,6 +362,58 @@ class InlineRepl:
                 desc = fn.get("description", "")
                 console.print(f"  [tool.badge]•[/tool.badge] [tool.name]{name}[/tool.name]: [dim]{desc}[/dim]")
             console.print()
+            return True
+
+        elif cmd == "/memory":
+            subcmd = parts[1].lower().strip() if len(parts) > 1 else "list"
+            if subcmd == "list":
+                from axiom.memory.semantic import get_all_memories
+                mems = get_all_memories()
+                if not mems:
+                    console.print("[dim]No persistent semantic memories stored yet.[/dim]\n")
+                else:
+                    console.print(f"\n[title]Stored Semantic Memories ({len(mems)}):[/title]")
+                    for m in mems:
+                        mem_id = m.get("id")
+                        created = m.get("created_at", "")
+                        content = m.get("content", "")
+                        console.print(f"  [value]#{mem_id}[/value] [dim]({created})[/dim]: [#c0caf5]{content}[/]")
+                    console.print()
+                return True
+            elif subcmd == "add":
+                fact = cmd_text.strip().split("add", 1)[1].strip() if "add" in cmd_text else ""
+                if not fact:
+                    console.print("[error]Usage: /memory add <fact to remember>[/error]\n")
+                    return True
+                from axiom.memory.semantic import add_memory
+                mem_id = add_memory(fact)
+                console.print(f"[success]✓ Remembered permanent fact (#{mem_id}):[/success] [value]{fact}[/value]\n")
+                return True
+            else:
+                console.print("[error]Usage: /memory [list | add <fact>][/error]\n")
+                return True
+
+        elif cmd == "/rules":
+            from axiom.core.instructions import InstructionManager
+            im = InstructionManager()
+            console.print(f"\n[title]Active AXIOM Rules & Instructions:[/title]\n")
+
+            global_text = im.get_global_instructions()
+            proj_path = im.get_project_instructions_path()
+            proj_text = im.get_project_instructions()
+
+            console.print(f"[label]Global Instructions[/label] [dim]({im.global_path}):[/dim]")
+            if global_text:
+                console.print(f"[#c0caf5]{global_text}[/]\n")
+            else:
+                console.print("[dim](None defined)[/dim]\n")
+
+            proj_label = f"({proj_path})" if proj_path else "(None found in workspace)"
+            console.print(f"[label]Project Workspace Rules[/label] [dim]{proj_label}:[/dim]")
+            if proj_text:
+                console.print(f"[#c0caf5]{proj_text}[/]\n")
+            else:
+                console.print("[dim](None defined: create AXIOM.md or .axiomrules in workspace)[/dim]\n")
             return True
 
         return False

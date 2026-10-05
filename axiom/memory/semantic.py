@@ -284,3 +284,223 @@ class SemanticIndex:
         if not embedding:
             return []
         return await self.search(db, embedding, owner_type=owner_type, top_k=top_k)
+
+
+# ---------------------------------------------------------------------------
+# Persistent SQLite Semantic Vector Memory Engine
+# ---------------------------------------------------------------------------
+
+import struct
+import re
+from collections import Counter
+import httpx
+from axiom.db.memory import get_db_path, get_connection, init_db
+
+
+def generate_embedding(
+    text: str,
+    base_url: Optional[str] = None,
+    model: str = "nomic-embed-text",
+) -> Optional[List[float]]:
+    """Generate embedding vector using local Ollama endpoint."""
+    if not text or not text.strip():
+        return None
+
+    if base_url is None:
+        try:
+            from axiom.config import get_config
+            cfg = get_config()
+            base_url = getattr(cfg, "ollama_base_url", "http://127.0.0.1:11434").rstrip("/")
+        except Exception:
+            base_url = "http://127.0.0.1:11434"
+
+    try:
+        with httpx.Client(timeout=4.0) as client:
+            resp = client.post(
+                f"{base_url}/api/embeddings",
+                json={"model": model, "prompt": text},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                emb = data.get("embedding")
+                if emb and isinstance(emb, list):
+                    return [float(x) for x in emb]
+    except Exception as e:
+        logger.debug(f"Ollama embedding request failed ({e}), falling back to lexical search.")
+    return None
+
+
+def serialize_embedding(vec: Optional[List[float]]) -> Optional[bytes]:
+    """Serialize list of floats into binary BLOB."""
+    if not vec:
+        return None
+    return struct.pack(f"{len(vec)}f", *vec)
+
+
+def deserialize_embedding(blob: Optional[bytes]) -> List[float]:
+    """Deserialize binary BLOB into list of floats."""
+    if not blob:
+        return []
+    n = len(blob) // 4
+    try:
+        return list(struct.unpack(f"{n}f", blob))
+    except Exception:
+        return []
+
+
+def cosine_similarity(v1: List[float], v2: List[float]) -> float:
+    """Compute cosine similarity between two float vectors."""
+    if not v1 or not v2 or len(v1) != len(v2):
+        return 0.0
+    dot = 0.0
+    norm1 = 0.0
+    norm2 = 0.0
+    for a, b in zip(v1, v2):
+        dot += a * b
+        norm1 += a * a
+        norm2 += b * b
+    if norm1 <= 0.0 or norm2 <= 0.0:
+        return 0.0
+    return dot / (math.sqrt(norm1) * math.sqrt(norm2))
+
+
+def bm25_search(query: str, documents: List[tuple[int, str]], top_k: int = 3) -> List[str]:
+    """Fallback lexical BM25 search when vector embeddings are unavailable."""
+    def tokenize(t: str) -> List[str]:
+        return re.findall(r"\w+", t.lower())
+
+    query_tokens = tokenize(query)
+    if not query_tokens or not documents:
+        return []
+
+    doc_tokens = [tokenize(doc[1]) for doc in documents]
+    n_docs = len(documents)
+
+    df: Counter[str] = Counter()
+    for tokens in doc_tokens:
+        for t in set(tokens):
+            df[t] += 1
+
+    idf = {t: math.log((n_docs - df[t] + 0.5) / (df[t] + 0.5) + 1.0) for t in query_tokens}
+
+    k1 = 1.5
+    b = 0.75
+    avgdl = sum(len(t) for t in doc_tokens) / max(n_docs, 1)
+
+    scored = []
+    for idx, (_, text) in enumerate(documents):
+        tokens = doc_tokens[idx]
+        dl = len(tokens)
+        tf = Counter(tokens)
+        score = 0.0
+        for qt in query_tokens:
+            if qt in tf:
+                freq = tf[qt]
+                numerator = freq * (k1 + 1)
+                denominator = freq + k1 * (1 - b + b * (dl / avgdl)) if avgdl > 0 else 1.0
+                score += idf.get(qt, 0.0) * (numerator / max(denominator, 1e-6))
+        if score > 0.0:
+            scored.append((score, text))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [s[1] for s in scored[:top_k]]
+
+
+def add_memory(fact: str, db_path: Optional[str] = None) -> int:
+    """Store a permanent fact in the SQLite vector memory store."""
+    fact = (fact or "").strip()
+    if not fact:
+        return -1
+
+    path = db_path or get_db_path()
+    init_db(path)
+
+    emb = generate_embedding(fact)
+    blob = serialize_embedding(emb)
+
+    with get_connection(path) as conn:
+        cursor = conn.execute(
+            "INSERT INTO memories (content, embedding) VALUES (?, ?)",
+            (fact, blob),
+        )
+        conn.commit()
+        return cursor.lastrowid or -1
+
+
+def search_memories(
+    query: str,
+    top_k: int = 3,
+    db_path: Optional[str] = None,
+) -> List[str]:
+    """Retrieve top_k matching memories using cosine similarity or BM25 fallback."""
+    query = (query or "").strip()
+    if not query:
+        return []
+
+    path = db_path or get_db_path()
+    init_db(path)
+
+    with get_connection(path) as conn:
+        cursor = conn.execute("SELECT id, content, embedding FROM memories")
+        rows = cursor.fetchall()
+
+    if not rows:
+        return []
+
+    q_emb = generate_embedding(query)
+    scored: List[tuple[float, str]] = []
+
+    if q_emb:
+        for row in rows:
+            blob = row["embedding"]
+            if blob:
+                mem_emb = deserialize_embedding(blob)
+                if mem_emb and len(mem_emb) == len(q_emb):
+                    sim = cosine_similarity(q_emb, mem_emb)
+                    if sim > 0.25:
+                        scored.append((sim, row["content"]))
+
+    if scored:
+        scored.sort(key=lambda x: x[0], reverse=True)
+        seen = set()
+        results = []
+        for _, content in scored:
+            if content not in seen:
+                seen.add(content)
+                results.append(content)
+                if len(results) >= top_k:
+                    break
+        return results
+
+    # Fallback to BM25 lexical search
+    docs = [(row["id"], row["content"]) for row in rows]
+    return bm25_search(query, docs, top_k=top_k)
+
+
+def get_all_memories(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Retrieve all stored permanent memories ordered by most recent first."""
+    path = db_path or get_db_path()
+    init_db(path)
+    with get_connection(path) as conn:
+        cursor = conn.execute(
+            "SELECT id, content, created_at FROM memories ORDER BY id DESC"
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+
+class SemanticMemoryStore:
+    """Manager class for persistent semantic memory operations."""
+
+    def __init__(self, db_path: Optional[str] = None) -> None:
+        self.db_path = db_path or get_db_path()
+        init_db(self.db_path)
+
+    def add_memory(self, fact: str) -> int:
+        return add_memory(fact, self.db_path)
+
+    def search_memories(self, query: str, top_k: int = 3) -> List[str]:
+        return search_memories(query, top_k=top_k, db_path=self.db_path)
+
+    def get_all_memories(self) -> List[Dict[str, Any]]:
+        return get_all_memories(self.db_path)
+

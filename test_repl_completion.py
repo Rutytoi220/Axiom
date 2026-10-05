@@ -31,7 +31,7 @@ def test_repl_completion_and_backend():
 
         # 3. Test sending prompt to backend engine
         print("\n>>> Testing backend prompt routing and streaming...")
-        test_prompt = "Say hello in one short sentence."
+        test_prompt = "Say 'hello' in plain text. Do not use any tools."
         child.send(f"{test_prompt}\r")
         
         # Expect Axiom response header
@@ -44,7 +44,7 @@ def test_repl_completion_and_backend():
         print("\n✓ Tokens successfully streamed from local AI backend without connection drop.")
 
         # 4. Clean exit
-        time.sleep(1.0)
+        child.expect(r"❯", timeout=15)
         child.sendline("/exit")
         child.expect(r"Goodbye.", timeout=5)
         child.expect(pexpect.EOF, timeout=5)

@@ -1,51 +1,162 @@
 import json
 import re
 import httpx
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 from axiom.core.plugins import get_tool_schemas, execute_tool
 
 class NativeOrchestrator:
+    def __init__(self, max_context_tokens: int = 4096):
+        self.max_context_tokens = max_context_tokens
+
+    def _build_system_prompt(self, base_directives: Optional[str] = None) -> str:
+        """Compile hierarchical system directives, global user instructions, and local project rules."""
+        from axiom.core.instructions import InstructionManager
+        manager = InstructionManager()
+        return manager.get_compiled_instructions(base_directives=base_directives)
+
+    @staticmethod
+    def count_tokens(text: str) -> int:
+        """Estimate token count for a text string."""
+        if not text:
+            return 0
+        words = len(text.split())
+        return max(len(text) // 4, int(words * 1.3), 1)
+
+    @classmethod
+    def count_message_tokens(cls, msg: dict) -> int:
+        """Estimate token footprint of a chat completion message."""
+        content = msg.get("content", "")
+        tokens = 0
+        if isinstance(content, str):
+            tokens = cls.count_tokens(content)
+        elif isinstance(content, list):
+            tokens = sum(cls.count_tokens(c.get("text", "")) for c in content if isinstance(c, dict))
+        elif isinstance(content, dict):
+            tokens = cls.count_tokens(json.dumps(content))
+        else:
+            tokens = cls.count_tokens(str(content))
+
+        if "tool_calls" in msg:
+            tokens += cls.count_tokens(json.dumps(msg["tool_calls"]))
+        return tokens + 4
+
+    def prune_messages(
+        self,
+        messages: list[dict],
+        max_context_tokens: Optional[int] = None,
+        reserve_tokens: int = 1000,
+    ) -> list[dict]:
+        """Sliding window context budgeting: keeps system directives, initial turn,
+        and latest turns within (max_context_tokens - reserve_tokens).
+        """
+        max_tokens = max_context_tokens or self.max_context_tokens
+        budget = max_tokens - reserve_tokens
+
+        system_messages = [m for m in messages if m.get("role") == "system"]
+        conv_messages = [m for m in messages if m.get("role") != "system"]
+
+        if not conv_messages:
+            return messages
+
+        total_conv_tokens = sum(self.count_message_tokens(m) for m in conv_messages)
+        if total_conv_tokens <= budget:
+            return messages
+
+        # Initial turn is conv_messages[0]
+        initial_turn = conv_messages[0]
+        remaining = conv_messages[1:]
+
+        initial_tokens = self.count_message_tokens(initial_turn)
+        avail_budget = max(budget - initial_tokens, 0)
+
+        # Retain as many latest turns as fit within avail_budget
+        kept_latest = []
+        current_tokens = 0
+        for msg in reversed(remaining):
+            msg_tokens = self.count_message_tokens(msg)
+            if current_tokens + msg_tokens <= avail_budget or not kept_latest:
+                kept_latest.insert(0, msg)
+                current_tokens += msg_tokens
+            else:
+                break
+
+        pruned_conv = [initial_turn] + kept_latest
+        return system_messages + pruned_conv
+
+    async def fetch_dynamic_context_length(self, model: str, base_url: str) -> Optional[int]:
+        """Attempt to read context length dynamically from Ollama /api/show."""
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                resp = await client.post(f"{base_url}/api/show", json={"name": model})
+                if resp.status_code == 200:
+                    data = resp.json()
+                    model_info = data.get("model_info", {})
+                    for k, v in model_info.items():
+                        if "context_length" in k and isinstance(v, int):
+                            return v
+        except Exception:
+            pass
+        return None
+
     async def generate_stream(self, payload: dict, depth: int = 0) -> AsyncGenerator[dict, None]:
         if depth > 10:
             yield {"choices": [{"delta": {"content": "\n[Error: Exceeded max tool execution depth]"}}]}
             return
 
+        from axiom.config import get_config
+        config = get_config()
+        base_url = getattr(config, "ollama_base_url", "http://127.0.0.1:11434").rstrip("/")
+
         if depth == 0:
+            system_prompt_content = self._build_system_prompt()
+
+            # Query semantic memory for relevant context
+            user_prompt = ""
+            for msg in reversed(payload.get("messages", [])):
+                if msg.get("role") == "user":
+                    c = msg.get("content", "")
+                    if isinstance(c, str):
+                        user_prompt = c
+                    elif isinstance(c, list):
+                        user_prompt = " ".join(part.get("text", "") for part in c if isinstance(part, dict))
+                    break
+
+            if user_prompt:
+                try:
+                    from axiom.memory.semantic import search_memories
+                    recalled = search_memories(user_prompt, top_k=3)
+                    if recalled:
+                        mem_block = (
+                            "\n\n[RECALLED SEMANTIC MEMORIES]\n"
+                            "<recalled_memory>\n"
+                            + "\n".join(f"- {m}" for m in recalled)
+                            + "\n</recalled_memory>"
+                        )
+                        system_prompt_content += mem_block
+                except Exception:
+                    pass
+
             system_prompt = {
                 "role": "system",
-                "content": (
-                    "You are AXIOM, a local-first AI orchestrator with a strict Three-Tier Automation Hierarchy.\n\n"
-                    "THREE-TIER AUTOMATION DIRECTIVES:\n"
-                    "1. TIER 1 (System IPC - hyprctl): For managing windows, switching workspaces, focusing applications, "
-                    "querying window geometry, or window state, ALWAYS use the 'manage_desktop_window' tool. "
-                    "NEVER simulate mouse clicks or visual coordinates for window/workspace management.\n"
-                    "2. TIER 2 (Semantic UI - Chrome DevTools Protocol): For interacting with web browsers (Zen Browser, "
-                    "Chrome, Brave, Chromium) or web applications (e.g. Monkeytype, Gemini web, YouTube, web forms) and "
-                    "Electron apps, ALWAYS use the 'interact_with_browser' tool. It executes sub-10ms deterministic "
-                    "clicks, typing, and JS evaluations via DOM selectors.\n"
-                    "3. TIER 3 (Vision Fallback - Grounding Engine): If and ONLY if the target application has NO DOM or IPC "
-                    "interface (e.g., native non-accessible binaries, games, raw canvas, or legacy applications), use the "
-                    "'interact_with_ui' tool. It captures a screen buffer and calculates spatial coordinates.\n\n"
-                    "GENERAL DIRECTIVES:\n"
-                    "- ALWAYS prefer dedicated API tools over raw shell commands. DO NOT attempt to use shell_exec, SSH, or Distrobox "
-                    "if a dedicated tool exists for the task.\n"
-                    "- Never guess tool parameters. If a tool fails, explain the error; do not aggressively retry shell commands.\n"
-                    "- CRITICAL RULE: NEVER use the ask_human tool to ask the user for screen coordinates or UI element locations."
-                )
+                "content": system_prompt_content,
             }
-            
+
             if not payload.get("messages") or payload["messages"][0].get("role") != "system":
                 payload.setdefault("messages", []).insert(0, system_prompt)
             else:
-                payload["messages"][0]["content"] += f"\n\n{system_prompt['content']}"
+                payload["messages"][0]["content"] += f"\n\n{system_prompt_content}"
+
+            # Apply sliding window context budgeting to prevent HTTP 400 overflows
+            payload["messages"] = self.prune_messages(
+                payload.get("messages", []),
+                max_context_tokens=self.max_context_tokens,
+                reserve_tokens=1000,
+            )
 
         if not payload.get("tools"):
             payload["tools"] = get_tool_schemas(0)
 
-        from axiom.config import get_config
-        config = get_config()
         payload["model"] = config.ollama_model
-        base_url = getattr(config, "ollama_base_url", "http://127.0.0.1:11434").rstrip("/")
 
         # Scrub images from payload to prevent context-window collapse
         for msg in payload.get("messages", []):
@@ -67,8 +178,22 @@ class NativeOrchestrator:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        # Enforce 100% GPU layer offload in Ollama
+        # Enforce 100% GPU layer offload and adequate context size in Ollama
         payload.setdefault("options", {})["num_gpu"] = 99
+        payload["options"].setdefault("num_ctx", max(self.max_context_tokens, 8192))
+
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                await client.post(
+                    f"{base_url}/api/generate",
+                    json={
+                        "model": payload["model"],
+                        "options": {"num_ctx": max(self.max_context_tokens, 8192), "num_gpu": 99},
+                        "keep_alive": "5m",
+                    },
+                )
+        except Exception:
+            pass
 
         timeout_config = httpx.Timeout(connect=10.0, read=300.0, write=20.0, pool=20.0)
         try:
