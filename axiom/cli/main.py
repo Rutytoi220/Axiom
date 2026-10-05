@@ -294,8 +294,9 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
-            "  axiom                           Drop into the Opencode-tier TUI\n"
-            "  axiom chat                      Same as above\n"
+            "  axiom                           Launch modern inline streaming CLI (default)\n"
+            "  axiom repl                      Same as default\n"
+            "  axiom chat                      Opencode-tier full-screen TUI\n"
             "  axiom ui                        Launch desktop UI\n"
             "  axiom server                    Show backend stub panel\n"
             "  axiom run 'summarise my notes'  Run autonomous agent\n"
@@ -305,8 +306,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", metavar="<command>")
 
     # ── Primary commands ────────────────────────────────────────────────────
-    sub.add_parser("repl",   help="Modern inline streaming CLI (Tokyo Night)")
-    sub.add_parser("chat",   help="Opencode-tier TUI (default)")
+    sub.add_parser("repl",   help="Modern inline streaming CLI (Tokyo Night, default)")
+    sub.add_parser("chat",   help="Opencode-tier full-screen TUI")
     sub.add_parser("ui",     help="Launch the PySide6 desktop UI")
     sub.add_parser("server", help="Print AXIOM Distributed Server panel (stub)")
 
@@ -366,8 +367,8 @@ def main() -> None:
     elif args.command in dispatch:
         dispatch[args.command](args)
     else:
-        # No sub-command → drop into the Opencode-tier TUI.
-        cmd_chat(args)
+        # No sub-command → launch the modern inline streaming CLI.
+        cmd_repl(args)
 
 
 if __name__ == "__main__":
