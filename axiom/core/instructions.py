@@ -17,9 +17,13 @@ DEFAULT_GLOBAL_INSTRUCTIONS_TEMPLATE = """\
 # These rules apply across all projects and sessions.
 """
 
-SYSTEM_CORE_DIRECTIVES = """\
+from axiom.core.system_prompt import HARDENED_SYSTEM_DIRECTIVES
+
+SYSTEM_CORE_DIRECTIVES = f"""\
 [SYSTEM CORE DIRECTIVES]
 You are AXIOM, a local-first AI orchestrator with a strict Three-Tier Automation Hierarchy.
+
+{HARDENED_SYSTEM_DIRECTIVES}
 
 THREE-TIER AUTOMATION DIRECTIVES:
 1. TIER 1 (System IPC - hyprctl): For managing windows, switching workspaces, focusing applications, querying window geometry, or window state, ALWAYS use the 'manage_desktop_window' tool. NEVER simulate mouse clicks or visual coordinates for window/workspace management.

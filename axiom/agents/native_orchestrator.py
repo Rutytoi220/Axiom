@@ -1,12 +1,69 @@
+import asyncio
 import json
 import re
+import shutil
 import httpx
 from typing import AsyncGenerator, Optional
 from axiom.core.plugins import get_tool_schemas, execute_tool
 
+REFUSAL_PHRASES = [
+    "cannot see your screen",
+    "can't see your screen",
+    "as an ai",
+    "don't have eyes",
+    "cannot interact with your computer",
+]
+
 class NativeOrchestrator:
     def __init__(self, max_context_tokens: int = 4096):
         self.max_context_tokens = max_context_tokens
+
+    @classmethod
+    def is_refusal(cls, text: str) -> bool:
+        """Checks if text contains signature conversational refusal phrases."""
+        if not text:
+            return False
+        t_lower = text.lower()
+        return any(phrase in t_lower for phrase in REFUSAL_PHRASES)
+
+    @classmethod
+    def is_interface_action_query(cls, text: str) -> bool:
+        """Determines if a query targets an OS, browser, or interface action."""
+        if not text:
+            return False
+        t_lower = text.lower()
+        patterns = [
+            r"\b(click|press|tap|double-click|right-click)\b",
+            r"\b(open|launch|start|run|close|switch|focus)\b",
+            r"\b(window|windows|workspace|workspaces|desktop|screen|display|monitor)\b",
+            r"\b(browser|webpage|website|url|tab|button|icon|link|menu)\b",
+            r"\b(inspect|navigate|scroll|type|look at|see|find|show me|view)\b",
+        ]
+        return any(re.search(pat, t_lower) for pat in patterns)
+
+    @staticmethod
+    async def get_active_window_context() -> Optional[str]:
+        """Query hyprctl activewindow -j non-blockingly and format telemetry header."""
+        if not shutil.which("hyprctl"):
+            return None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "hyprctl", "activewindow", "-j",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=1.0)
+            if proc.returncode == 0 and stdout:
+                data = json.loads(stdout.decode())
+                title = data.get("title", "")
+                w_class = data.get("class", "")
+                workspace = data.get("workspace", {})
+                w_id = workspace.get("id", "") if isinstance(workspace, dict) else workspace
+                if title or w_class:
+                    return f'[Active Window: title="{title}", class="{w_class}", workspace={w_id}]'
+        except Exception:
+            pass
+        return None
 
     def _build_system_prompt(self, base_directives: Optional[str] = None) -> str:
         """Compile hierarchical system directives, global user instructions, and local project rules."""
@@ -98,7 +155,7 @@ class NativeOrchestrator:
             pass
         return None
 
-    async def generate_stream(self, payload: dict, depth: int = 0) -> AsyncGenerator[dict, None]:
+    async def generate_stream(self, payload: dict, depth: int = 0, is_retry: bool = False) -> AsyncGenerator[dict, None]:
         if depth > 10:
             yield {"choices": [{"delta": {"content": "\n[Error: Exceeded max tool execution depth]"}}]}
             return
@@ -108,6 +165,23 @@ class NativeOrchestrator:
         base_url = getattr(config, "ollama_base_url", "http://127.0.0.1:11434").rstrip("/")
 
         if depth == 0:
+            active_win_header = await self.get_active_window_context()
+            if active_win_header:
+                for msg in reversed(payload.get("messages", [])):
+                    if msg.get("role") == "user":
+                        content = msg.get("content", "")
+                        if isinstance(content, str):
+                            if "[Active Window:" not in content:
+                                msg["content"] = f"{active_win_header}\n{content}"
+                        elif isinstance(content, list):
+                            for part in content:
+                                if isinstance(part, dict) and part.get("type") == "text":
+                                    t = part.get("text", "")
+                                    if "[Active Window:" not in t:
+                                        part["text"] = f"{active_win_header}\n{t}"
+                                    break
+                        break
+
             system_prompt_content = self._build_system_prompt()
 
             # Query semantic memory for relevant context
@@ -124,7 +198,8 @@ class NativeOrchestrator:
             if user_prompt:
                 try:
                     from axiom.memory.semantic import search_memories
-                    recalled = search_memories(user_prompt, top_k=3)
+                    clean_search = re.sub(r"\[Active Window:.*?\]\n?", "", user_prompt).strip()
+                    recalled = search_memories(clean_search, top_k=3)
                     if recalled:
                         mem_block = (
                             "\n\n[RECALLED SEMANTIC MEMORIES]\n"
@@ -152,6 +227,17 @@ class NativeOrchestrator:
                 max_context_tokens=self.max_context_tokens,
                 reserve_tokens=1000,
             )
+
+        user_query_for_intent = ""
+        for msg in reversed(payload.get("messages", [])):
+            if msg.get("role") == "user":
+                c = msg.get("content", "")
+                if isinstance(c, str):
+                    user_query_for_intent = c
+                elif isinstance(c, list):
+                    user_query_for_intent = " ".join(part.get("text", "") for part in c if isinstance(part, dict))
+                break
+        is_interface_action = self.is_interface_action_query(user_query_for_intent)
 
         if not payload.get("tools"):
             payload["tools"] = get_tool_schemas(0)
@@ -211,6 +297,9 @@ class NativeOrchestrator:
                     pending_tool_calls = []
                     is_reasoning = False
                     collected_assistant_text = []
+                    buffered_chunks = []
+                    buffering = (depth == 0 and not is_retry and is_interface_action)
+                    refusal_detected = False
 
                     async for line in resp.aiter_lines():
                         if not line:
@@ -251,7 +340,27 @@ class NativeOrchestrator:
                                             if "arguments" in tc["function"] and tc["function"]["arguments"]:
                                                 pending_tool_calls[idx]["function"]["arguments"] += tc["function"]["arguments"]
 
-                                yield data
+                                if buffering:
+                                    if "tool_calls" in delta or pending_tool_calls:
+                                        buffering = False
+                                        for b in buffered_chunks:
+                                            yield b
+                                        buffered_chunks.clear()
+                                        yield data
+                                    else:
+                                        buffered_chunks.append(data)
+                                        text_so_far = "".join(collected_assistant_text)
+                                        clean_text = re.sub(r"<think>.*?</think>", "", text_so_far, flags=re.DOTALL)
+                                        if self.is_refusal(clean_text):
+                                            refusal_detected = True
+                                            break
+                                        elif len(clean_text) > 250:
+                                            buffering = False
+                                            for b in buffered_chunks:
+                                                yield b
+                                            buffered_chunks.clear()
+                                else:
+                                    yield data
                             except json.JSONDecodeError:
                                 pass
         except httpx.ConnectError as exc:
@@ -260,6 +369,34 @@ class NativeOrchestrator:
         except httpx.RequestError as exc:
             yield {"choices": [{"delta": {"content": f"\n⚠️ [Request Error] Communication failure with {base_url}: {exc}\n"}}]}
             return
+
+        if not refusal_detected and (depth == 0 and not is_retry and is_interface_action):
+            text_so_far = "".join(collected_assistant_text)
+            clean_text = re.sub(r"<think>.*?</think>", "", text_so_far, flags=re.DOTALL)
+            if not pending_tool_calls and self.is_refusal(clean_text):
+                refusal_detected = True
+
+        if refusal_detected:
+            buffered_chunks.clear()
+            collected_assistant_text.clear()
+            pending_tool_calls.clear()
+
+            override_msg = {
+                "role": "user",
+                "content": "[SYSTEM OVERRIDE]: You possess tools to inspect and interact with the environment. Call the appropriate tool immediately without commentary."
+            }
+            payload.setdefault("messages", []).append(override_msg)
+            payload.setdefault("options", {})["temperature"] = 0.1
+            payload["temperature"] = 0.1
+
+            async for retry_chunk in self.generate_stream(payload, depth=depth, is_retry=True):
+                yield retry_chunk
+            return
+
+        if buffered_chunks:
+            for b in buffered_chunks:
+                yield b
+            buffered_chunks.clear()
 
         if not pending_tool_calls and collected_assistant_text:
             full_text = "".join(collected_assistant_text).strip()
