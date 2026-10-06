@@ -262,6 +262,8 @@ class InlineRepl:
             key_bindings=kb,
         )
         self.is_running = True
+        self.bridge = None
+        self._bridge_server = None
         ensure_ollama_running(self.config.ollama_base_url)
 
     def toggle_thinking(self) -> bool:
@@ -640,42 +642,55 @@ class InlineRepl:
         if final_text:
             add_message(self.session_id, "assistant", final_text)
 
+    async def start_services(self) -> None:
+        """Eagerly starts background services including WebExtension bridge."""
+        from axiom.tools.browser_extension import get_bridge
+        self.bridge = get_bridge()
+        try:
+            await self.bridge.start_server()
+            # Keep an active reference to prevent GC
+            self._bridge_server = self.bridge.server
+        except Exception as exc:
+            console.print(f"[dim yellow]⚠️ Warning: Failed to bind WebExtension bridge on 41144: {exc}[/dim yellow]")
+
+    async def do_exit(self) -> None:
+        """Performs cleanup and graceful teardown of background services."""
+        if hasattr(self, "bridge") and self.bridge:
+            await self.bridge.stop_server()
+            self._bridge_server = None
+
     async def run_loop(self) -> None:
         """Main non-blocking interactive loop."""
         clear_screen()
+        await self.start_services()
         self.print_banner()
 
-        # Eagerly spawn and start BrowserExtensionBridge server on 127.0.0.1:41144
         try:
-            from axiom.tools.browser_extension import get_bridge
-            bridge = get_bridge()
-            asyncio.create_task(bridge.start_server())
-        except Exception:
-            pass
+            while self.is_running:
+                try:
+                    # Prompt with Soft Blue glyph #7aa2f7
+                    prompt_text = FormattedText([
+                        ("class:prompt-glyph", "❯ "),
+                    ])
+                    user_input = await asyncio.to_thread(self.prompt_session.prompt, prompt_text)
+                    user_input = user_input.strip()
 
-        while self.is_running:
-            try:
-                # Prompt with Soft Blue glyph #7aa2f7
-                prompt_text = FormattedText([
-                    ("class:prompt-glyph", "❯ "),
-                ])
-                user_input = await asyncio.to_thread(self.prompt_session.prompt, prompt_text)
-                user_input = user_input.strip()
-
-                if not user_input:
-                    continue
-
-                if user_input.startswith("/"):
-                    if self.handle_command(user_input):
+                    if not user_input:
                         continue
 
-                await self.stream_response(user_input)
+                    if user_input.startswith("/"):
+                        if self.handle_command(user_input):
+                            continue
 
-            except (KeyboardInterrupt, EOFError):
-                console.print("\n[dim]Session closed.[/dim]")
-                break
-            except Exception as e:
-                console.print(f"[error]Error: {e}[/error]")
+                    await self.stream_response(user_input)
+
+                except (KeyboardInterrupt, EOFError):
+                    console.print("\n[dim]Session closed.[/dim]")
+                    break
+                except Exception as e:
+                    console.print(f"[error]Error: {e}[/error]")
+        finally:
+            await self.do_exit()
 
 
 def run_repl(session_id: Optional[str] = None) -> None:
