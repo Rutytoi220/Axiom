@@ -53,6 +53,13 @@ async def run_bridge_lifecycle_tests():
     from axiom.tools.browser_cdp import InteractWithBrowserTool
     tool = InteractWithBrowserTool()
 
+    # 0. Verify InteractWithBrowserTool schema does NOT contain 'port' and contains 'query'
+    schema = tool.schema
+    properties = schema.get("properties", {})
+    assert "port" not in properties, "InteractWithBrowserTool.schema must NOT contain 'port'!"
+    assert "query" in properties, "InteractWithBrowserTool.schema should contain 'query'!"
+    print("  → InteractWithBrowserTool.schema verified: 'port' purged, 'query' present.")
+
     bridge = get_bridge()
     await bridge.start_server()
     assert bridge.server is not None, "Failed to start WebSocket server on 41144"
@@ -181,6 +188,12 @@ async def run_bridge_lifecycle_tests():
                 assert tool_res.success is True
                 assert "Clicked" in str(tool_res.output)
                 print("  → InteractWithBrowserTool routed to extension bridge seamlessly when connected.")
+
+                # 9. Verify calling execute({"action": "switch_tab", "query": "gemini"}) routes cleanly to extension bridge without throwing a CDP connection error
+                tool_switch = await tool.execute({"action": "switch_tab", "query": "gemini"})
+                assert tool_switch.success is True, f"tool switch_tab failed: {tool_switch.error}"
+                assert "Gemini" in str(tool_switch.output)
+                print("  → InteractWithBrowserTool.execute('switch_tab') verified without CDP connection error.")
 
             finally:
                 worker_task.cancel()

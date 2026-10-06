@@ -22,29 +22,36 @@ DEFAULT_CDP_PORTS = [9222, 9223, 9224]
 
 
 class InteractWithBrowserTool(BaseTool):
-    """Semantic browser automation using the Chrome DevTools Protocol (CDP)."""
+    """Semantic browser automation using the AXIOM WebExtension bridge & Chrome DevTools Protocol."""
 
     def __init__(self):
         super().__init__(
             tool_id="interact_with_browser",
             name="interact_with_browser",
             description=(
-                "Tier 2 Semantic UI Automation: Sub-10ms browser interaction via Chrome DevTools Protocol (CDP). "
-                "Deterministically click, type, and evaluate JavaScript in web browsers (Zen, Chrome, Brave) "
-                "and Electron apps. Actions: 'click', 'type', 'evaluate', 'get_content', 'list_tabs'."
+                "Tier 2 Semantic UI Automation: Browser and tab automation via AXIOM WebExtension bridge. "
+                "Actions: 'switch_tab' (focus tab by title/domain query), 'list_tabs', 'click' (DOM selector), "
+                "'type' (input text into selector), 'get_dom' (retrieve page text)."
             ),
         )
         self.parameters = [
             ToolParameter(
                 name="action",
                 type="string",
-                description="The browser action: 'click', 'type', 'evaluate', 'get_content', 'list_tabs'.",
+                description="The browser action: 'switch_tab', 'list_tabs', 'click', 'type', 'get_dom'.",
                 required=True,
+            ),
+            ToolParameter(
+                name="query",
+                type="string",
+                description="Tab title, domain, or URL query to search and switch to when action is 'switch_tab'.",
+                required=False,
+                default="",
             ),
             ToolParameter(
                 name="selector",
                 type="string",
-                description="CSS selector of the DOM element to interact with (e.g. 'button.submit', '#search-input', 'a[href=\"/login\"]').",
+                description="CSS selector of the DOM element to interact with inside a web page (e.g. 'button.submit', '#search-input').",
                 required=False,
                 default="",
             ),
@@ -61,13 +68,6 @@ class InteractWithBrowserTool(BaseTool):
                 description="JavaScript code expression to evaluate in the page context.",
                 required=False,
                 default="",
-            ),
-            ToolParameter(
-                name="port",
-                type="integer",
-                description="Remote debugging port (defaults to 9222, auto-discovers 9222-9224).",
-                required=False,
-                default=9222,
             ),
             ToolParameter(
                 name="tab_id",
@@ -137,13 +137,11 @@ class InteractWithBrowserTool(BaseTool):
         expression = str(params.get("expression", "") or "").strip()
         tab_id = str(params.get("tab_id", "") or "").strip()
 
-        # Check if caller explicitly requested a specific CDP port (e.g. port=9222 in tests)
-        explicit_port = params.get("port")
-        has_explicit_port = explicit_port is not None
+        # Only route to legacy CDP if explicitly requested by unit test fixtures via internal keyword argument _force_cdp=True
+        force_cdp = bool(params.get("_force_cdp", False))
 
-        # Tier 2 WebExtension Bridge is primary for browser automation.
-        # Unless the caller explicitly passed a port parameter, route strictly through the extension bridge.
-        if not has_explicit_port:
+        # Tier 2 WebExtension Bridge is primary for browser automation (100% default).
+        if not force_cdp:
             try:
                 from axiom.tools.browser_extension import get_bridge
                 bridge = get_bridge()
@@ -154,7 +152,7 @@ class InteractWithBrowserTool(BaseTool):
                         pass
 
                 if bridge.is_connected():
-                    ext_params = {k: v for k, v in params.items() if k != "action"}
+                    ext_params = {k: v for k, v in params.items() if k not in ("action", "_force_cdp")}
                     ext_res = await bridge.send_command(action, **ext_params)
                     if ext_res.success:
                         return ToolResult(True, output=ext_res.output or ext_res)
@@ -179,8 +177,8 @@ class InteractWithBrowserTool(BaseTool):
                     ),
                 )
 
-        # Legacy / Explicit CDP path (when caller explicitly specifies a port, e.g. port=9222)
-        port = int(explicit_port or 9222)
+        # Legacy CDP path (strictly exercised only when _force_cdp=True)
+        port = int(params.get("port") or 9222)
 
         # Handle list_tabs discovery
         if action in ("list_tabs", "tabs"):

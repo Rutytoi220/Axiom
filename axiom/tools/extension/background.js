@@ -133,7 +133,7 @@ async function handleCommand(msg) {
       }
 
       case "switch_tab": {
-        const query = (msg.query || msg.filter || "").toLowerCase().trim();
+        const query = (msg.query || msg.filter || msg.target || msg.title || msg.url || msg.text || "").toLowerCase().trim();
         const tabId = msg.tab_id ? Number(msg.tab_id) : null;
         const allTabs = await chrome.tabs.query({});
 
@@ -149,6 +149,38 @@ async function handleCommand(msg) {
         }
 
         if (!matched) {
+          let openUrl = null;
+          if (query.startsWith("http://") || query.startsWith("https://")) {
+            openUrl = query;
+          } else if (query.includes(".") && !query.includes(" ")) {
+            openUrl = `https://${query}`;
+          } else if (query === "gemini") {
+            openUrl = "https://gemini.google.com";
+          } else if (query === "monkeytype") {
+            openUrl = "https://monkeytype.com";
+          } else if (query === "youtube") {
+            openUrl = "https://youtube.com";
+          } else if (query === "github") {
+            openUrl = "https://github.com";
+          }
+
+          if (openUrl) {
+            try {
+              const newTab = await chrome.tabs.create({ url: openUrl, active: true });
+              sendReply({
+                id,
+                success: true,
+                action: "switch_tab",
+                tab: {
+                  id: newTab.id,
+                  title: newTab.title || query,
+                  url: newTab.url || openUrl,
+                },
+              });
+              return;
+            } catch (_) {}
+          }
+
           sendReply({
             id,
             success: false,
