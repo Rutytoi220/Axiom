@@ -138,6 +138,18 @@ class InteractWithBrowserTool(BaseTool):
         port = int(params.get("port") or 9222)
         tab_id = str(params.get("tab_id", "") or "").strip()
 
+        # Check if local WebExtension bridge has an active connection
+        try:
+            from axiom.tools.browser_extension import get_bridge
+            bridge = get_bridge()
+            if bridge.is_connected():
+                ext_res = await bridge.send_command(action, **params)
+                if ext_res.success:
+                    return ToolResult(True, output=ext_res.output or ext_res)
+                return ToolResult(False, error=ext_res.error or "Extension command failed")
+        except Exception:
+            pass
+
         # Handle list_tabs discovery
         if action in ("list_tabs", "tabs"):
             ports_to_try = [port] + [p for p in DEFAULT_CDP_PORTS if p != port]
