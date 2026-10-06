@@ -93,6 +93,17 @@ class BrowserExtensionBridge:
             async for raw_message in websocket:
                 try:
                     data = json.loads(raw_message)
+
+                    # Handle heartbeat ping frames from browser extension
+                    msg_type = data.get("type")
+                    msg_action = data.get("action")
+                    if msg_type == "ping" or msg_action == "ping":
+                        pong_payload = {"type": "pong", "id": data.get("id")}
+                        await websocket.send(json.dumps(pong_payload))
+                        logger.debug("[AXIOM Extension Bridge] Received ping from %s, replied with pong", remote)
+                        print("  [Heartbeat] Extension ping received → Daemon replied pong", flush=True)
+                        continue
+
                     msg_id = data.get("id")
                     if msg_id and msg_id in self.pending_requests:
                         future = self.pending_requests.pop(msg_id)

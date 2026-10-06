@@ -7,13 +7,36 @@
 const WS_URL = "ws://127.0.0.1:41144";
 let socket = null;
 let reconnectTimer = null;
+let pingTimer = null;
 const INITIAL_RECONNECT_DELAY = 2000;
 const MAX_RECONNECT_DELAY = 5000;
 const RECONNECT_MULTIPLIER = 1.3;
+const PING_INTERVAL_MS = 10000; // 10 seconds
 let reconnectDelay = INITIAL_RECONNECT_DELAY;
 
 function log(msg, ...args) {
   console.log(`[AXIOM Extension] ${msg}`, ...args);
+}
+
+function startKeepAlivePing() {
+  stopKeepAlivePing();
+  pingTimer = setInterval(() => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      log("Sending keep-alive ping to daemon...");
+      try {
+        socket.send(JSON.stringify({ type: "ping", action: "ping" }));
+      } catch (err) {
+        log("Failed to send ping:", err);
+      }
+    }
+  }, PING_INTERVAL_MS);
+}
+
+function stopKeepAlivePing() {
+  if (pingTimer) {
+    clearInterval(pingTimer);
+    pingTimer = null;
+  }
 }
 
 function connect() {
@@ -37,12 +60,21 @@ function connect() {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
+    startKeepAlivePing();
   };
 
   socket.onmessage = async (event) => {
     try {
       const msg = JSON.parse(event.data);
-      if (!msg || !msg.id || !msg.action) {
+      if (!msg) return;
+
+      // Handle pong frames from daemon
+      if (msg.type === "pong" || msg.action === "pong") {
+        log("Received keep-alive pong from daemon.");
+        return;
+      }
+
+      if (!msg.id || !msg.action) {
         log("Invalid command payload:", event.data);
         return;
       }
@@ -54,12 +86,14 @@ function connect() {
 
   socket.onclose = () => {
     log("Disconnected from daemon.");
+    stopKeepAlivePing();
     socket = null;
     scheduleReconnect();
   };
 
   socket.onerror = (err) => {
     log("WebSocket error:", err);
+    stopKeepAlivePing();
     if (socket) {
       socket.close();
     }
@@ -348,3 +382,21 @@ if (typeof chrome !== "undefined" && chrome.runtime) {
     chrome.runtime.onInstalled.addListener(() => connect());
   }
 }
+
+// Periodic alarm keep-alive to protect against Manifest V3 worker idle termination
+if (typeof chrome !== "undefined" && chrome.alarms) {
+  try {
+    chrome.alarms.create("axiom_keep_alive", { periodInMinutes: 0.4 }); // Every ~24s
+    chrome.alarms.onAlarm.addListener((alarm) => {
+      if (alarm.name === "axiom_keep_alive") {
+        log("Keep-alive alarm triggered: ensuring WebSocket link is active");
+        if (!socket || socket.readyState !== WebSocket.OPEN) {
+          connect();
+        }
+      }
+    });
+  } catch (err) {
+    log("Failed to register chrome.alarms keep-alive:", err);
+  }
+}
+

@@ -26,6 +26,7 @@ def test_extension_scaffold():
     assert "tabs" in perms, "Missing 'tabs' permission"
     assert "activeTab" in perms, "Missing 'activeTab' permission"
     assert "scripting" in perms, "Missing 'scripting' permission"
+    assert "alarms" in perms, "Missing 'alarms' permission"
     assert "<all_urls>" in manifest.get("host_permissions", []), "Missing '<all_urls>' host permission"
 
     bg_file = ext_dir / "background.js"
@@ -34,6 +35,8 @@ def test_extension_scaffold():
     assert "41144" in bg_code, "Port 41144 not configured in background.js"
     assert "2000" in bg_code, "2000ms initial reconnect delay not configured in background.js"
     assert "5000" in bg_code, "5000ms max reconnect delay cap not configured in background.js"
+    assert "axiom_keep_alive" in bg_code, "axiom_keep_alive alarm missing in background.js"
+    assert "ping" in bg_code, "ping keep-alive loop missing in background.js"
     assert "switch_tab" in bg_code, "switch_tab handler missing in background.js"
     assert "click" in bg_code, "click handler missing in background.js"
     assert "type" in bg_code, "type handler missing in background.js"

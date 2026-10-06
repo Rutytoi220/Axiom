@@ -2,11 +2,12 @@
   "manifest_version": 3,
   "name": "AXIOM Browser Bridge",
   "version": "1.0.0",
-  "description": "Zero-friction local automation bridge for AXIOM AI orchestrator",
+  "description": "Local WebSocket automation bridge for AXIOM",
   "permissions": [
     "tabs",
     "activeTab",
-    "scripting"
+    "scripting",
+    "alarms"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -17,7 +18,7 @@
   },
   "browser_specific_settings": {
     "gecko": {
-      "id": "axiom-bridge@local.axiom",
+      "id": "axiom-bridge@local",
       "strict_min_version": "109.0"
     }
   },
