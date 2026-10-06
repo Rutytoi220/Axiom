@@ -165,6 +165,15 @@ class NativeOrchestrator:
         base_url = getattr(config, "ollama_base_url", "http://127.0.0.1:11434").rstrip("/")
 
         if depth == 0:
+            # Eagerly ensure WebExtension bridge server is running on 127.0.0.1:41144
+            try:
+                from axiom.tools.browser_extension import get_bridge
+                bridge = get_bridge()
+                if bridge.server is None:
+                    asyncio.create_task(bridge.start_server())
+            except Exception:
+                pass
+
             active_win_header = await self.get_active_window_context()
             if active_win_header:
                 for msg in reversed(payload.get("messages", [])):

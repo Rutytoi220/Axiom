@@ -32,6 +32,8 @@ def test_extension_scaffold():
     assert bg_file.is_file(), "background.js missing"
     bg_code = bg_file.read_text(encoding="utf-8")
     assert "41144" in bg_code, "Port 41144 not configured in background.js"
+    assert "2000" in bg_code, "2000ms initial reconnect delay not configured in background.js"
+    assert "5000" in bg_code, "5000ms max reconnect delay cap not configured in background.js"
     assert "switch_tab" in bg_code, "switch_tab handler missing in background.js"
     assert "click" in bg_code, "click handler missing in background.js"
     assert "type" in bg_code, "type handler missing in background.js"
@@ -48,16 +50,30 @@ def test_extension_scaffold():
 
 async def run_bridge_lifecycle_tests():
     print("[CHECK 2] Testing Local WebSocket Bridge Server Lifecycle & Commands...")
+    from axiom.tools.browser_cdp import InteractWithBrowserTool
+    tool = InteractWithBrowserTool()
+
     bridge = get_bridge()
     await bridge.start_server()
     assert bridge.server is not None, "Failed to start WebSocket server on 41144"
 
     try:
-        # 1. Test offline error reporting
+        # 1. Test offline error reporting via bridge and tool
         offline_res = await interact_with_browser("list_tabs")
         assert offline_res.success is False
-        assert "41144" in offline_res.error or "connected" in offline_res.error.lower()
+        expected_msg = (
+            "No browser extension connected on ws://127.0.0.1:41144. "
+            "Ensure the AXIOM extension is loaded in Zen Browser (about:debugging) or Chromium. "
+            "Do not ask for --remote-debugging-port flags."
+        )
+        assert offline_res.error == expected_msg, f"Expected '{expected_msg}', got '{offline_res.error}'"
         print(f"  → Offline error handled cleanly: '{offline_res.error}'")
+
+        # Test InteractWithBrowserTool offline behavior
+        tool_offline = await tool.execute({"action": "list_tabs"})
+        assert tool_offline.success is False
+        assert tool_offline.error == expected_msg
+        print("  → InteractWithBrowserTool offline explicit error confirmed without CDP fallback.")
 
         # 2. Connect mock WebExtension client
         ws_uri = f"ws://{bridge.host}:{bridge.port}"
@@ -159,6 +175,12 @@ async def run_bridge_lifecycle_tests():
                 assert res_dom.success is True
                 assert "Gemini" in res_dom["content"]
                 print(f"  → get_dom roundtrip verified: Content length {len(res_dom['content'])} chars")
+
+                # 8. Test InteractWithBrowserTool routes cleanly through extension when connected
+                tool_res = await tool.execute({"action": "click", "selector": "button.submit"})
+                assert tool_res.success is True
+                assert "Clicked" in str(tool_res.output)
+                print("  → InteractWithBrowserTool routed to extension bridge seamlessly when connected.")
 
             finally:
                 worker_task.cancel()

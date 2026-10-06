@@ -7,9 +7,10 @@
 const WS_URL = "ws://127.0.0.1:41144";
 let socket = null;
 let reconnectTimer = null;
-let reconnectDelay = 1000;
-const MAX_RECONNECT_DELAY = 15000;
-const RECONNECT_MULTIPLIER = 1.5;
+const INITIAL_RECONNECT_DELAY = 2000;
+const MAX_RECONNECT_DELAY = 5000;
+const RECONNECT_MULTIPLIER = 1.3;
+let reconnectDelay = INITIAL_RECONNECT_DELAY;
 
 function log(msg, ...args) {
   console.log(`[AXIOM Extension] ${msg}`, ...args);
@@ -31,7 +32,7 @@ function connect() {
 
   socket.onopen = () => {
     log("Connected to AXIOM daemon.");
-    reconnectDelay = 1000;
+    reconnectDelay = INITIAL_RECONNECT_DELAY;
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
@@ -70,7 +71,7 @@ function scheduleReconnect() {
   log(`Scheduling reconnect in ${reconnectDelay}ms...`);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
-    reconnectDelay = Math.min(reconnectDelay * RECONNECT_MULTIPLIER, MAX_RECONNECT_DELAY);
+    reconnectDelay = Math.min(Math.round(reconnectDelay * RECONNECT_MULTIPLIER), MAX_RECONNECT_DELAY);
     connect();
   }, reconnectDelay);
 }
@@ -304,5 +305,14 @@ async function handleCommand(msg) {
   }
 }
 
-// Start connection on extension load
+// Start connection immediately on extension load
 connect();
+
+if (typeof chrome !== "undefined" && chrome.runtime) {
+  if (chrome.runtime.onStartup) {
+    chrome.runtime.onStartup.addListener(() => connect());
+  }
+  if (chrome.runtime.onInstalled) {
+    chrome.runtime.onInstalled.addListener(() => connect());
+  }
+}

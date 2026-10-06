@@ -135,20 +135,52 @@ class InteractWithBrowserTool(BaseTool):
         selector = str(params.get("selector", "") or "").strip()
         text = str(params.get("text", "") or "")
         expression = str(params.get("expression", "") or "").strip()
-        port = int(params.get("port") or 9222)
         tab_id = str(params.get("tab_id", "") or "").strip()
 
-        # Check if local WebExtension bridge has an active connection
-        try:
-            from axiom.tools.browser_extension import get_bridge
-            bridge = get_bridge()
-            if bridge.is_connected():
-                ext_res = await bridge.send_command(action, **params)
-                if ext_res.success:
-                    return ToolResult(True, output=ext_res.output or ext_res)
-                return ToolResult(False, error=ext_res.error or "Extension command failed")
-        except Exception:
-            pass
+        # Check if caller explicitly requested a specific CDP port (e.g. port=9222 in tests)
+        explicit_port = params.get("port")
+        has_explicit_port = explicit_port is not None
+
+        # Tier 2 WebExtension Bridge is primary for browser automation.
+        # Unless the caller explicitly passed a port parameter, route strictly through the extension bridge.
+        if not has_explicit_port:
+            try:
+                from axiom.tools.browser_extension import get_bridge
+                bridge = get_bridge()
+                if bridge.server is None:
+                    try:
+                        await bridge.ensure_server()
+                    except Exception:
+                        pass
+
+                if bridge.is_connected():
+                    ext_params = {k: v for k, v in params.items() if k != "action"}
+                    ext_res = await bridge.send_command(action, **ext_params)
+                    if ext_res.success:
+                        return ToolResult(True, output=ext_res.output or ext_res)
+                    return ToolResult(False, error=ext_res.error or "Extension command failed")
+                else:
+                    return ToolResult(
+                        False,
+                        error=(
+                            "No browser extension connected on ws://127.0.0.1:41144. "
+                            "Ensure the AXIOM extension is loaded in Zen Browser (about:debugging) or Chromium. "
+                            "Do not ask for --remote-debugging-port flags."
+                        ),
+                    )
+            except Exception as exc:
+                return ToolResult(
+                    False,
+                    error=(
+                        f"Browser extension bridge error: {exc}. "
+                        "No browser extension connected on ws://127.0.0.1:41144. "
+                        "Ensure the AXIOM extension is loaded in Zen Browser (about:debugging) or Chromium. "
+                        "Do not ask for --remote-debugging-port flags."
+                    ),
+                )
+
+        # Legacy / Explicit CDP path (when caller explicitly specifies a port, e.g. port=9222)
+        port = int(explicit_port or 9222)
 
         # Handle list_tabs discovery
         if action in ("list_tabs", "tabs"):

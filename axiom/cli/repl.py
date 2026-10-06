@@ -645,6 +645,14 @@ class InlineRepl:
         clear_screen()
         self.print_banner()
 
+        # Eagerly spawn and start BrowserExtensionBridge server on 127.0.0.1:41144
+        try:
+            from axiom.tools.browser_extension import get_bridge
+            bridge = get_bridge()
+            asyncio.create_task(bridge.start_server())
+        except Exception:
+            pass
+
         while self.is_running:
             try:
                 # Prompt with Soft Blue glyph #7aa2f7

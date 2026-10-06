@@ -48,7 +48,18 @@ class BrowserExtensionBridge:
         self.active_clients: Set[Any] = set()
         self.pending_requests: Dict[str, asyncio.Future] = {}
         self.server: Optional[WebSocketServer] = None
-        self._lock = asyncio.Lock()
+        self._lock: Optional[asyncio.Lock] = None
+
+    def _get_lock(self) -> asyncio.Lock:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        elif loop is not None and getattr(self._lock, "_loop", None) not in (None, loop):
+            self._lock = asyncio.Lock()
+        return self._lock
 
     @classmethod
     def get_instance(cls, host: str = DEFAULT_BRIDGE_HOST, port: int = DEFAULT_BRIDGE_PORT) -> BrowserExtensionBridge:
@@ -62,6 +73,10 @@ class BrowserExtensionBridge:
 
     def is_connected(self) -> bool:
         """Returns True if at least one browser extension is actively connected."""
+        self.active_clients = {
+            c for c in self.active_clients
+            if getattr(c, "open", True) and not getattr(c, "closed", False)
+        }
         return len(self.active_clients) > 0
 
     @property
@@ -93,7 +108,7 @@ class BrowserExtensionBridge:
 
     async def start_server(self) -> None:
         """Starts the WebSocket server on 127.0.0.1:41144."""
-        async with self._lock:
+        async with self._get_lock():
             if self.server is not None:
                 return
             try:
@@ -108,7 +123,7 @@ class BrowserExtensionBridge:
 
     async def stop_server(self) -> None:
         """Closes all client connections and shuts down the server."""
-        async with self._lock:
+        async with self._get_lock():
             for fut in self.pending_requests.values():
                 if not fut.done():
                     fut.cancel()
@@ -139,12 +154,17 @@ class BrowserExtensionBridge:
         if not self.is_connected():
             return BrowserResult({
                 "success": False,
-                "error": f"No browser extension connected. Awaiting connection on port {self.port}.",
+                "error": (
+                    f"No browser extension connected on ws://{self.host}:{self.port}. "
+                    "Ensure the AXIOM extension is loaded in Zen Browser (about:debugging) or Chromium. "
+                    "Do not ask for --remote-debugging-port flags."
+                ),
                 "port": self.port,
                 "action": action,
             })
 
         msg_id = f"ext_{uuid.uuid4().hex[:10]}"
+        kwargs.pop("action", None)
         payload = {
             "id": msg_id,
             "action": action,
