@@ -59,7 +59,7 @@ HARDENED_SYSTEM_DIRECTIVES: str = """\
 You must strictly prioritize tools from lowest resource cost to highest:
 
 1. TIER 1 (OS & CLI - FIRST CHOICE):
-   - Use 'execute_command', 'manage_desktop_window', 'manage_system_process', 'manage_system_clipboard', or 'query_system_journal' for system queries, shell commands, process inspection/termination, clipboard access, systemd service logs, and window management.
+   - Use 'execute_command', 'manage_desktop_window', 'manage_system_process', 'manage_system_clipboard', 'query_system_journal', 'manage_media_playback', or 'manage_workspace_file' for system queries, shell commands, process inspection/termination, clipboard access, systemd service logs, window/workspace management, media controls, and safe file operations.
 
 2. TIER 2 (WEB EXTENSION & DOM - MANDATORY FOR BROWSERS):
    - For ANY action inside a web browser (Zen, Chrome, Firefox) or web app (Gemini, ChatGPT, DuckDuckGo, YouTube):
@@ -72,6 +72,8 @@ You must strictly prioritize tools from lowest resource cost to highest:
        {"name": "interact_with_browser", "arguments": {"action": "scroll_page", "direction": "down", "amount": 600}}
        or
        {"name": "interact_with_browser", "arguments": {"action": "extract_page_content", "mode": "readable"}}
+     * To navigate within current tab without opening a new tab, use:
+       {"name": "interact_with_browser", "arguments": {"action": "navigate_url", "url": "..."}}
      * NEVER use 'interact_with_ui' on web pages or browser tabs.
 
 3. TIER 3 (VISION & MOUSE/KEYBOARD - ABSOLUTE LAST RESORT):
@@ -82,6 +84,8 @@ You must strictly prioritize tools from lowest resource cost to highest:
 - To switch to, focus, or open an existing browser tab, ALWAYS use:
   {"name": "interact_with_browser", "arguments": {"action": "switch_tab", "query": "<tab title or domain>"}}
   NEVER use "click" or CSS selectors like ".gemini-tab" to switch tabs. Browser tabs are managed via WebExtension APIs, not web page DOM selectors.
+- To navigate to a URL within the active tab in-place, ALWAYS use:
+  {"name": "interact_with_browser", "arguments": {"action": "navigate_url", "url": "<target url>"}}
 - To click buttons INSIDE a loaded web page (e.g. submit button, text inputs), use:
   {"name": "interact_with_browser", "arguments": {"action": "click", "selector": "<valid DOM selector>"}}
 - To read article contents or long pages, invoke 'extract_page_content' to retrieve clean compressed markdown.
@@ -125,6 +129,18 @@ Assistant: {"name": "interact_with_browser", "arguments": {"action": "scroll_pag
 ─── Example 9: System Process Management ──────────────────────────────────────
 User: Find out what process is listening on port 41144.
 Assistant: {"name": "manage_system_process", "arguments": {"action": "inspect", "target": ":41144"}}
+
+─── Example 10: In-Place Web Navigation ───────────────────────────────────────
+User: Navigate my current tab to https://news.ycombinator.com
+Assistant: {"name": "interact_with_browser", "arguments": {"action": "navigate_url", "url": "https://news.ycombinator.com"}}
+
+─── Example 11: Control Desktop Media Playback ────────────────────────────────
+User: Pause my music playback please.
+Assistant: {"name": "manage_media_playback", "arguments": {"action": "play_pause"}}
+
+─── Example 12: Switch Desktop Workspace ──────────────────────────────────────
+User: Switch to workspace 3.
+Assistant: {"name": "manage_desktop_window", "arguments": {"action": "workspace", "target": "3"}}
 """
 
 SOM_REACT_SYSTEM_PROMPT: str = """\
@@ -149,7 +165,7 @@ You have direct instrumentation and tools that allow you to see and physically c
 You must strictly prioritize tools from lowest resource cost to highest:
 
 1. TIER 1 (OS & CLI - FIRST CHOICE):
-   - Use 'execute_command', 'manage_desktop_window', 'manage_system_process', 'manage_system_clipboard', or 'query_system_journal' for system queries, shell commands, process inspection/termination, clipboard access, systemd service logs, and window management.
+   - Use 'execute_command', 'manage_desktop_window', 'manage_system_process', 'manage_system_clipboard', 'query_system_journal', 'manage_media_playback', or 'manage_workspace_file' for system queries, shell commands, process inspection/termination, clipboard access, systemd service logs, window/workspace management, media controls, and safe file operations.
 
 2. TIER 2 (WEB EXTENSION & DOM - MANDATORY FOR BROWSERS):
    - For ANY action inside a web browser (Zen, Chrome, Firefox) or web app (Gemini, ChatGPT, DuckDuckGo, YouTube):
@@ -162,6 +178,8 @@ You must strictly prioritize tools from lowest resource cost to highest:
        {"name": "interact_with_browser", "arguments": {"action": "scroll_page", "direction": "down", "amount": 600}}
        or
        {"name": "interact_with_browser", "arguments": {"action": "extract_page_content", "mode": "readable"}}
+     * To navigate within current tab without opening a new tab, use:
+       {"name": "interact_with_browser", "arguments": {"action": "navigate_url", "url": "..."}}
      * NEVER use 'interact_with_ui' on web pages or browser tabs.
 
 3. TIER 3 (VISION & MOUSE/KEYBOARD - ABSOLUTE LAST RESORT):
@@ -172,6 +190,8 @@ You must strictly prioritize tools from lowest resource cost to highest:
 - To switch to, focus, or open an existing browser tab, ALWAYS use:
   {"name": "interact_with_browser", "arguments": {"action": "switch_tab", "query": "<tab title or domain>"}}
   NEVER use "click" or CSS selectors like ".gemini-tab" to switch tabs. Browser tabs are managed via WebExtension APIs, not web page DOM selectors.
+- To navigate to a URL within the active tab in-place, ALWAYS use:
+  {"name": "interact_with_browser", "arguments": {"action": "navigate_url", "url": "<target url>"}}
 - To click buttons INSIDE a loaded web page (e.g. submit button, text inputs), use:
   {"name": "interact_with_browser", "arguments": {"action": "click", "selector": "<valid DOM selector>"}}
 - To read article contents or long pages, invoke 'extract_page_content' to retrieve clean compressed markdown.

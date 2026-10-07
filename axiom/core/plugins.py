@@ -110,6 +110,50 @@ def load_plugins() -> None:
                 "    return json.dumps(res.to_dict(tool=_tool.name, arguments=params))\n"
             ),
         ),
+        (
+            TOOLS_DIR / "manage_media_playback.py",
+            (
+                "import json\n"
+                "from axiom.tools.os_desktop import ManageMediaPlaybackTool\n\n"
+                "_tool = ManageMediaPlaybackTool()\n\n"
+                "TOOL_SCHEMA = {\n"
+                '    "type": "function",\n'
+                '    "function": {\n'
+                '        "name": _tool.name,\n'
+                '        "description": _tool.description,\n'
+                '        "parameters": _tool.schema,\n'
+                "    }\n"
+                "}\n"
+                'TUI_HINT = "🎵 Controlling desktop media & audio..."\n'
+                "REQUIRED_RING = 0\n\n"
+                "async def execute(action: str = 'status', player: str = '', value: str = '', **kwargs) -> str:\n"
+                '    params = {"action": action, "player": player, "value": value, **kwargs}\n'
+                "    res = await _tool.execute(params)\n"
+                "    return json.dumps(res.to_dict(tool=_tool.name, arguments=params))\n"
+            ),
+        ),
+        (
+            TOOLS_DIR / "manage_workspace_file.py",
+            (
+                "import json\n"
+                "from axiom.tools.workspace_file import ManageWorkspaceFileTool\n\n"
+                "_tool = ManageWorkspaceFileTool()\n\n"
+                "TOOL_SCHEMA = {\n"
+                '    "type": "function",\n'
+                '    "function": {\n'
+                '        "name": _tool.name,\n'
+                '        "description": _tool.description,\n'
+                '        "parameters": _tool.schema,\n'
+                "    }\n"
+                "}\n"
+                'TUI_HINT = "📁 Safely managing workspace file..."\n'
+                "REQUIRED_RING = 0\n\n"
+                "async def execute(action: str = 'read', path: str = '', content: str = '', search_text: str = '', replace_text: str = '', max_lines: int = 200, **kwargs) -> str:\n"
+                '    params = {"action": action, "path": path, "content": content, "search_text": search_text, "replace_text": replace_text, "max_lines": max_lines, **kwargs}\n'
+                "    res = await _tool.execute(params)\n"
+                "    return json.dumps(res.to_dict(tool=_tool.name, arguments=params))\n"
+            ),
+        ),
     ]
     for target_file, code_content in provisions:
         if not target_file.exists():

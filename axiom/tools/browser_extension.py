@@ -44,7 +44,10 @@ class BrowserResult(dict):
             or ({"tab_id": self.get("tab_id"), "title": self.get("title"), "url": self.get("url")} if "tab_id" in self else None)
             or ({"closed_tab_id": self.get("closed_tab_id"), "title": self.get("title")} if "closed_tab_id" in self else None)
             or ({"clicked_id": self.get("clicked_id"), "tag": self.get("tag"), "text": self.get("text")} if "clicked_id" in self else None)
+            or ({"element_id": self.get("element_id"), "element_type": self.get("element_type"), "value": self.get("value"), "text": self.get("text"), "submitted": self.get("submitted")} if "element_id" in self and "element_type" in self else None)
             or ({"element_id": self.get("element_id"), "text": self.get("text"), "submitted": self.get("submitted")} if "element_id" in self and "submitted" in self else None)
+            or ({"screenshot_path": self.get("screenshot_path"), "format": self.get("format", "png"), "length": self.get("length")} if "screenshot_path" in self else None)
+            or ({"format": self.get("format"), "data_url_prefix": self.get("data_url_prefix"), "length": self.get("length")} if "data_url_prefix" in self else None)
             or ({"scrollY": self.get("scrollY"), "innerHeight": self.get("innerHeight"), "scrollHeight": self.get("scrollHeight")} if "scrollY" in self else None)
             or ({"pinned": self.get("pinned"), "tab_id": self.get("tab_id")} if "pinned" in self else None)
             or self
@@ -255,9 +258,11 @@ async def interact_with_browser(
     """Interacts with browser via local WebExtension WebSocket bridge.
 
     Actions:
+      - navigate_url: Navigates current tab to URL in-place without opening a new tab.
+      - capture_tab_screenshot: Captures visible viewport as PNG.
       - get_page_snapshot: Inspects active tab, numbers interactive elements, and returns compact summary.
       - click_element: Clicks element by numeric snapshot ID (element_id).
-      - fill_element: Types text into element by numeric ID, optionally submitting form.
+      - fill_element: Types text into element by numeric ID, or selects dropdown/checkbox, optionally submitting form.
       - list_tabs: Query list of open tabs with IDs, titles, URLs, active state.
       - switch_tab: Matches tab titles or URLs against query and switches focus.
       - open_tab: Opens a new tab with given URL.

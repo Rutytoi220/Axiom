@@ -245,6 +245,137 @@ async function handleCommand(msg) {
         break;
       }
 
+      case "navigate_url": {
+        let url = (msg.url || msg.query || msg.target || "").trim();
+        if (!url) {
+          sendReply({ id, success: false, action: "navigate_url", error: "Missing url parameter" });
+          return;
+        }
+        if (!url.includes("://") && !url.startsWith("about:") && !url.startsWith("chrome:")) {
+          url = `https://${url}`;
+        }
+
+        const tab = await getTargetTab(msg);
+        if (!tab || !tab.id) {
+          sendReply({ id, success: false, action: "navigate_url", error: "No target tab available to navigate" });
+          return;
+        }
+
+        try {
+          await chrome.tabs.update(tab.id, { url });
+
+          // Await tab status === "complete" or a 4-second timeout
+          await new Promise((resolve) => {
+            let timer = null;
+            let listener = null;
+
+            const cleanup = () => {
+              if (timer) clearTimeout(timer);
+              if (listener && chrome.tabs && chrome.tabs.onUpdated && typeof chrome.tabs.onUpdated.removeListener === "function") {
+                try { chrome.tabs.onUpdated.removeListener(listener); } catch (_) {}
+              }
+            };
+
+            timer = setTimeout(() => {
+              cleanup();
+              resolve();
+            }, 4000);
+
+            listener = (updatedTabId, changeInfo) => {
+              if (updatedTabId === tab.id && changeInfo.status === "complete") {
+                cleanup();
+                resolve();
+              }
+            };
+
+            if (chrome.tabs && chrome.tabs.onUpdated && typeof chrome.tabs.onUpdated.addListener === "function") {
+              try {
+                chrome.tabs.onUpdated.addListener(listener);
+              } catch (_) {
+                cleanup();
+                resolve();
+              }
+            } else {
+              cleanup();
+              resolve();
+            }
+          });
+
+          let updatedTab = null;
+          try {
+            updatedTab = await chrome.tabs.get(tab.id);
+          } catch (_) {}
+
+          sendReply({
+            id,
+            success: true,
+            action: "navigate_url",
+            tab_id: tab.id,
+            title: (updatedTab && updatedTab.title) || tab.title || "",
+            url: (updatedTab && updatedTab.url) || url,
+          });
+        } catch (err) {
+          sendReply({
+            id,
+            success: false,
+            action: "navigate_url",
+            error: `Failed to navigate tab: ${err.message || String(err)}`,
+          });
+        }
+        break;
+      }
+
+      case "capture_tab_screenshot": {
+        try {
+          if (!chrome.tabs || typeof chrome.tabs.captureVisibleTab !== "function") {
+            sendReply({
+              id,
+              success: false,
+              action: "capture_tab_screenshot",
+              error: "captureVisibleTab API is not supported in this browser context",
+            });
+            return;
+          }
+
+          const capturePromise = new Promise((resolve, reject) => {
+            try {
+              const res = chrome.tabs.captureVisibleTab(null, { format: "png" }, (result) => {
+                if (chrome.runtime && chrome.runtime.lastError) {
+                  reject(new Error(chrome.runtime.lastError.message));
+                } else if (result) {
+                  resolve(result);
+                }
+              });
+              if (res && typeof res.then === "function") {
+                res.then(resolve).catch(reject);
+              }
+            } catch (e) {
+              reject(e);
+            }
+          });
+
+          const dataUrl = await capturePromise;
+
+          sendReply({
+            id,
+            success: true,
+            action: "capture_tab_screenshot",
+            format: "png",
+            data_url: dataUrl,
+            data_url_prefix: dataUrl ? dataUrl.slice(0, 30) : "",
+            length: dataUrl ? dataUrl.length : 0,
+          });
+        } catch (err) {
+          sendReply({
+            id,
+            success: false,
+            action: "capture_tab_screenshot",
+            error: `Failed to capture tab screenshot: ${err.message || String(err)}`,
+          });
+        }
+        break;
+      }
+
       case "get_active_tab": {
         try {
           let activeTabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
@@ -630,7 +761,40 @@ async function handleCommand(msg) {
               el.focus();
             } catch (_) {}
 
-            if ("value" in el) {
+            const tag = el.tagName.toLowerCase();
+            let currentVal = val;
+
+            if (tag === "select") {
+              const options = Array.from(el.options || []);
+              const lowerVal = String(val).toLowerCase().trim();
+              const matchedOpt = options.find((opt) =>
+                (opt.value && opt.value.toLowerCase().trim() === lowerVal) ||
+                (opt.text && opt.text.toLowerCase().trim() === lowerVal) ||
+                (opt.text && opt.text.toLowerCase().trim().includes(lowerVal)) ||
+                (opt.value && opt.value.toLowerCase().trim().includes(lowerVal))
+              );
+              if (matchedOpt) {
+                el.value = matchedOpt.value;
+                currentVal = el.value;
+              } else if (val) {
+                el.value = val;
+                currentVal = el.value;
+              }
+              el.dispatchEvent(new Event("input", { bubbles: true }));
+              el.dispatchEvent(new Event("change", { bubbles: true }));
+            } else if (tag === "input" && (el.type === "checkbox" || el.type === "radio")) {
+              const lowerVal = String(val).toLowerCase().trim();
+              if (lowerVal === "true" || lowerVal === "1" || lowerVal === "check" || lowerVal === "checked") {
+                el.checked = true;
+              } else if (lowerVal === "false" || lowerVal === "0" || lowerVal === "uncheck" || lowerVal === "unchecked") {
+                el.checked = false;
+              } else {
+                el.checked = !el.checked;
+              }
+              currentVal = el.checked;
+              el.dispatchEvent(new Event("input", { bubbles: true }));
+              el.dispatchEvent(new Event("change", { bubbles: true }));
+            } else if ("value" in el) {
               el.value = val;
               el.dispatchEvent(new Event("input", { bubbles: true }));
               el.dispatchEvent(new Event("change", { bubbles: true }));
@@ -670,9 +834,12 @@ async function handleCommand(msg) {
               }
             }
 
+            const id = elemId != null ? elemId : (el.getAttribute("data-axiom-id") ? Number(el.getAttribute("data-axiom-id")) : null);
             return {
               success: true,
-              element_id: elemId != null ? elemId : (el.getAttribute("data-axiom-id") ? Number(el.getAttribute("data-axiom-id")) : null),
+              element_id: id,
+              element_type: tag,
+              value: currentVal,
               text: val,
               submitted: submitted,
             };

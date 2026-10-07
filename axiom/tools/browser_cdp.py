@@ -31,8 +31,9 @@ class InteractWithBrowserTool(BaseTool):
             description=(
                 "Tier 2 Semantic UI Automation: Browser and tab automation via AXIOM WebExtension bridge. "
                 "Use 'click_element' with 'element_id' from the latest get_page_snapshot to click buttons, links, or controls on the page. "
-                "Actions: 'get_page_snapshot' (list numbered interactive elements), 'click_element' (click by element_id), "
-                "'fill_element' (type text into element_id), 'scroll_page' (scroll down/up/top/bottom), "
+                "Actions: 'navigate_url' (navigate active tab in-place), 'capture_tab_screenshot' (capture PNG of viewport), "
+                "'get_page_snapshot' (list numbered interactive elements), 'click_element' (click by element_id), "
+                "'fill_element' (type text into element_id or select dropdown/checkbox), 'scroll_page' (scroll down/up/top/bottom), "
                 "'extract_page_content' (extract clean markdown content up to 4000 chars), "
                 "'switch_tab' (focus tab by query), 'open_tab' (open url), 'close_tab' (close tab), "
                 "'duplicate_tab', 'reload_tab', 'pin_tab', 'get_active_tab', 'list_tabs', 'click' (DOM selector), 'type', 'get_dom'."
@@ -43,8 +44,9 @@ class InteractWithBrowserTool(BaseTool):
                 name="action",
                 type="string",
                 description=(
-                    "The browser action: 'get_page_snapshot', 'click_element', 'fill_element', 'scroll_page', 'extract_page_content', "
-                    "'switch_tab', 'open_tab', 'close_tab', 'duplicate_tab', 'reload_tab', 'pin_tab', 'get_active_tab', 'list_tabs', 'click', 'type', 'get_dom'."
+                    "The browser action: 'navigate_url', 'capture_tab_screenshot', 'get_page_snapshot', 'click_element', 'fill_element', "
+                    "'scroll_page', 'extract_page_content', 'switch_tab', 'open_tab', 'close_tab', 'duplicate_tab', 'reload_tab', "
+                    "'pin_tab', 'get_active_tab', 'list_tabs', 'click', 'type', 'get_dom'."
                 ),
                 required=True,
             ),
@@ -211,6 +213,29 @@ class InteractWithBrowserTool(BaseTool):
                     ext_params = {k: v for k, v in params.items() if k not in ("action", "_force_cdp")}
                     ext_res = await bridge.send_command(action, **ext_params)
                     if ext_res.success:
+                        if action == "capture_tab_screenshot":
+                            import base64
+                            from pathlib import Path
+                            raw_data = ext_res.get("data_url") or ext_res.get("data") or ""
+                            if "," in raw_data:
+                                b64_bytes = raw_data.split(",", 1)[1]
+                            else:
+                                b64_bytes = raw_data
+                            screenshot_path = "/tmp/axiom_tab_capture.png"
+                            try:
+                                if b64_bytes:
+                                    img_bytes = base64.b64decode(b64_bytes)
+                                    Path(screenshot_path).write_bytes(img_bytes)
+                                return ToolResult(
+                                    True,
+                                    output={
+                                        "screenshot_path": screenshot_path,
+                                        "format": ext_res.get("format", "png"),
+                                        "length": ext_res.get("length", len(raw_data)),
+                                    },
+                                )
+                            except Exception as save_err:
+                                return ToolResult(False, error=f"Failed saving screenshot: {save_err}")
                         return ToolResult(True, output=ext_res.output or ext_res)
                     error_msg = ext_res.error or "Extension command failed"
                     if "open_tabs" in ext_res:

@@ -52,6 +52,7 @@ COMMANDS = {
     "/tools": "List active Three-Tier tools in registry",
     "/memory": "Manage persistent semantic memories (/memory list, /memory add <fact>)",
     "/rules": "Display active global and local project instructions",
+    "/status": "Display live system, bridge, desktop, and tool telemetry",
     "/exit": "Quit the AXIOM REPL cleanly",
 }
 
@@ -451,6 +452,84 @@ class InlineRepl:
                 console.print(f"\n[dim italic #7982a9]▾ Last Thought Trace:\n{self.last_thought}[/]\n[dim #3b4261]───[/]\n")
             else:
                 console.print("[dim]No thought trace stored from the last response.[/dim]\n")
+            return True
+
+        elif cmd == "/status":
+            import shutil
+            import subprocess
+            from axiom.tools.browser_extension import get_bridge
+
+            # 1. WebSocket Extension Bridge Telemetry
+            bridge = get_bridge()
+            is_listening = bridge.server is not None
+            client_count = bridge.client_count if bridge else 0
+            if is_listening:
+                bridge_status = f"[#9ece6a]Active (ws://{bridge.host}:{bridge.port})[/#9ece6a] · [value]{client_count}[/value] client{'s' if client_count != 1 else ''} connected"
+            else:
+                bridge_status = "[#f7768e]Inactive (Not listening)[/#f7768e]"
+
+            # 2. Desktop Environment Telemetry
+            hypr_sig = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE", "")
+            wayland_disp = os.environ.get("WAYLAND_DISPLAY", "")
+            ws_str = "N/A"
+            if hypr_sig and shutil.which("hyprctl"):
+                try:
+                    res = subprocess.run(["hyprctl", "activeworkspace", "-j"], capture_output=True, text=True, timeout=1.0)
+                    if res.returncode == 0:
+                        ws_data = json.loads(res.stdout)
+                        ws_str = f"Workspace {ws_data.get('id', ws_data.get('name', 'Unknown'))}"
+                except Exception:
+                    pass
+            desktop_status = f"Wayland: [value]{wayland_disp or 'None'}[/value] · Hyprland: [value]{'Active' if hypr_sig else 'Inactive'}[/value] ({ws_str})"
+
+            # 3. Audio / Media Control Telemetry (MPRIS)
+            media_status = "No active media players detected"
+            if shutil.which("playerctl"):
+                try:
+                    res = subprocess.run(
+                        ["playerctl", "metadata", "--format", "{{playerName}}: {{title}} - {{artist}} ({{status}})"],
+                        capture_output=True, text=True, timeout=1.0,
+                    )
+                    if res.returncode == 0 and res.stdout.strip():
+                        media_status = res.stdout.strip()
+                except Exception:
+                    pass
+
+            # 4. Registered Tools Telemetry
+            schemas = get_tool_schemas(0)
+            tool_status = f"[value]{len(schemas)}[/value] dynamic tools active across Tier 1, Tier 2, and Tier 3"
+
+            # 5. VRAM / CUDA Engine Telemetry
+            cuda_status = "Torch/CUDA runtime not resident (lazy init)"
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    alloc_mb = torch.cuda.memory_allocated() / (1024 ** 2)
+                    res_mb = torch.cuda.memory_reserved() / (1024 ** 2)
+                    dev_name = torch.cuda.get_device_name(0)
+                    cuda_status = f"[#9ece6a]Active[/#9ece6a] ({dev_name}) · VRAM Allocated: [value]{alloc_mb:.1f} MB[/value] · Reserved: [value]{res_mb:.1f} MB[/value]"
+                else:
+                    cuda_status = "CPU mode (CUDA not available)"
+            except ImportError:
+                cuda_status = "Torch not installed in active environment"
+            except Exception as e:
+                cuda_status = f"Unknown ({e})"
+
+            panel_content = (
+                f"[label]WebSocket Extension Bridge:[/label] {bridge_status}\n"
+                f"[label]Desktop Environment:[/label] {desktop_status}\n"
+                f"[label]Audio / Media (MPRIS):[/label] [value]{media_status}[/value]\n"
+                f"[label]Registered Tool Count:[/label] {tool_status}\n"
+                f"[label]VRAM / CUDA Grounding:[/label] {cuda_status}"
+            )
+            console.print()
+            console.print(Panel(
+                panel_content,
+                title="[title]AXIOM System & Runtime Telemetry[/title]",
+                border_style="#7aa2f7",
+                padding=(1, 2),
+            ))
+            console.print()
             return True
 
         return False

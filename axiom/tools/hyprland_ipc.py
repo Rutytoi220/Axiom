@@ -26,14 +26,14 @@ class ManageDesktopWindowTool(BaseTool):
             description=(
                 "Tier 1 Hyprland System IPC: Deterministically manage desktop windows, workspaces, "
                 "and focus via hyprctl. Actions: 'list', 'get_active', 'focus', 'workspace', "
-                "'toggle_floating', 'toggle_fullscreen', 'close'."
+                "'move_to_workspace', 'toggle_floating', 'toggle_fullscreen', 'close'."
             ),
         )
         self.parameters = [
             ToolParameter(
                 name="action",
                 type="string",
-                description="The window management action to perform: 'list', 'get_active', 'focus', 'workspace', 'toggle_floating', 'toggle_fullscreen', 'close'.",
+                description="The window management action to perform: 'list', 'get_active', 'focus', 'workspace', 'move_to_workspace', 'toggle_floating', 'toggle_fullscreen', 'close'.",
                 required=True,
             ),
             ToolParameter(
@@ -110,12 +110,11 @@ class ManageDesktopWindowTool(BaseTool):
             elif action in ("focus", "focuswindow"):
                 if not target:
                     return ToolResult(False, error="Target window class, title, or address is required for 'focus' action.")
-                # If target is a hex address, use address: prefix
                 dispatch_arg = f"address:{target}" if target.startswith("0x") else target
                 code, out, err = await self._run_hyprctl(f"dispatch focuswindow {dispatch_arg}")
                 if code != 0 or "failed" in err.lower():
                     return ToolResult(False, error=f"Failed to focus window: {err or out}")
-                return ToolResult(True, output=f"Focused window matching '{target}'.")
+                return ToolResult(True, output={"action": "focus", "target": target, "message": f"Focused window matching '{target}'."})
 
             elif action in ("workspace", "switch_workspace"):
                 if not target:
@@ -123,31 +122,39 @@ class ManageDesktopWindowTool(BaseTool):
                 code, out, err = await self._run_hyprctl(f"dispatch workspace {target}")
                 if code != 0 or "failed" in err.lower():
                     return ToolResult(False, error=f"Failed to switch workspace: {err or out}")
-                return ToolResult(True, output=f"Switched to workspace '{target}'.")
+                return ToolResult(True, output={"action": "workspace", "workspace": target, "message": f"Switched to workspace '{target}'."})
+
+            elif action in ("move_to_workspace", "movetoworkspace", "move_to_ws"):
+                if not target:
+                    return ToolResult(False, error="Target workspace ID or name is required for 'move_to_workspace' action.")
+                code, out, err = await self._run_hyprctl(f"dispatch movetoworkspace {target}")
+                if code != 0 or "failed" in err.lower():
+                    return ToolResult(False, error=f"Failed to move window to workspace: {err or out}")
+                return ToolResult(True, output={"action": "move_to_workspace", "target_workspace": target, "message": f"Moved window to workspace '{target}'."})
 
             elif action in ("toggle_floating", "togglefloating"):
                 code, out, err = await self._run_hyprctl("dispatch togglefloating")
                 if code != 0:
                     return ToolResult(False, error=f"Failed to toggle floating: {err}")
-                return ToolResult(True, output="Toggled floating state of active window.")
+                return ToolResult(True, output={"action": "toggle_floating", "message": "Toggled floating state of active window."})
 
             elif action in ("toggle_fullscreen", "fullscreen"):
                 code, out, err = await self._run_hyprctl("dispatch fullscreen 1")
                 if code != 0:
                     return ToolResult(False, error=f"Failed to toggle fullscreen: {err}")
-                return ToolResult(True, output="Toggled fullscreen state of active window.")
+                return ToolResult(True, output={"action": "fullscreen", "message": "Toggled fullscreen state of active window."})
 
             elif action in ("close", "closewindow"):
                 arg = f"address:{target}" if target.startswith("0x") else target
                 code, out, err = await self._run_hyprctl(f"dispatch closewindow {arg}" if arg else "dispatch closewindow")
                 if code != 0:
                     return ToolResult(False, error=f"Failed to close window: {err}")
-                return ToolResult(True, output=f"Closed window '{target or 'active'}'.")
+                return ToolResult(True, output={"action": "close", "target": target or "active", "message": f"Closed window '{target or 'active'}'."})
 
             else:
                 return ToolResult(
                     False,
-                    error=f"Unknown action '{action}'. Supported actions: list, get_active, focus, workspace, toggle_floating, toggle_fullscreen, close.",
+                    error=f"Unknown action '{action}'. Supported actions: list, get_active, focus, workspace, move_to_workspace, toggle_floating, toggle_fullscreen, close.",
                 )
 
         except Exception as exc:
