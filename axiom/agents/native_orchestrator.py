@@ -3,7 +3,7 @@ import json
 import re
 import shutil
 import httpx
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Optional
 from axiom.core.plugins import get_tool_schemas, execute_tool, get_tier_timeout
 
 REFUSAL_PHRASES = [
@@ -17,6 +17,15 @@ REFUSAL_PHRASES = [
 class NativeOrchestrator:
     def __init__(self, max_context_tokens: int = 32768):
         self.max_context_tokens = max_context_tokens
+        self._execute_tool = None
+
+    @property
+    def execute_tool(self):
+        return self._execute_tool or execute_tool
+
+    @execute_tool.setter
+    def execute_tool(self, val):
+        self._execute_tool = val
 
     @classmethod
     def is_refusal(cls, text: str) -> bool:
@@ -162,12 +171,39 @@ class NativeOrchestrator:
         """Tolerantly extract the first valid JSON/XML tool call from model text.
 
         Resolves issues with small models (e.g. Qwen-7B) emitting concatenated
-        JSON objects, markdown code fences, or reasoning text before tool calls.
-        Safely extracts and returns ONLY the first valid tool call, ignoring trailing
-        calls or text.
+        JSON objects, markdown code fences embedded in prose, or reasoning text before tool calls.
+        Safely extracts and returns the first valid tool call normalized to dual format:
+        {"type": "function", "function": {"name": ..., "arguments": ...}, "name": ..., "arguments": ...}
         """
         if not text:
             return None
+
+        def _format_res(name: Any, args: Any) -> Optional[dict]:
+            if not name or not isinstance(name, str):
+                return None
+            clean_name = name
+            if clean_name.startswith("functions."):
+                clean_name = clean_name[len("functions."):]
+            elif clean_name.startswith("tools."):
+                clean_name = clean_name[len("tools."):]
+            if known_tools and clean_name not in known_tools:
+                return None
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except Exception:
+                    pass
+            if not isinstance(args, dict):
+                args = {}
+            return {
+                "type": "function",
+                "function": {
+                    "name": clean_name,
+                    "arguments": args,
+                },
+                "name": clean_name,
+                "arguments": args,
+            }
 
         # 1. XML <tool_call> tags
         if "<tool_call>" in text:
@@ -175,13 +211,49 @@ class NativeOrchestrator:
             xml_res = extract_xml_tool_call(text)
             if xml_res and "function" in xml_res:
                 fn = xml_res["function"]
-                name = fn.get("name", "")
-                if name.startswith("functions."):
-                    name = name[len("functions."):]
-                elif name.startswith("tools."):
-                    name = name[len("tools."):]
-                if not known_tools or name in known_tools:
-                    return {"name": name, "arguments": fn.get("arguments", {})}
+                res = _format_res(fn.get("name", ""), fn.get("arguments", {}))
+                if res:
+                    return res
+
+        # 2. Markdown code fences embedded anywhere in the text
+        # Handles models placing conversational commentary before ```json ... ``` blocks
+        for match in re.finditer(r"```(?:json)?\s*([\{\[].*?[\}\]])\s*```", text, re.DOTALL | re.IGNORECASE):
+            block = match.group(1).strip()
+            decoder = json.JSONDecoder()
+            idx = 0
+            while idx < len(block):
+                brace_pos = block.find("{", idx)
+                bracket_pos = block.find("[", idx)
+                if brace_pos != -1 and bracket_pos != -1:
+                    start_pos = min(brace_pos, bracket_pos)
+                elif brace_pos != -1:
+                    start_pos = brace_pos
+                elif bracket_pos != -1:
+                    start_pos = bracket_pos
+                else:
+                    break
+
+                try:
+                    obj, end_pos = decoder.raw_decode(block, start_pos)
+                    if isinstance(obj, list) and obj:
+                        first_item = obj[0]
+                        if isinstance(first_item, dict):
+                            fn_obj = first_item.get("function") if isinstance(first_item.get("function"), dict) else first_item
+                            name = fn_obj.get("name") or fn_obj.get("tool")
+                            args = fn_obj.get("arguments", fn_obj.get("parameters", fn_obj.get("args", {})))
+                            res = _format_res(name, args)
+                            if res:
+                                return res
+                    elif isinstance(obj, dict):
+                        fn_obj = obj.get("function") if isinstance(obj.get("function"), dict) else obj
+                        name = fn_obj.get("name") or fn_obj.get("tool")
+                        args = fn_obj.get("arguments", fn_obj.get("parameters", fn_obj.get("args", {})))
+                        res = _format_res(name, args)
+                        if res:
+                            return res
+                    idx = end_pos
+                except json.JSONDecodeError:
+                    idx = start_pos + 1
 
         candidate = text.strip()
         # Clean enclosing markdown fences
@@ -193,7 +265,7 @@ class NativeOrchestrator:
             candidate = candidate[:-3]
         candidate = candidate.strip()
 
-        # 2. Check if text starts with a JSON list of tool calls
+        # 3. Check if text starts with a JSON list of tool calls
         if candidate.startswith("["):
             try:
                 decoder = json.JSONDecoder()
@@ -201,24 +273,16 @@ class NativeOrchestrator:
                 if isinstance(parsed_list, list) and parsed_list:
                     first_item = parsed_list[0]
                     if isinstance(first_item, dict):
-                        name = first_item.get("name") or first_item.get("tool")
-                        if name:
-                            if name.startswith("functions."):
-                                name = name[len("functions."):]
-                            elif name.startswith("tools."):
-                                name = name[len("tools."):]
-                            if not known_tools or name in known_tools:
-                                args = first_item.get("arguments", first_item.get("parameters", first_item.get("args", {})))
-                                if isinstance(args, str):
-                                    try:
-                                        args = json.loads(args)
-                                    except Exception:
-                                        pass
-                                return {"name": name, "arguments": args}
+                        fn_obj = first_item.get("function") if isinstance(first_item.get("function"), dict) else first_item
+                        name = fn_obj.get("name") or fn_obj.get("tool")
+                        args = fn_obj.get("arguments", fn_obj.get("parameters", fn_obj.get("args", {})))
+                        res = _format_res(name, args)
+                        if res:
+                            return res
             except Exception:
                 pass
 
-        # 3. Iterative JSONDecoder().raw_decode starting at each '{'
+        # 4. Iterative JSONDecoder().raw_decode starting at each '{'
         decoder = json.JSONDecoder()
         idx = 0
         while idx < len(candidate):
@@ -228,52 +292,26 @@ class NativeOrchestrator:
             try:
                 obj, end_pos = decoder.raw_decode(candidate, brace_pos)
                 if isinstance(obj, dict):
-                    name = None
-                    args = {}
-                    if "function" in obj and isinstance(obj["function"], dict) and "name" in obj["function"]:
-                        name = obj["function"]["name"]
-                        args = obj["function"].get("arguments", {})
-                    elif "name" in obj and isinstance(obj["name"], str):
-                        name = obj["name"]
-                        args = obj.get("arguments", obj.get("parameters", obj.get("args", {})))
-                    elif "tool" in obj and isinstance(obj["tool"], str):
-                        name = obj["tool"]
-                        args = obj.get("arguments", obj.get("parameters", obj.get("args", {})))
-
-                    if name:
-                        if name.startswith("functions."):
-                            name = name[len("functions."):]
-                        elif name.startswith("tools."):
-                            name = name[len("tools."):]
-                        if not known_tools or name in known_tools:
-                            if isinstance(args, str):
-                                try:
-                                    args = json.loads(args)
-                                except Exception:
-                                    pass
-                            return {"name": name, "arguments": args}
+                    fn_obj = obj.get("function") if isinstance(obj.get("function"), dict) else obj
+                    name = fn_obj.get("name") or fn_obj.get("tool")
+                    args = fn_obj.get("arguments", fn_obj.get("parameters", fn_obj.get("args", {})))
+                    res = _format_res(name, args)
+                    if res:
+                        return res
                 idx = brace_pos + 1
             except json.JSONDecodeError:
                 idx = brace_pos + 1
 
-        # 4. Fallback regex search for single-level JSON tool call objects
+        # 5. Fallback regex search for single-level JSON tool call objects
         for match in re.finditer(r'\{[^{}]*"name"\s*:\s*"([^"]+)"[^{}]*\}', candidate):
             try:
                 extracted = json.loads(match.group(0))
                 if isinstance(extracted, dict) and "name" in extracted:
                     name = extracted["name"]
-                    if name.startswith("functions."):
-                        name = name[len("functions."):]
-                    elif name.startswith("tools."):
-                        name = name[len("tools."):]
-                    if not known_tools or name in known_tools:
-                        args = extracted.get("arguments", extracted.get("parameters", extracted.get("args", {})))
-                        if isinstance(args, str):
-                            try:
-                                args = json.loads(args)
-                            except Exception:
-                                pass
-                        return {"name": name, "arguments": args}
+                    args = extracted.get("arguments", extracted.get("parameters", extracted.get("args", {})))
+                    res = _format_res(name, args)
+                    if res:
+                        return res
             except Exception:
                 pass
 
@@ -473,11 +511,15 @@ class NativeOrchestrator:
                                             pending_tool_calls.append({"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
                                         if "id" in tc and tc["id"]:
                                             pending_tool_calls[idx]["id"] = tc["id"]
-                                        if "function" in tc:
+                                        if "function" in tc and isinstance(tc["function"], dict):
                                             if "name" in tc["function"] and tc["function"]["name"]:
                                                 pending_tool_calls[idx]["function"]["name"] = tc["function"]["name"]
                                             if "arguments" in tc["function"] and tc["function"]["arguments"]:
-                                                pending_tool_calls[idx]["function"]["arguments"] += tc["function"]["arguments"]
+                                                pending_tool_calls[idx]["function"]["arguments"] += str(tc["function"]["arguments"])
+                                        elif "name" in tc and tc["name"]:
+                                            pending_tool_calls[idx]["function"]["name"] = tc["name"]
+                                            if "arguments" in tc and tc["arguments"]:
+                                                pending_tool_calls[idx]["function"]["arguments"] += str(tc["arguments"])
 
                                 if buffering:
                                     if "tool_calls" in delta or pending_tool_calls:
@@ -550,14 +592,24 @@ class NativeOrchestrator:
             known_tools = set()
             if payload.get("tools"):
                 for t in payload["tools"]:
-                    if isinstance(t, dict) and "function" in t and "name" in t["function"]:
-                        known_tools.add(t["function"]["name"])
+                    if isinstance(t, dict):
+                        if "function" in t and "name" in t["function"]:
+                            known_tools.add(t["function"]["name"])
+                        elif "name" in t:
+                            known_tools.add(t["name"])
 
             tool_call = self.extract_first_tool_call(full_text, known_tools)
             if tool_call:
-                func_name = tool_call["name"]
-                func_args = tool_call.get("arguments", {})
-                func_args_str = json.dumps(func_args) if isinstance(func_args, dict) else str(func_args)
+                func_name = tool_call.get("function", {}).get("name") or tool_call.get("name")
+                func_args = tool_call.get("function", {}).get("arguments") or tool_call.get("arguments", {})
+                if isinstance(func_args, str):
+                    try:
+                        func_args = json.loads(func_args)
+                    except Exception:
+                        pass
+                if not isinstance(func_args, dict):
+                    func_args = {}
+                func_args_str = json.dumps(func_args)
                 call_id = "call_native_0"
                 pending_tool_calls = [{
                     "id": call_id,
@@ -565,7 +617,9 @@ class NativeOrchestrator:
                     "function": {
                         "name": func_name,
                         "arguments": func_args_str
-                    }
+                    },
+                    "name": func_name,
+                    "arguments": func_args
                 }]
                 buffered_chunks.clear()
                 yield {
@@ -599,13 +653,18 @@ class NativeOrchestrator:
             payload["messages"].append(assistant_msg)
 
             for tc in pending_tool_calls:
-                func_name = tc["function"]["name"]
-                func_args_str = tc["function"]["arguments"]
-                tool_call_id = tc["id"]
+                func_name = tc.get("function", {}).get("name") or tc.get("name")
+                func_args_raw = tc.get("function", {}).get("arguments") or tc.get("arguments", {})
+                tool_call_id = tc.get("id", "call_native_0")
 
-                try:
-                    func_args = json.loads(func_args_str) if func_args_str else {}
-                except Exception:
+                if isinstance(func_args_raw, str):
+                    try:
+                        func_args = json.loads(func_args_raw) if func_args_raw else {}
+                    except Exception:
+                        func_args = {}
+                elif isinstance(func_args_raw, dict):
+                    func_args = func_args_raw
+                else:
                     func_args = {}
 
                 # Guard against model confusing interact_with_ui with interact_with_browser on web elements
@@ -616,7 +675,7 @@ class NativeOrchestrator:
                 timeout_int = int(timeout)
                 try:
                     tool_result = await asyncio.wait_for(
-                        execute_tool(func_name, **func_args),
+                        self.execute_tool(func_name, **func_args),
                         timeout=timeout,
                     )
                     
