@@ -11,6 +11,17 @@ async def test_repl_bridge_binding():
     # Ensure bridge singleton is clean before test
     BrowserExtensionBridge.reset_instance()
 
+    import socket
+    test_port = 41144
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind(("127.0.0.1", 41144))
+        except OSError:
+            test_port = 41145  # Port 41144 in use by active user session
+
+    BrowserExtensionBridge.get_instance(port=test_port)
+
     repl = InlineRepl(session_id="test_bridge_binding_session")
     assert repl.bridge is None
     assert repl._bridge_server is None

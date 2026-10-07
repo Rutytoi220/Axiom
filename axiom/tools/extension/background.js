@@ -444,6 +444,247 @@ async function handleCommand(msg) {
         break;
       }
 
+      case "get_page_snapshot": {
+        const tab = await getTargetTab(msg);
+        if (!tab || !tab.id) {
+          sendReply({ id, success: false, action: "get_page_snapshot", error: "No target tab available" });
+          return;
+        }
+
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            // Clean up any old labels first
+            const oldLabeled = document.querySelectorAll("[data-axiom-id]");
+            for (const el of oldLabeled) {
+              el.removeAttribute("data-axiom-id");
+            }
+
+            const selector = [
+              "a[href]",
+              "button",
+              "input",
+              "textarea",
+              "select",
+              '[role="button"]',
+              '[role="link"]',
+              "[onclick]",
+              '[tabindex]:not([tabindex="-1"])',
+            ].join(", ");
+
+            const candidates = Array.from(document.querySelectorAll(selector));
+            const items = [];
+            let index = 1;
+
+            for (const el of candidates) {
+              if (index > 50) break; // Capped at 50 most relevant elements
+
+              const rect = el.getBoundingClientRect();
+              const style = window.getComputedStyle(el);
+              if (
+                rect.width === 0 ||
+                rect.height === 0 ||
+                style.display === "none" ||
+                style.visibility === "hidden" ||
+                parseFloat(style.opacity || "1") === 0
+              ) {
+                continue;
+              }
+
+              // Tag element with transient attribute
+              el.setAttribute("data-axiom-id", String(index));
+
+              const tag = el.tagName.toLowerCase();
+              const item = {
+                id: index,
+                tag: tag,
+              };
+
+              if (tag === "input" || tag === "textarea") {
+                if (el.type) item.type = el.type;
+                if (el.placeholder) item.placeholder = el.placeholder.slice(0, 100);
+                if (el.value) item.value = el.value.slice(0, 100);
+                if (el.name) item.name = el.name;
+              }
+
+              const ariaLabel = el.getAttribute("aria-label") || el.getAttribute("aria-labelledby") || "";
+              if (ariaLabel) item.aria_label = ariaLabel.trim().slice(0, 100);
+
+              const text = (el.innerText || el.textContent || "").trim().replace(/\s+/g, " ");
+              if (text && tag !== "input") {
+                item.text = text.slice(0, 100);
+              }
+
+              if (tag === "a") {
+                const href = el.getAttribute("href") || "";
+                if (href) item.href = href.slice(0, 120);
+              }
+
+              const role = el.getAttribute("role");
+              if (role) item.role = role;
+
+              items.push(item);
+              index++;
+            }
+
+            const summaryLines = items.map((it) => {
+              const parts = [`[${it.id}] <${it.tag}`];
+              if (it.type) parts.push(`type="${it.type}"`);
+              if (it.placeholder) parts.push(`placeholder="${it.placeholder}"`);
+              if (it.name) parts.push(`name="${it.name}"`);
+              if (it.role) parts.push(`role="${it.role}"`);
+              parts.push(">");
+              if (it.text) parts.push(`"${it.text}"`);
+              if (it.value) parts.push(`value="${it.value}"`);
+              if (it.aria_label) parts.push(`(aria: "${it.aria_label}")`);
+              if (it.href) parts.push(`(href: ${it.href})`);
+              return parts.join(" ");
+            });
+
+            return {
+              title: document.title,
+              url: window.location.href,
+              elements: items,
+              summary: summaryLines.join("\n"),
+              count: items.length,
+            };
+          },
+        });
+
+        const execResult = results && results[0] ? results[0].result : { success: false, error: "Snapshot script produced no result" };
+        sendReply({ id, success: true, action: "get_page_snapshot", ...execResult });
+        break;
+      }
+
+      case "click_element": {
+        const elementId = msg.element_id != null ? Number(msg.element_id) : null;
+        const selector = msg.selector || (elementId != null ? `[data-axiom-id="${elementId}"]` : null);
+        if (!selector) {
+          sendReply({ id, success: false, action: "click_element", error: "Missing element_id or selector parameter" });
+          return;
+        }
+
+        const tab = await getTargetTab(msg);
+        if (!tab || !tab.id) {
+          sendReply({ id, success: false, action: "click_element", error: "No target tab available" });
+          return;
+        }
+
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: (sel, elemId) => {
+            const el = document.querySelector(sel);
+            if (!el) {
+              return { success: false, error: `Element not found for ${elemId != null ? `id #${elemId}` : `selector '${sel}'`}` };
+            }
+            try {
+              el.scrollIntoView({ behavior: "instant", block: "center" });
+            } catch (_) {}
+            try {
+              el.focus();
+            } catch (_) {}
+            el.click();
+            return {
+              success: true,
+              clicked_id: elemId != null ? elemId : (el.getAttribute("data-axiom-id") ? Number(el.getAttribute("data-axiom-id")) : null),
+              tag: el.tagName,
+              text: (el.innerText || el.textContent || "").trim().slice(0, 100),
+            };
+          },
+          args: [selector, elementId],
+        });
+
+        const execResult = results && results[0] ? results[0].result : { success: false, error: "Click script execution produced no result" };
+        sendReply({ id, action: "click_element", ...execResult });
+        break;
+      }
+
+      case "fill_element": {
+        const elementId = msg.element_id != null ? Number(msg.element_id) : null;
+        const selector = msg.selector || (elementId != null ? `[data-axiom-id="${elementId}"]` : null);
+        const text = msg.text || "";
+        const submit = Boolean(msg.submit);
+
+        if (!selector) {
+          sendReply({ id, success: false, action: "fill_element", error: "Missing element_id or selector parameter" });
+          return;
+        }
+
+        const tab = await getTargetTab(msg);
+        if (!tab || !tab.id) {
+          sendReply({ id, success: false, action: "fill_element", error: "No target tab available" });
+          return;
+        }
+
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: (sel, val, doSubmit, elemId) => {
+            const el = document.querySelector(sel);
+            if (!el) {
+              return { success: false, error: `Element not found for ${elemId != null ? `id #${elemId}` : `selector '${sel}'`}` };
+            }
+            try {
+              el.scrollIntoView({ behavior: "instant", block: "center" });
+            } catch (_) {}
+            try {
+              el.focus();
+            } catch (_) {}
+
+            if ("value" in el) {
+              el.value = val;
+              el.dispatchEvent(new Event("input", { bubbles: true }));
+              el.dispatchEvent(new Event("change", { bubbles: true }));
+            } else {
+              el.textContent = val;
+            }
+
+            let submitted = false;
+            if (doSubmit) {
+              if (el.form && typeof el.form.requestSubmit === "function") {
+                try {
+                  el.form.requestSubmit();
+                  submitted = true;
+                } catch (_) {
+                  try {
+                    el.form.submit();
+                    submitted = true;
+                  } catch (_) {}
+                }
+              } else if (el.form && typeof el.form.submit === "function") {
+                try {
+                  el.form.submit();
+                  submitted = true;
+                } catch (_) {}
+              }
+              if (!submitted) {
+                const enterEvent = new KeyboardEvent("keydown", {
+                  bubbles: true,
+                  cancelable: true,
+                  key: "Enter",
+                  code: "Enter",
+                  keyCode: 13,
+                  which: 13,
+                });
+                el.dispatchEvent(enterEvent);
+                submitted = true;
+              }
+            }
+
+            return {
+              success: true,
+              element_id: elemId != null ? elemId : (el.getAttribute("data-axiom-id") ? Number(el.getAttribute("data-axiom-id")) : null),
+              text: val,
+              submitted: submitted,
+            };
+          },
+          args: [selector, text, submit, elementId],
+        });
+
+        const execResult = results && results[0] ? results[0].result : { success: false, error: "Fill script execution produced no result" };
+        sendReply({ id, action: "fill_element", ...execResult });
+        break;
+      }
+
       default:
         sendReply({
           id,

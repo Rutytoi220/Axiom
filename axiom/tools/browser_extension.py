@@ -35,12 +35,16 @@ class BrowserResult(dict):
     @property
     def output(self) -> Any:
         return (
-            self.get("result")
+            self.get("summary")
+            or self.get("elements")
+            or self.get("result")
             or self.get("tabs")
             or self.get("tab")
             or self.get("content")
             or ({"tab_id": self.get("tab_id"), "title": self.get("title"), "url": self.get("url")} if "tab_id" in self else None)
             or ({"closed_tab_id": self.get("closed_tab_id"), "title": self.get("title")} if "closed_tab_id" in self else None)
+            or ({"clicked_id": self.get("clicked_id"), "tag": self.get("tag"), "text": self.get("text")} if "clicked_id" in self else None)
+            or ({"element_id": self.get("element_id"), "text": self.get("text"), "submitted": self.get("submitted")} if "element_id" in self and "submitted" in self else None)
             or self
         )
 
@@ -242,11 +246,16 @@ async def interact_with_browser(
     text: str = "",
     url: str = "",
     tab_id: Any = None,
+    element_id: Optional[int] = None,
+    submit: bool = False,
     **kwargs: Any,
 ) -> BrowserResult:
     """Interacts with browser via local WebExtension WebSocket bridge.
 
     Actions:
+      - get_page_snapshot: Inspects active tab, numbers interactive elements, and returns compact summary.
+      - click_element: Clicks element by numeric snapshot ID (element_id).
+      - fill_element: Types text into element by numeric ID, optionally submitting form.
       - list_tabs: Query list of open tabs with IDs, titles, URLs, active state.
       - switch_tab: Matches tab titles or URLs against query and switches focus.
       - open_tab: Opens a new tab with given URL.
@@ -268,6 +277,10 @@ async def interact_with_browser(
         cmd_args["url"] = url
     if tab_id is not None and tab_id != "":
         cmd_args["tab_id"] = tab_id
+    if element_id is not None and element_id != "":
+        cmd_args["element_id"] = element_id
+    if submit:
+        cmd_args["submit"] = submit
 
     return await bridge.send_command(action, timeout=5.0, **cmd_args)
 

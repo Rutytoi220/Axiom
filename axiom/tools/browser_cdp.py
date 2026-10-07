@@ -30,17 +30,34 @@ class InteractWithBrowserTool(BaseTool):
             name="interact_with_browser",
             description=(
                 "Tier 2 Semantic UI Automation: Browser and tab automation via AXIOM WebExtension bridge. "
-                "Actions: 'switch_tab' (focus tab by title/domain query), 'open_tab' (open new tab with url), "
-                "'close_tab' (close tab by id/query), 'get_active_tab' (get focused tab info), 'list_tabs', "
-                "'click' (DOM selector), 'type' (input text into selector), 'get_dom' (retrieve page text)."
+                "Actions: 'get_page_snapshot' (list numbered interactive elements), 'click_element' (click by element_id), "
+                "'fill_element' (type text into element_id), 'switch_tab' (focus tab by query), 'open_tab' (open url), "
+                "'close_tab' (close tab), 'get_active_tab', 'list_tabs', 'click' (DOM selector), 'type', 'get_dom'."
             ),
         )
         self.parameters = [
             ToolParameter(
                 name="action",
                 type="string",
-                description="The browser action: 'switch_tab', 'open_tab', 'close_tab', 'get_active_tab', 'list_tabs', 'click', 'type', 'get_dom'.",
+                description=(
+                    "The browser action: 'get_page_snapshot', 'click_element', 'fill_element', "
+                    "'switch_tab', 'open_tab', 'close_tab', 'get_active_tab', 'list_tabs', 'click', 'type', 'get_dom'."
+                ),
                 required=True,
+            ),
+            ToolParameter(
+                name="element_id",
+                type="integer",
+                description="Numeric snapshot ID of the interactive element from get_page_snapshot (used with click_element or fill_element).",
+                required=False,
+                default=None,
+            ),
+            ToolParameter(
+                name="submit",
+                type="boolean",
+                description="Whether to submit the form after filling the element (used with fill_element).",
+                required=False,
+                default=False,
             ),
             ToolParameter(
                 name="query",
@@ -173,7 +190,7 @@ class InteractWithBrowserTool(BaseTool):
                     return ToolResult(
                         False,
                         error=(
-                            "No browser extension connected on ws://127.0.0.1:41144. "
+                            f"No browser extension connected on ws://{bridge.host}:{bridge.port}. "
                             "Ensure the AXIOM extension is loaded in Zen Browser (about:debugging) or Chromium. "
                             "Do not ask for --remote-debugging-port flags."
                         ),
@@ -183,7 +200,7 @@ class InteractWithBrowserTool(BaseTool):
                     False,
                     error=(
                         f"Browser extension bridge error: {exc}. "
-                        "No browser extension connected on ws://127.0.0.1:41144. "
+                        f"No browser extension connected on ws://{bridge.host}:{bridge.port}. "
                         "Ensure the AXIOM extension is loaded in Zen Browser (about:debugging) or Chromium. "
                         "Do not ask for --remote-debugging-port flags."
                     ),
