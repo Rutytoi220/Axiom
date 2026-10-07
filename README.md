@@ -2,52 +2,38 @@
 
 A local-first AI assistant and automation layer for Linux.
 
-AXIOM runs local models through Ollama and gives them access to
-your desktop through a set of tools. It can control Linux,
-interact with websites, use your clipboard/media/network tools,
-and fall back to visual interaction when a program doesn't expose
-a better interface.
+AXIOM uses local AI models through Ollama and can interact with
+your Linux desktop, websites, files, media, and other tools.
 
-The project is mainly built around Linux + Wayland/Hyprland,
-but some components work independently of the desktop environment.
+> AXIOM is currently developed and tested primarily on Linux,
+> especially Hyprland/wlroots-based systems.
 
-## How it works
+## What can AXIOM do?
 
-AXIOM uses three levels of interaction:
-
-1. Tier 1 — OS / IPC
-   Uses deterministic Linux interfaces when possible:
-   Hyprland IPC, processes, clipboard, MPRIS, notifications,
-   files, network tools, etc.
-
-2. Tier 2 — Browser
-   Uses a browser extension bridge to inspect and interact with
-   web pages through their DOM/accessibility information.
-
-3. Tier 3 — Vision
-   Used as a fallback for graphical applications where AXIOM
-   doesn't have a usable semantic interface.
-
-The goal is simple: use the most reliable interface available
-instead of making a vision model click everything.
-
-## Current status
-
-| Component | Status |
-|---|---|
-| Local LLM / Ollama | Working |
-| ReAct tool execution | Working |
-| Tier 1 tools | Working |
-| Browser bridge | Working |
-| Vision fallback | Experimental |
-| Plugin system | Working |
-| Themes | Working |
-| Memory | In development |
-| Remote/LAN features | In development |
-
-## Requirements
-
-- Linux
-- Python 3.11+
-- Ollama
+- Run local LLMs through Ollama
+- Execute tools and multi-step tasks
+- Control parts of the Linux desktop
+- Interact with websites through a browser extension
+- Use vision as a fallback for applications without a better interface
+- Load plugins and additional tools
 - ...
+  
+## Installation
+
+### Easiest method: AppImage
+
+If you've never used AXIOM before, **use the AppImage**.
+You don't need to clone the repository or install Python.
+
+#### 1. Download AXIOM
+
+Go to the latest release:
+
+**[Download AXIOM](https://github.com/Rutytoi220/Axiom/releases/latest)**
+
+Under **Assets**, download the file ending in `.AppImage`.
+
+For example:
+
+```text
+AXIOM-x86_64.AppImage
