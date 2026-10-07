@@ -238,28 +238,90 @@ class InteractWithBrowserTool(BaseTool):
                                 return ToolResult(False, error=f"Failed saving screenshot: {save_err}")
                         return ToolResult(True, output=ext_res.output or ext_res)
                     error_msg = ext_res.error or "Extension command failed"
-                    if "open_tabs" in ext_res:
-                        tabs_summary = ", ".join([f"'{t.get('title') or t.get('url')}'" for t in ext_res["open_tabs"]])
-                        error_msg = f"{error_msg}. Open tabs: [{tabs_summary}]. Hint: Use action='open_tab' with url='<url>' to open a new tab."
-                    return ToolResult(False, error=error_msg)
-                else:
+                    remedy_hint = ext_res.remedy_hint if hasattr(ext_res, "remedy_hint") else ext_res.get("remedy_hint")
+                    allowed_actions = ext_res.allowed_actions if hasattr(ext_res, "allowed_actions") else (ext_res.get("allowed_actions") or [])
+
+                    if action in ("click_element", "fill_element"):
+                        elem_id = params.get("element_id")
+                        if elem_id is not None and ("not found" in error_msg.lower() or not ext_res.error or "Element not found" in error_msg):
+                            error_msg = f"Element ID {elem_id} not found on page."
+                        if not remedy_hint:
+                            remedy_hint = "Call get_page_snapshot to refresh element IDs, or scroll_page down if the element is below the viewport."
+                        if not allowed_actions:
+                            allowed_actions = ["get_page_snapshot", "scroll_page"]
+                    elif action == "switch_tab":
+                        target_url = params.get("query") or params.get("url") or "<url>"
+                        if "open_tabs" in ext_res:
+                            tabs_summary = ", ".join([f"'{t.get('title') or t.get('url')}'" for t in ext_res["open_tabs"]])
+                            error_msg = f"{error_msg}. Open tabs: [{tabs_summary}]."
+                        if not remedy_hint:
+                            remedy_hint = f"Call list_tabs to see valid targets, or open_tab with url='{target_url}' to launch it."
+                        if not allowed_actions:
+                            allowed_actions = ["list_tabs", "open_tab"]
+
                     return ToolResult(
                         False,
-                        error=(
-                            f"No browser extension connected on ws://{bridge.host}:{bridge.port}. "
-                            "Ensure the AXIOM extension is loaded in Zen Browser (about:debugging) or Chromium. "
-                            "Do not ask for --remote-debugging-port flags."
-                        ),
+                        error=error_msg,
+                        remedy_hint=remedy_hint,
+                        allowed_actions=allowed_actions,
+                        metadata={"open_tabs": ext_res.get("open_tabs", [])} if "open_tabs" in ext_res else None,
                     )
-            except Exception as exc:
-                return ToolResult(
-                    False,
-                    error=(
-                        f"Browser extension bridge error: {exc}. "
+                else:
+                    elem_id = params.get("element_id")
+                    target_url = params.get("query") or params.get("url") or "<url>"
+                    base_err = (
                         f"No browser extension connected on ws://{bridge.host}:{bridge.port}. "
                         "Ensure the AXIOM extension is loaded in Zen Browser (about:debugging) or Chromium. "
                         "Do not ask for --remote-debugging-port flags."
-                    ),
+                    )
+                    if action in ("click_element", "fill_element"):
+                        return ToolResult(
+                            False,
+                            error=base_err,
+                            remedy_hint="Call get_page_snapshot to refresh element IDs, or scroll_page down if the element is below the viewport.",
+                            allowed_actions=["get_page_snapshot", "scroll_page"],
+                        )
+                    elif action == "switch_tab":
+                        return ToolResult(
+                            False,
+                            error=base_err,
+                            remedy_hint=f"Call list_tabs to see valid targets, or open_tab with url='{target_url}' to launch it.",
+                            allowed_actions=["list_tabs", "open_tab"],
+                        )
+                    return ToolResult(
+                        False,
+                        error=base_err,
+                        remedy_hint="Ensure the browser extension is running or use Tier 1 execute_command or manage_desktop_window.",
+                        allowed_actions=["execute_command", "manage_desktop_window"],
+                    )
+            except Exception as exc:
+                elem_id = params.get("element_id")
+                target_url = params.get("query") or params.get("url") or "<url>"
+                base_err = (
+                    f"Browser extension bridge error: {exc}. "
+                    f"No browser extension connected on ws://{bridge.host}:{bridge.port}. "
+                    "Ensure the AXIOM extension is loaded in Zen Browser (about:debugging) or Chromium. "
+                    "Do not ask for --remote-debugging-port flags."
+                )
+                if action in ("click_element", "fill_element"):
+                    return ToolResult(
+                        False,
+                        error=base_err,
+                        remedy_hint="Call get_page_snapshot to refresh element IDs, or scroll_page down if the element is below the viewport.",
+                        allowed_actions=["get_page_snapshot", "scroll_page"],
+                    )
+                elif action == "switch_tab":
+                    return ToolResult(
+                        False,
+                        error=base_err,
+                        remedy_hint=f"Call list_tabs to see valid targets, or open_tab with url='{target_url}' to launch it.",
+                        allowed_actions=["list_tabs", "open_tab"],
+                    )
+                return ToolResult(
+                    False,
+                    error=base_err,
+                    remedy_hint="Ensure the browser extension is running or use Tier 1 execute_command or manage_desktop_window.",
+                    allowed_actions=["execute_command", "manage_desktop_window"],
                 )
 
         # Legacy CDP path (strictly exercised only when _force_cdp=True)

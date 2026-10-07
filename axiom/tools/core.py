@@ -6,38 +6,56 @@ logger = logging.getLogger(__name__)
 class ToolResult:
     """Represents the result of a tool execution."""
 
-    def __init__(self, success: bool, output: Any=None, error: Optional[str]=None, metadata: Optional[Dict]=None):
-        """Auto-generated docstring.
-
-Args:
-    success: Argument.
-    output: Argument.
-    error: Argument.
-    metadata: Argument.
-
-Returns:
-    Return value.
-"""
+    def __init__(
+        self,
+        success: bool,
+        output: Any = None,
+        error: Optional[str] = None,
+        metadata: Optional[Dict] = None,
+        remedy_hint: Optional[str] = None,
+        allowed_actions: Optional[List[str]] = None,
+    ):
+        """Represents the result of a tool execution."""
         self.success = success
         self.output = output
         self.error = error
         self.metadata = metadata or {}
+        self.remedy_hint = remedy_hint if remedy_hint is not None else self.metadata.get("remedy_hint")
+        self.allowed_actions = allowed_actions if allowed_actions is not None else self.metadata.get("allowed_actions", [])
+        if self.remedy_hint:
+            self.metadata["remedy_hint"] = self.remedy_hint
+        if self.allowed_actions:
+            self.metadata["allowed_actions"] = self.allowed_actions
 
     def __repr__(self):
-        """Auto-generated docstring.
-
-
-Returns:
-    Return value.
-"""
+        """Return human-readable representation."""
         if self.success:
-            return f'ToolResult(success={self.success}, output={self.output!r})'
-        return f'ToolResult(success={self.success}, error={self.error!r})'
+            return f"ToolResult(success={self.success}, output={self.output!r})"
+        if self.remedy_hint:
+            return f"ToolResult(success={self.success}, error={self.error!r}, remedy_hint={self.remedy_hint!r})"
+        return f"ToolResult(success={self.success}, error={self.error!r})"
 
-    def to_dict(self, tool: str='', arguments: Optional[Dict[str, Any]]=None) -> Dict[str, Any]:
+    def to_dict(self, tool: str = "", arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Return the strict AXIOM tool-result envelope."""
-        result = {'output': self.output, 'error': self.error, 'metadata': self.metadata}
-        return {'tool': tool, 'arguments': arguments or {}, 'result': result, 'success': bool(self.success)}
+        result = {"output": self.output, "error": self.error, "metadata": self.metadata}
+        if self.remedy_hint:
+            result["remedy_hint"] = self.remedy_hint
+        if self.allowed_actions:
+            result["allowed_actions"] = self.allowed_actions
+
+        envelope = {
+            "tool": tool,
+            "arguments": arguments or {},
+            "result": result,
+            "success": bool(self.success),
+        }
+        if not self.success and self.error:
+            envelope["error"] = self.error
+        if self.remedy_hint:
+            envelope["remedy_hint"] = self.remedy_hint
+        if self.allowed_actions:
+            envelope["allowed_actions"] = self.allowed_actions
+        return envelope
 
 class ToolParameter:
     """Parameter definition for a tool."""

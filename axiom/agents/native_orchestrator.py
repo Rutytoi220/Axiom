@@ -443,6 +443,28 @@ class NativeOrchestrator:
         user_query_for_intent = re.sub(r"^\[Active Window:[^\]]*\]\s*", "", user_query_for_intent)
         is_interface_action = self.is_interface_action_query(user_query_for_intent)
 
+        # Inspect if preceding turn was a failed tool execution requiring actuator recovery
+        is_recovery_turn = False
+        recovery_hint = ""
+        allowed_recovery_actions = []
+
+        messages = payload.get("messages", [])
+        if messages:
+            for m in reversed(messages):
+                if m.get("role") == "user" and "[ACTUATOR RECOVERY REQUIRED]" in str(m.get("content", "")):
+                    continue
+                if m.get("role") == "tool":
+                    c = str(m.get("content", ""))
+                    if "[Tool Error]:" in c:
+                        is_recovery_turn = True
+                        recovery_hint = m.get("remedy_hint") or ""
+                        if not recovery_hint and "Recovery Hint:" in c:
+                            recovery_hint = c.split("Recovery Hint:", 1)[1].strip()
+                        allowed_recovery_actions = m.get("allowed_actions") or []
+                    break
+                elif m.get("role") == "assistant" and m.get("tool_calls"):
+                    break
+
         # Inspect query intent, active window, and bridge connectivity to filter active schemas
         active_window = await self.get_active_window()
         bridge_connected = False
@@ -457,6 +479,11 @@ class NativeOrchestrator:
             active_window=active_window,
             bridge_connected=bridge_connected,
         )
+        if is_recovery_turn and allowed_recovery_actions:
+            tier2_actions = {"get_page_snapshot", "scroll_page", "click_element", "fill_element", "list_tabs", "open_tab", "switch_tab", "navigate_url"}
+            if any(a in tier2_actions for a in allowed_recovery_actions):
+                tier = "tier2_browser"
+
         from axiom.core.plugins import filter_tool_schemas_by_tier
         from axiom.agents.actuator_arbiter import is_browser_window
         browser_active = is_browser_window(active_window)
@@ -529,7 +556,7 @@ class NativeOrchestrator:
                     is_reasoning = False
                     collected_assistant_text = []
                     buffered_chunks = []
-                    buffering = (depth == 0 and not is_retry and is_interface_action) or (depth > 0)
+                    buffering = (depth == 0 and not is_retry and is_interface_action) or (depth > 0) or is_recovery_turn
                     refusal_detected = False
 
                     async for line in resp.aiter_lines():
@@ -581,7 +608,7 @@ class NativeOrchestrator:
                                     if "tool_calls" in delta or pending_tool_calls:
                                         buffering = False
                                         clean_so_far = "".join(collected_assistant_text)
-                                        if not clean_so_far.lstrip().startswith(("{", "[", "```", "<")):
+                                        if not is_recovery_turn and not clean_so_far.lstrip().startswith(("{", "[", "```", "<")):
                                             for b in buffered_chunks:
                                                 yield b
                                         buffered_chunks.clear()
@@ -595,12 +622,12 @@ class NativeOrchestrator:
                                             refusal_detected = True
                                             break
                                         elif stripped and not stripped.startswith(("{", "[", "```", "<")):
-                                            if depth > 0 or len(clean_text) > 250:
+                                            if not is_recovery_turn and (depth > 0 or len(clean_text) > 250):
                                                 buffering = False
                                                 for b in buffered_chunks:
                                                     yield b
                                                 buffered_chunks.clear()
-                                        elif len(clean_text) > 4000:
+                                        elif not is_recovery_turn and len(clean_text) > 4000:
                                             buffering = False
                                             for b in buffered_chunks:
                                                 yield b
@@ -695,6 +722,33 @@ class NativeOrchestrator:
                 }
                 collected_assistant_text = []
 
+        # Closed-loop error recovery enforcement (Anti-consultant rule):
+        # If the model responds to a recovery hint with conversational text instead of
+        # an actuator tool call, and depth < 4, do not terminate the loop.
+        # Reject conversational prose, clear buffers, and trigger a fast retry directing
+        # the model to invoke the recovery tool immediately.
+        if is_recovery_turn and not pending_tool_calls and depth < 4:
+            buffered_chunks.clear()
+            collected_assistant_text.clear()
+
+            hint_text = recovery_hint or "Execute the recovery tool immediately."
+            allowed_clause = f" Allowed recovery actions: {', '.join(allowed_recovery_actions)}." if allowed_recovery_actions else ""
+            override_msg = {
+                "role": "user",
+                "content": (
+                    f"[ACTUATOR RECOVERY REQUIRED]: A previous action failed with recovery hint: '{hint_text}'.{allowed_clause} "
+                    f"You must NOT output conversational apologies, explanations, or tutorials. "
+                    f"Call the appropriate actuator recovery tool immediately."
+                ),
+            }
+            payload.setdefault("messages", []).append(override_msg)
+            payload.setdefault("options", {})["temperature"] = 0.1
+            payload["temperature"] = 0.1
+
+            async for retry_chunk in self.generate_stream(payload, depth=depth + 1, is_retry=True):
+                yield retry_chunk
+            return
+
         if not pending_tool_calls and buffered_chunks:
             for b in buffered_chunks:
                 yield b
@@ -735,23 +789,83 @@ class NativeOrchestrator:
                         timeout=timeout,
                     )
                     
-                    if not isinstance(tool_result, str):
+                    if hasattr(tool_result, "to_dict"):
+                        tool_dict = tool_result.to_dict(tool=func_name, arguments=func_args)
+                        tool_result = json.dumps(tool_dict, indent=2)
+                    elif not isinstance(tool_result, str):
                         tool_result = json.dumps(tool_result, indent=2)
                     res_str = tool_result
                 except (TimeoutError, asyncio.TimeoutError):
                     res_str = json.dumps({
                         "success": False,
                         "error": f"Tool execution timed out after {timeout_int}s. Try a faster Tier 1 command or verify active window.",
+                        "remedy_hint": "Try a faster Tier 1 command or verify active window.",
+                        "allowed_actions": ["execute_command", "manage_desktop_window"],
                     })
                 except Exception as e:
-                    res_str = json.dumps({"error": str(e), "status": "tool_execution_failed"})
+                    res_str = json.dumps({
+                        "success": False,
+                        "error": str(e),
+                        "status": "tool_execution_failed",
+                        "remedy_hint": "Inspect error or try alternative action.",
+                        "allowed_actions": [],
+                    })
+
+                # Format tool output: if tool execution failed, format as structured recovery observation
+                is_failed = False
+                err_text = ""
+                remedy_hint_out = ""
+                allowed_actions_out = []
+
+                try:
+                    parsed_res = json.loads(res_str) if isinstance(res_str, str) else res_str
+                    if isinstance(parsed_res, dict):
+                        if parsed_res.get("success") is False:
+                            is_failed = True
+                        elif "error" in parsed_res and parsed_res["error"]:
+                            is_failed = True
+                        elif isinstance(parsed_res.get("result"), dict) and parsed_res["result"].get("error"):
+                            is_failed = True
+
+                        if is_failed:
+                            err_text = (
+                                parsed_res.get("error")
+                                or (parsed_res.get("result", {}).get("error") if isinstance(parsed_res.get("result"), dict) else None)
+                                or "Tool execution failed"
+                            )
+                            remedy_hint_out = (
+                                parsed_res.get("remedy_hint")
+                                or (parsed_res.get("result", {}).get("remedy_hint") if isinstance(parsed_res.get("result"), dict) else None)
+                                or (parsed_res.get("result", {}).get("metadata", {}).get("remedy_hint") if isinstance(parsed_res.get("result"), dict) else None)
+                                or ""
+                            )
+                            allowed_actions_out = (
+                                parsed_res.get("allowed_actions")
+                                or (parsed_res.get("result", {}).get("allowed_actions") if isinstance(parsed_res.get("result"), dict) else None)
+                                or (parsed_res.get("result", {}).get("metadata", {}).get("allowed_actions") if isinstance(parsed_res.get("result"), dict) else None)
+                                or []
+                            )
+                except Exception:
+                    pass
+
+                if is_failed and err_text:
+                    err_clean = str(err_text).rstrip(".")
+                    if remedy_hint_out:
+                        content_for_msg = f"[Tool Error]: {err_clean}. Recovery Hint: {remedy_hint_out}"
+                    else:
+                        content_for_msg = f"[Tool Error]: {err_clean}"
+                else:
+                    content_for_msg = res_str
 
                 tool_msg = {
                     "role": "tool",
                     "tool_call_id": tool_call_id,
                     "name": func_name,
-                    "content": res_str
+                    "content": content_for_msg,
                 }
+                if is_failed and remedy_hint_out:
+                    tool_msg["remedy_hint"] = remedy_hint_out
+                    tool_msg["allowed_actions"] = allowed_actions_out
                 payload["messages"].append(tool_msg)
 
                 session_id = payload.get("session_id")

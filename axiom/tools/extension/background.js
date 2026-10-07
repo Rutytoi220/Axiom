@@ -194,6 +194,8 @@ async function handleCommand(msg) {
             success: false,
             action: "switch_tab",
             error: `No open tab matching query: '${query || tabId}'`,
+            remedy_hint: `Call list_tabs to see valid targets, or open_tab with url='${query || "<url>"}' to launch it.`,
+            allowed_actions: ["list_tabs", "open_tab"],
             open_tabs: openTabs,
           });
           return;
@@ -706,7 +708,12 @@ async function handleCommand(msg) {
           func: (sel, elemId) => {
             const el = document.querySelector(sel);
             if (!el) {
-              return { success: false, error: `Element not found for ${elemId != null ? `id #${elemId}` : `selector '${sel}'`}` };
+              return {
+                success: false,
+                error: `Element ID ${elemId != null ? elemId : sel} not found on page.`,
+                remedy_hint: "Call get_page_snapshot to refresh element IDs, or scroll_page down if the element is below the viewport.",
+                allowed_actions: ["get_page_snapshot", "scroll_page"],
+              };
             }
             try {
               el.scrollIntoView({ behavior: "instant", block: "center" });
@@ -767,7 +774,12 @@ async function handleCommand(msg) {
           func: (sel, val, doSubmit, elemId) => {
             const el = document.querySelector(sel);
             if (!el) {
-              return { success: false, error: `Element not found for ${elemId != null ? `id #${elemId}` : `selector '${sel}'`}` };
+              return {
+                success: false,
+                error: `Element ID ${elemId != null ? elemId : sel} not found on page.`,
+                remedy_hint: "Call get_page_snapshot to refresh element IDs, or scroll_page down if the element is below the viewport.",
+                allowed_actions: ["get_page_snapshot", "scroll_page"],
+              };
             }
             try {
               el.scrollIntoView({ behavior: "instant", block: "center" });

@@ -33,6 +33,14 @@ class BrowserResult(dict):
         return self.get("error")
 
     @property
+    def remedy_hint(self) -> Optional[str]:
+        return self.get("remedy_hint")
+
+    @property
+    def allowed_actions(self) -> List[str]:
+        return self.get("allowed_actions") or []
+
+    @property
     def output(self) -> Any:
         return (
             self.get("summary")
