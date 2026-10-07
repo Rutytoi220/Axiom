@@ -48,6 +48,11 @@ class InteractWithUITool(BaseTool):
                 "STRICT RESTRICTION: DO NOT use this tool for web browsers or web pages. "
                 "If interacting with a browser tab, you MUST use interact_with_browser with click_element or fill_element."
             ),
+            tier=3,
+            is_core=False,
+            requires_bridge=False,
+            requires_window=True,
+            token_cost=600,
         )
         self.parameters = [
             ToolParameter(

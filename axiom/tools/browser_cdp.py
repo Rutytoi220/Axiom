@@ -38,6 +38,11 @@ class InteractWithBrowserTool(BaseTool):
                 "'switch_tab' (focus tab by query), 'open_tab' (open url), 'close_tab' (close tab), "
                 "'duplicate_tab', 'reload_tab', 'pin_tab', 'get_active_tab', 'list_tabs', 'click' (DOM selector), 'type', 'get_dom'."
             ),
+            tier=2,
+            is_core=False,
+            requires_bridge=True,
+            requires_window=True,
+            token_cost=250,
         )
         self.parameters = [
             ToolParameter(

@@ -79,23 +79,62 @@ Returns:
         self.required = required
         self.default = default
 
+class ToolCapability:
+    """Formal capability metadata for dynamic tier routing and schema pruning."""
+
+    def __init__(
+        self,
+        tier: Optional[int] = 1,
+        is_core: bool = False,
+        requires_bridge: bool = False,
+        requires_window: bool = False,
+        token_cost: int = 150,
+    ):
+        self.tier = tier
+        self.is_core = is_core
+        self.requires_bridge = requires_bridge
+        self.requires_window = requires_window
+        self.token_cost = token_cost
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "tier": self.tier,
+            "is_core": self.is_core,
+            "requires_bridge": self.requires_bridge,
+            "requires_window": self.requires_window,
+            "token_cost": self.token_cost,
+        }
+
+
 class BaseTool(ABC):
     """Base class for all tools."""
 
-    def __init__(self, tool_id: str | None = None, name: str | None = None, description: str | None = None):
-        """Auto-generated docstring.
-
-Args:
-    tool_id: Argument.
-    name: Argument.
-    description: Argument.
-
-Returns:
-    Return value.
-"""
+    def __init__(
+        self,
+        tool_id: str | None = None,
+        name: str | None = None,
+        description: str | None = None,
+        tier: int = 1,
+        is_core: bool = False,
+        requires_bridge: bool = False,
+        requires_window: bool = False,
+        token_cost: int = 150,
+    ):
         self._tool_id = tool_id
         self._name = name
         self._description = description
+        self.tier = tier
+        self.is_core = is_core
+        self.requires_bridge = requires_bridge
+        self.requires_window = requires_window
+        self.token_cost = token_cost
+        self.capability = ToolCapability(
+            tier=tier,
+            is_core=is_core,
+            requires_bridge=requires_bridge,
+            requires_window=requires_window,
+            token_cost=token_cost,
+        )
         self.parameters: List[ToolParameter] = []
         self._execution_count = 0
 

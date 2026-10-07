@@ -10,13 +10,15 @@ _schemas: List[Dict[str, Any]] = []
 _rings: Dict[str, int] = {}
 _executors: Dict[str, Callable[..., Awaitable[str]]] = {}
 _tui_hints: Dict[str, str] = {}
+_capabilities: Dict[str, Any] = {}
 
 def load_plugins() -> None:
-    global _schemas, _executors, _tui_hints
+    global _schemas, _executors, _tui_hints, _capabilities
     _schemas.clear()
     _rings.clear()
     _executors.clear()
     _tui_hints.clear()
+    _capabilities.clear()
 
     TOOLS_DIR.mkdir(parents=True, exist_ok=True)
     
@@ -202,6 +204,8 @@ def load_plugins() -> None:
             TOOLS_DIR / "execute_command.py",
             (
                 "import subprocess\n\n"
+                "IS_CORE = True\n"
+                "TIER = 0\n"
                 "TOOL_SCHEMA = {\n"
                 '    "type": "function",\n'
                 '    "function": {\n'
@@ -259,15 +263,13 @@ def load_plugins() -> None:
                     
                     if hasattr(mod, "TUI_HINT"):
                         _tui_hints[name] = getattr(mod, "TUI_HINT")
+
+                    _capabilities[name] = _extract_capability(mod, name)
             except Exception as e:
                 print(f"\033[1;31m[Warning] Failed to load plugin {path.name}: {e}\033[0m")
 
-CORE_TOOLS = {
-    "execute_command",
-    "manage_desktop_window",
-}
 
-TIER_1_TOOLS = {
+TIER_1_BUILTIN = {
     "manage_system_process",
     "manage_system_clipboard",
     "query_system_journal",
@@ -277,30 +279,227 @@ TIER_1_TOOLS = {
     "inspect_network",
 }
 
-TIER_2_TOOLS = {
-    "interact_with_browser",
-}
+
+def _extract_capability(mod: Any, name: str):
+    from axiom.tools.core import ToolCapability
+
+    if mod is not None:
+        if hasattr(mod, "CAPABILITY") and isinstance(mod.CAPABILITY, ToolCapability):
+            return mod.CAPABILITY
+        if hasattr(mod, "TIER"):
+            try:
+                tier = int(getattr(mod, "TIER", 1))
+            except Exception:
+                tier = 1
+            is_core = bool(getattr(mod, "IS_CORE", tier == 0))
+            requires_bridge = bool(getattr(mod, "REQUIRES_BRIDGE", tier == 2))
+            requires_window = bool(getattr(mod, "REQUIRES_WINDOW", False))
+            try:
+                token_cost = int(getattr(mod, "TOKEN_COST", 150))
+            except Exception:
+                token_cost = 150
+            return ToolCapability(
+                tier=tier,
+                is_core=is_core,
+                requires_bridge=requires_bridge,
+                requires_window=requires_window,
+                token_cost=token_cost,
+            )
+        if hasattr(mod, "IS_CORE") and bool(getattr(mod, "IS_CORE")):
+            return ToolCapability(
+                tier=0,
+                is_core=True,
+                requires_bridge=bool(getattr(mod, "REQUIRES_BRIDGE", False)),
+                requires_window=bool(getattr(mod, "REQUIRES_WINDOW", False)),
+                token_cost=int(getattr(mod, "TOKEN_COST", 150)),
+            )
+        if hasattr(mod, "_tool") and hasattr(mod._tool, "capability"):
+            cap = mod._tool.capability
+            if name in ("manage_desktop_window", "interact_with_browser", "interact_with_ui") or name in TIER_1_BUILTIN:
+                return cap
+            if cap.is_core or cap.tier in (2, 3) or cap.requires_bridge:
+                return cap
+
+    # Heuristic fallback mapping by tool identifier
+    if name in ("execute_command", "manage_desktop_window"):
+        return ToolCapability(
+            tier=0 if name == "execute_command" else 1,
+            is_core=True,
+            requires_bridge=False,
+            requires_window=(name == "manage_desktop_window"),
+            token_cost=150,
+        )
+    if name in TIER_1_BUILTIN:
+        return ToolCapability(
+            tier=1,
+            is_core=False,
+            requires_bridge=False,
+            requires_window=False,
+            token_cost=150,
+        )
+    if name == "interact_with_browser":
+        return ToolCapability(
+            tier=2,
+            is_core=False,
+            requires_bridge=True,
+            requires_window=True,
+            token_cost=250,
+        )
+    if name in ("interact_with_ui", "vision", "capture_som_screen", "som_click", "som_type", "som_key"):
+        return ToolCapability(
+            tier=3,
+            is_core=False,
+            requires_bridge=False,
+            requires_window=True,
+            token_cost=600,
+        )
+    return ToolCapability(
+        tier=None,
+        is_core=False,
+        requires_bridge=False,
+        requires_window=False,
+        token_cost=150,
+    )
+
+
+def get_tool_capability(name: str):
+    if not _capabilities and not _schemas:
+        load_plugins()
+    if name in _capabilities:
+        return _capabilities[name]
+    return _extract_capability(None, name)
+
+
+def get_tool_capabilities() -> Dict[str, Any]:
+    if not _capabilities and not _schemas:
+        load_plugins()
+    return dict(_capabilities)
+
+
+class DynamicCapabilitySet(set):
+    """Compatibility set proxy reflecting capability registry dynamically."""
+
+    def __init__(self, filter_fn: Callable[[str, Any], bool], default_fallback: set):
+        super().__init__(default_fallback)
+        self._filter_fn = filter_fn
+        self._default_fallback = set(default_fallback)
+
+    def _sync(self) -> None:
+        if _capabilities:
+            res = {name for name, cap in _capabilities.items() if self._filter_fn(name, cap)}
+            if res:
+                self.clear()
+                self.update(res)
+                return
+        self.clear()
+        self.update(self._default_fallback)
+
+    def __contains__(self, item: Any) -> bool:
+        self._sync()
+        return super().__contains__(item)
+
+    def __iter__(self):
+        self._sync()
+        return super().__iter__()
+
+    def __len__(self) -> int:
+        self._sync()
+        return super().__len__()
+
+    def __or__(self, other: Any) -> set:
+        self._sync()
+        if isinstance(other, DynamicCapabilitySet):
+            other._sync()
+        return super().__or__(other)
+
+    def __ror__(self, other: Any) -> set:
+        self._sync()
+        if isinstance(other, DynamicCapabilitySet):
+            other._sync()
+        return set(other) | set(self)
+
+    def __and__(self, other: Any) -> set:
+        self._sync()
+        if isinstance(other, DynamicCapabilitySet):
+            other._sync()
+        return super().__and__(other)
+
+    def __rand__(self, other: Any) -> set:
+        self._sync()
+        if isinstance(other, DynamicCapabilitySet):
+            other._sync()
+        return set(other) & set(self)
+
+    def __sub__(self, other: Any) -> set:
+        self._sync()
+        if isinstance(other, DynamicCapabilitySet):
+            other._sync()
+        return super().__sub__(other)
+
+    def __rsub__(self, other: Any) -> set:
+        self._sync()
+        if isinstance(other, DynamicCapabilitySet):
+            other._sync()
+        return set(other) - set(self)
+
+    def __repr__(self) -> str:
+        self._sync()
+        return super().__repr__()
+
+
+CORE_TOOLS = DynamicCapabilitySet(
+    lambda n, c: getattr(c, "is_core", False) or getattr(c, "tier", None) == 0,
+    {"execute_command", "manage_desktop_window"},
+)
+
+TIER_1_TOOLS = DynamicCapabilitySet(
+    lambda n, c: getattr(c, "tier", None) == 1 and not getattr(c, "is_core", False),
+    {
+        "manage_system_process",
+        "manage_system_clipboard",
+        "query_system_journal",
+        "manage_media_playback",
+        "manage_workspace_file",
+        "send_desktop_notification",
+        "inspect_network",
+    },
+)
+
+TIER_2_TOOLS = DynamicCapabilitySet(
+    lambda n, c: getattr(c, "tier", None) == 2,
+    {"interact_with_browser"},
+)
+
+TIER_3_TOOLS = DynamicCapabilitySet(
+    lambda n, c: getattr(c, "tier", None) == 3,
+    {"interact_with_ui"},
+)
 
 
 def filter_tool_schemas_by_tier(schemas: List[Dict[str, Any]], tier: str, is_browser: bool = False) -> List[Dict[str, Any]]:
     """Filter dynamic tool schemas based on the detected automation tier.
 
     - Always includes core system tools: execute_command, manage_desktop_window.
-    - If Tier 1: includes Tier 1 tools (manage_system_process, manage_system_clipboard,
-      query_system_journal, manage_media_playback, manage_workspace_file,
-      send_desktop_notification, inspect_network).
-    - If Tier 2: includes Tier 2 tools (interact_with_browser).
+    - If Tier 1: includes Core + Tier 1 tools.
+    - If Tier 2: includes Core + Tier 2 tools.
     - If Tier 3 / Ambiguous / General: includes the full registry.
     - If is_browser is True, interact_with_ui is strictly purged from exposed schemas.
     """
     tier_lower = (tier or "").lower().strip()
     if tier_lower in ("tier1", "tier1_ipc", "1"):
-        allowed = CORE_TOOLS | TIER_1_TOOLS
-        filtered = [s for s in schemas if (s.get("function", {}).get("name") or s.get("name")) in allowed]
-        result = filtered if filtered else list(schemas)
+        target_tier = 1
     elif tier_lower in ("tier2", "tier2_browser", "2"):
-        allowed = CORE_TOOLS | TIER_2_TOOLS
-        filtered = [s for s in schemas if (s.get("function", {}).get("name") or s.get("name")) in allowed]
+        target_tier = 2
+    else:
+        target_tier = None
+
+    if target_tier is not None:
+        filtered = []
+        for s in schemas:
+            name = s.get("function", {}).get("name") or s.get("name")
+            cap = get_tool_capability(name)
+            if cap.is_core or cap.tier == 0 or cap.tier == target_tier:
+                filtered.append(s)
         result = filtered if filtered else list(schemas)
     else:
         result = list(schemas)
@@ -412,12 +611,13 @@ def reload_plugin(path: Path) -> None:
                 name = fn["name"]
                 
                 # Remove existing schema if it exists
-                global _schemas, _executors, _tui_hints
+                global _schemas, _executors, _tui_hints, _capabilities
                 _schemas = [s for s in _schemas if s["function"]["name"] != name]
                 
                 _schemas.append(schema)
                 _executors[name] = getattr(mod, "execute")
                 _rings[name] = getattr(mod, "REQUIRED_RING", 0)
+                _capabilities[name] = _extract_capability(mod, name)
                 
                 if hasattr(mod, "TUI_HINT"):
                     _tui_hints[name] = getattr(mod, "TUI_HINT")

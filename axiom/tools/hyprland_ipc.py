@@ -28,6 +28,11 @@ class ManageDesktopWindowTool(BaseTool):
                 "and focus via hyprctl. Actions: 'list', 'get_active', 'focus', 'workspace', "
                 "'move_to_workspace', 'toggle_floating', 'toggle_fullscreen', 'close'."
             ),
+            tier=1,
+            is_core=True,
+            requires_bridge=False,
+            requires_window=True,
+            token_cost=150,
         )
         self.parameters = [
             ToolParameter(
