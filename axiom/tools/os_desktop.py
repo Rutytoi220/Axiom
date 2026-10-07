@@ -217,3 +217,103 @@ class ManageMediaPlaybackTool(BaseTool):
         except Exception as exc:
             logger.exception("Media playback control error")
             return ToolResult(False, error=f"Media playback error: {exc}")
+
+
+class SendDesktopNotificationTool(BaseTool):
+    """Deterministically dispatches desktop notifications on Linux via notify-send."""
+
+    def __init__(self):
+        super().__init__(
+            tool_id="send_desktop_notification",
+            name="send_desktop_notification",
+            description=(
+                "Tier 1 Linux Desktop Notification: Dispatch native desktop notifications via notify-send. "
+                "Supports urgency levels ('low', 'normal', 'critical'), notification title, message, and app name."
+            ),
+        )
+        self.parameters = [
+            ToolParameter(
+                name="title",
+                type="string",
+                description="Notification title string.",
+                required=True,
+            ),
+            ToolParameter(
+                name="message",
+                type="string",
+                description="Notification body message string.",
+                required=True,
+            ),
+            ToolParameter(
+                name="urgency",
+                type="string",
+                description="Urgency level: 'low', 'normal', or 'critical'. Defaults to 'normal'.",
+                required=False,
+                default="normal",
+            ),
+            ToolParameter(
+                name="app_name",
+                type="string",
+                description="Application name displayed with the notification. Defaults to 'AXIOM'.",
+                required=False,
+                default="AXIOM",
+            ),
+        ]
+
+    async def execute(self, params: Optional[Dict[str, Any]] = None, **kwargs) -> ToolResult:
+        merged = dict(params or {})
+        merged.update(kwargs)
+
+        title = str(merged.get("title") or "").strip()
+        message = str(merged.get("message") or "").strip()
+        urgency = str(merged.get("urgency") or "normal").strip().lower()
+        app_name = str(merged.get("app_name") or "AXIOM").strip()
+
+        if not title:
+            return ToolResult(False, error="Title is required for desktop notification.")
+        if not message:
+            return ToolResult(False, error="Message body is required for desktop notification.")
+        if urgency not in ("low", "normal", "critical"):
+            urgency = "normal"
+
+        if not shutil.which("notify-send"):
+            logger.info("notify-send binary not found on PATH. Falling back to console output.")
+            return ToolResult(
+                True,
+                output={
+                    "success": True,
+                    "fallback": "console",
+                    "delivered": False,
+                    "title": title,
+                    "message": message,
+                    "urgency": urgency,
+                },
+            )
+
+        cmd = ["notify-send", "-u", urgency, "-a", app_name, title, message]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=3.0)
+            if proc.returncode != 0:
+                err_text = stderr.decode("utf-8", errors="replace").strip()
+                return ToolResult(False, error=f"notify-send failed: {err_text}")
+
+            return ToolResult(
+                True,
+                output={
+                    "success": True,
+                    "title": title,
+                    "urgency": urgency,
+                    "app_name": app_name,
+                    "delivered": True,
+                },
+            )
+        except asyncio.TimeoutError:
+            return ToolResult(False, error="notify-send command timed out after 3.0s.")
+        except Exception as exc:
+            return ToolResult(False, error=f"Failed to dispatch desktop notification: {exc}")
+

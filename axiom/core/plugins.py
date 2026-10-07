@@ -154,6 +154,50 @@ def load_plugins() -> None:
                 "    return json.dumps(res.to_dict(tool=_tool.name, arguments=params))\n"
             ),
         ),
+        (
+            TOOLS_DIR / "send_desktop_notification.py",
+            (
+                "import json\n"
+                "from axiom.tools.os_desktop import SendDesktopNotificationTool\n\n"
+                "_tool = SendDesktopNotificationTool()\n\n"
+                "TOOL_SCHEMA = {\n"
+                '    "type": "function",\n'
+                '    "function": {\n'
+                '        "name": _tool.name,\n'
+                '        "description": _tool.description,\n'
+                '        "parameters": _tool.schema,\n'
+                "    }\n"
+                "}\n"
+                'TUI_HINT = "🔔 Sending native desktop notification..."\n'
+                "REQUIRED_RING = 0\n\n"
+                "async def execute(title: str = '', message: str = '', urgency: str = 'normal', app_name: str = 'AXIOM', **kwargs) -> str:\n"
+                '    params = {"title": title, "message": message, "urgency": urgency, "app_name": app_name, **kwargs}\n'
+                "    res = await _tool.execute(params)\n"
+                "    return json.dumps(res.to_dict(tool=_tool.name, arguments=params))\n"
+            ),
+        ),
+        (
+            TOOLS_DIR / "inspect_network.py",
+            (
+                "import json\n"
+                "from axiom.tools.os_system import InspectNetworkTool\n\n"
+                "_tool = InspectNetworkTool()\n\n"
+                "TOOL_SCHEMA = {\n"
+                '    "type": "function",\n'
+                '    "function": {\n'
+                '        "name": _tool.name,\n'
+                '        "description": _tool.description,\n'
+                '        "parameters": _tool.schema,\n'
+                "    }\n"
+                "}\n"
+                'TUI_HINT = "🌐 Inspecting network interfaces & latency..."\n'
+                "REQUIRED_RING = 0\n\n"
+                "async def execute(check_target: str = '1.1.1.1', **kwargs) -> str:\n"
+                '    params = {"check_target": check_target, **kwargs}\n'
+                "    res = await _tool.execute(params)\n"
+                "    return json.dumps(res.to_dict(tool=_tool.name, arguments=params))\n"
+            ),
+        ),
     ]
     for target_file, code_content in provisions:
         if not target_file.exists():

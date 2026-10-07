@@ -714,6 +714,21 @@ async function handleCommand(msg) {
             try {
               el.focus();
             } catch (_) {}
+
+            // Visual Action Highlighting: 400ms high-contrast outline
+            try {
+              const origOutline = el.style.outline;
+              const origBoxShadow = el.style.boxShadow;
+              el.style.outline = "3px solid #7aa2f7";
+              el.style.boxShadow = "0 0 10px rgba(122, 162, 247, 0.8)";
+              setTimeout(() => {
+                try {
+                  el.style.outline = origOutline || "";
+                  el.style.boxShadow = origBoxShadow || "";
+                } catch (_) {}
+              }, 400);
+            } catch (_) {}
+
             el.click();
             return {
               success: true,
@@ -1127,6 +1142,41 @@ async function handleCommand(msg) {
 
         const execResult = results && results[0] ? results[0].result : { success: false, error: "Content extraction script produced no result" };
         sendReply({ id, action: "extract_page_content", ...execResult });
+        break;
+      }
+
+      case "evaluate_script": {
+        const expression = msg.expression || msg.script || msg.code || "";
+        if (!expression) {
+          sendReply({ id, success: false, action: "evaluate_script", error: "Missing expression parameter" });
+          return;
+        }
+
+        const tab = await getTargetTab(msg);
+        if (!tab || !tab.id) {
+          sendReply({ id, success: false, action: "evaluate_script", error: "No target tab available" });
+          return;
+        }
+
+        try {
+          const results = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: (codeStr) => {
+              try {
+                const res = window.eval(codeStr);
+                return { success: true, result: res };
+              } catch (evalErr) {
+                return { success: false, error: evalErr.message || String(evalErr) };
+              }
+            },
+            args: [expression],
+          });
+
+          const execResult = results && results[0] ? results[0].result : { success: false, error: "Script execution produced no result" };
+          sendReply({ id, action: "evaluate_script", ...execResult });
+        } catch (err) {
+          sendReply({ id, success: false, action: "evaluate_script", error: `Failed to evaluate script: ${err.message || String(err)}` });
+        }
         break;
       }
 

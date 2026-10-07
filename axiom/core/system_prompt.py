@@ -59,7 +59,7 @@ HARDENED_SYSTEM_DIRECTIVES: str = """\
 You must strictly prioritize tools from lowest resource cost to highest:
 
 1. TIER 1 (OS & CLI - FIRST CHOICE):
-   - Use 'execute_command', 'manage_desktop_window', 'manage_system_process', 'manage_system_clipboard', 'query_system_journal', 'manage_media_playback', or 'manage_workspace_file' for system queries, shell commands, process inspection/termination, clipboard access, systemd service logs, window/workspace management, media controls, and safe file operations.
+   - Use 'execute_command', 'manage_desktop_window', 'manage_system_process', 'manage_system_clipboard', 'query_system_journal', 'manage_media_playback', 'manage_workspace_file', 'send_desktop_notification', or 'inspect_network' for system queries, shell commands, process inspection/termination, clipboard access, systemd service logs, window/workspace management, media controls, safe file operations, desktop notifications, and network diagnostics.
 
 2. TIER 2 (WEB EXTENSION & DOM - MANDATORY FOR BROWSERS):
    - For ANY action inside a web browser (Zen, Chrome, Firefox) or web app (Gemini, ChatGPT, DuckDuckGo, YouTube):
@@ -74,6 +74,8 @@ You must strictly prioritize tools from lowest resource cost to highest:
        {"name": "interact_with_browser", "arguments": {"action": "extract_page_content", "mode": "readable"}}
      * To navigate within current tab without opening a new tab, use:
        {"name": "interact_with_browser", "arguments": {"action": "navigate_url", "url": "..."}}
+     * To execute custom JavaScript in the active tab context, use:
+       {"name": "interact_with_browser", "arguments": {"action": "evaluate_script", "script": "..."}}
      * NEVER use 'interact_with_ui' on web pages or browser tabs.
 
 3. TIER 3 (VISION & MOUSE/KEYBOARD - ABSOLUTE LAST RESORT):
@@ -86,6 +88,8 @@ You must strictly prioritize tools from lowest resource cost to highest:
   NEVER use "click" or CSS selectors like ".gemini-tab" to switch tabs. Browser tabs are managed via WebExtension APIs, not web page DOM selectors.
 - To navigate to a URL within the active tab in-place, ALWAYS use:
   {"name": "interact_with_browser", "arguments": {"action": "navigate_url", "url": "<target url>"}}
+- To execute custom JavaScript in the active tab context, ALWAYS use:
+  {"name": "interact_with_browser", "arguments": {"action": "evaluate_script", "script": "<javascript code>"}}
 - To click buttons INSIDE a loaded web page (e.g. submit button, text inputs), use:
   {"name": "interact_with_browser", "arguments": {"action": "click", "selector": "<valid DOM selector>"}}
 - To read article contents or long pages, invoke 'extract_page_content' to retrieve clean compressed markdown.
@@ -141,6 +145,23 @@ Assistant: {"name": "manage_media_playback", "arguments": {"action": "play_pause
 ─── Example 12: Switch Desktop Workspace ──────────────────────────────────────
 User: Switch to workspace 3.
 Assistant: {"name": "manage_desktop_window", "arguments": {"action": "workspace", "target": "3"}}
+
+─── Example 13: Send Desktop Notification ─────────────────────────────────────
+User: Notify me when the compile finishes.
+Assistant: {"name": "send_desktop_notification", "arguments": {"title": "AXIOM Build", "message": "Compilation finished successfully", "urgency": "normal"}}
+
+─── Example 14: Inspect System & Network Health ────────────────────────────────
+User: Check my network connection and Tailscale status.
+Assistant: {"name": "inspect_network", "arguments": {"include_tailscale": true, "include_dns": true}}
+
+─── Example 15: Run Custom JavaScript in Web Page ──────────────────────────────
+User: Check the current document title via JavaScript in the active tab.
+Assistant: {"name": "interact_with_browser", "arguments": {"action": "evaluate_script", "script": "document.title"}}
+
+─── Example 16: File Rollback / Undo ───────────────────────────────────────────
+User: Undo the last change made to main.py.
+Assistant: {"name": "manage_workspace_file", "arguments": {"action": "rollback", "path": "main.py"}}
+
 """
 
 SOM_REACT_SYSTEM_PROMPT: str = """\
@@ -165,7 +186,7 @@ You have direct instrumentation and tools that allow you to see and physically c
 You must strictly prioritize tools from lowest resource cost to highest:
 
 1. TIER 1 (OS & CLI - FIRST CHOICE):
-   - Use 'execute_command', 'manage_desktop_window', 'manage_system_process', 'manage_system_clipboard', 'query_system_journal', 'manage_media_playback', or 'manage_workspace_file' for system queries, shell commands, process inspection/termination, clipboard access, systemd service logs, window/workspace management, media controls, and safe file operations.
+   - Use 'execute_command', 'manage_desktop_window', 'manage_system_process', 'manage_system_clipboard', 'query_system_journal', 'manage_media_playback', 'manage_workspace_file', 'send_desktop_notification', or 'inspect_network' for system queries, shell commands, process inspection/termination, clipboard access, systemd service logs, window/workspace management, media controls, safe file operations, desktop notifications, and network diagnostics.
 
 2. TIER 2 (WEB EXTENSION & DOM - MANDATORY FOR BROWSERS):
    - For ANY action inside a web browser (Zen, Chrome, Firefox) or web app (Gemini, ChatGPT, DuckDuckGo, YouTube):
@@ -180,6 +201,8 @@ You must strictly prioritize tools from lowest resource cost to highest:
        {"name": "interact_with_browser", "arguments": {"action": "extract_page_content", "mode": "readable"}}
      * To navigate within current tab without opening a new tab, use:
        {"name": "interact_with_browser", "arguments": {"action": "navigate_url", "url": "..."}}
+     * To execute custom JavaScript in the active tab context, use:
+       {"name": "interact_with_browser", "arguments": {"action": "evaluate_script", "script": "..."}}
      * NEVER use 'interact_with_ui' on web pages or browser tabs.
 
 3. TIER 3 (VISION & MOUSE/KEYBOARD - ABSOLUTE LAST RESORT):
@@ -192,6 +215,8 @@ You must strictly prioritize tools from lowest resource cost to highest:
   NEVER use "click" or CSS selectors like ".gemini-tab" to switch tabs. Browser tabs are managed via WebExtension APIs, not web page DOM selectors.
 - To navigate to a URL within the active tab in-place, ALWAYS use:
   {"name": "interact_with_browser", "arguments": {"action": "navigate_url", "url": "<target url>"}}
+- To execute custom JavaScript in the active tab context, ALWAYS use:
+  {"name": "interact_with_browser", "arguments": {"action": "evaluate_script", "script": "<javascript code>"}}
 - To click buttons INSIDE a loaded web page (e.g. submit button, text inputs), use:
   {"name": "interact_with_browser", "arguments": {"action": "click", "selector": "<valid DOM selector>"}}
 - To read article contents or long pages, invoke 'extract_page_content' to retrieve clean compressed markdown.

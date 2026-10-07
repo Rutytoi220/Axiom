@@ -16,6 +16,8 @@ import os
 import re
 import shutil
 import signal
+import socket
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from axiom.tools.core import BaseTool, ToolParameter, ToolResult
@@ -596,3 +598,125 @@ class QuerySystemJournalTool(BaseTool):
             return ToolResult(False, error="journalctl command timed out after 5.0s.")
         except Exception as e:
             return ToolResult(False, error=f"journalctl execution failed: {e}")
+
+
+class InspectNetworkTool(BaseTool):
+    """Deterministically inspects Linux network interfaces, default gateway, DNS latency, and VPN status."""
+
+    def __init__(self):
+        super().__init__(
+            tool_id="inspect_network",
+            name="inspect_network",
+            description=(
+                "Tier 1 Linux Network & VPN Diagnostics: Inspect default gateway, network interfaces, "
+                "local IP addresses, DNS resolution latency, and Tailscale VPN connection status."
+            ),
+        )
+        self.parameters = [
+            ToolParameter(
+                name="check_target",
+                type="string",
+                description="Domain or IP target to measure DNS resolution latency (defaults to '1.1.1.1').",
+                required=False,
+                default="1.1.1.1",
+            ),
+        ]
+
+    async def execute(self, params: Optional[Dict[str, Any]] = None, **kwargs) -> ToolResult:
+        merged = dict(params or {})
+        merged.update(kwargs)
+
+        check_target = str(merged.get("check_target") or "1.1.1.1").strip()
+        if not check_target:
+            check_target = "1.1.1.1"
+
+        # 1. Default Gateway via `ip route`
+        gateway_info: Dict[str, Any] = {"gateway": "unknown", "interface": "unknown", "raw": ""}
+        if shutil.which("ip"):
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "ip", "route", "show", "default",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=2.0)
+                route_line = stdout.decode("utf-8", errors="replace").strip()
+                gateway_info["raw"] = route_line
+                match = re.search(r"default via ([\d\w\.:]+)\s+dev\s+([\w\.\-]+)", route_line)
+                if match:
+                    gateway_info["gateway"] = match.group(1)
+                    gateway_info["interface"] = match.group(2)
+            except Exception as e:
+                gateway_info["error"] = str(e)
+
+        # 2. Local IP Addresses & Interfaces via `ip -brief address`
+        interfaces: List[Dict[str, Any]] = []
+        if shutil.which("ip"):
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "ip", "-brief", "address",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=2.0)
+                for line in stdout.decode("utf-8", errors="replace").splitlines():
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        iface = parts[0]
+                        state = parts[1]
+                        ips = parts[2:]
+                        interfaces.append({
+                            "interface": iface,
+                            "state": state,
+                            "ips": ips,
+                        })
+            except Exception as e:
+                logger.warning(f"Error reading ip address: {e}")
+
+        # 3. DNS resolution and latency
+        dns_info: Dict[str, Any] = {"target": check_target}
+        try:
+            t0 = time.perf_counter()
+            resolved = await asyncio.to_thread(socket.gethostbyname, check_target)
+            lat_ms = round((time.perf_counter() - t0) * 1000, 2)
+            dns_info["resolved_ip"] = resolved
+            dns_info["latency_ms"] = lat_ms
+            dns_info["status"] = "resolved"
+        except Exception as exc:
+            dns_info["resolved_ip"] = None
+            dns_info["latency_ms"] = None
+            dns_info["status"] = f"error: {exc}"
+
+        # 4. Tailscale VPN status
+        tailscale_info: Dict[str, Any] = {"tailscale_active": False}
+        if shutil.which("tailscale"):
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "tailscale", "status", "--json",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=3.0)
+                if proc.returncode == 0:
+                    ts_data = json.loads(stdout.decode("utf-8", errors="replace"))
+                    backend = ts_data.get("BackendState", "Stopped")
+                    tailscale_info["tailscale_active"] = (backend == "Running")
+                    tailscale_info["backend_state"] = backend
+                    tailscale_info["tailnet_ips"] = ts_data.get("TailscaleIPs", [])
+                    self_node = ts_data.get("Self", {}) or {}
+                    tailscale_info["node_name"] = self_node.get("HostName", "")
+                    peers = ts_data.get("Peer", {}) or {}
+                    tailscale_info["peer_count"] = len(peers)
+            except Exception as ts_err:
+                tailscale_info["error"] = str(ts_err)
+
+        return ToolResult(
+            True,
+            output={
+                "gateway": gateway_info,
+                "interfaces": interfaces,
+                "dns": dns_info,
+                "tailscale": tailscale_info,
+            },
+        )
+

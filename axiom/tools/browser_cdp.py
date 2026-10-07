@@ -32,9 +32,9 @@ class InteractWithBrowserTool(BaseTool):
                 "Tier 2 Semantic UI Automation: Browser and tab automation via AXIOM WebExtension bridge. "
                 "Use 'click_element' with 'element_id' from the latest get_page_snapshot to click buttons, links, or controls on the page. "
                 "Actions: 'navigate_url' (navigate active tab in-place), 'capture_tab_screenshot' (capture PNG of viewport), "
-                "'get_page_snapshot' (list numbered interactive elements), 'click_element' (click by element_id), "
-                "'fill_element' (type text into element_id or select dropdown/checkbox), 'scroll_page' (scroll down/up/top/bottom), "
-                "'extract_page_content' (extract clean markdown content up to 4000 chars), "
+                "'evaluate_script' (execute JS expression in active tab), 'get_page_snapshot' (list numbered interactive elements), "
+                "'click_element' (click by element_id), 'fill_element' (type text into element_id or select dropdown/checkbox), "
+                "'scroll_page' (scroll down/up/top/bottom), 'extract_page_content' (extract clean markdown content up to 4000 chars), "
                 "'switch_tab' (focus tab by query), 'open_tab' (open url), 'close_tab' (close tab), "
                 "'duplicate_tab', 'reload_tab', 'pin_tab', 'get_active_tab', 'list_tabs', 'click' (DOM selector), 'type', 'get_dom'."
             ),
@@ -44,9 +44,9 @@ class InteractWithBrowserTool(BaseTool):
                 name="action",
                 type="string",
                 description=(
-                    "The browser action: 'navigate_url', 'capture_tab_screenshot', 'get_page_snapshot', 'click_element', 'fill_element', "
-                    "'scroll_page', 'extract_page_content', 'switch_tab', 'open_tab', 'close_tab', 'duplicate_tab', 'reload_tab', "
-                    "'pin_tab', 'get_active_tab', 'list_tabs', 'click', 'type', 'get_dom'."
+                    "The browser action: 'navigate_url', 'capture_tab_screenshot', 'evaluate_script', 'get_page_snapshot', 'click_element', "
+                    "'fill_element', 'scroll_page', 'extract_page_content', 'switch_tab', 'open_tab', 'close_tab', 'duplicate_tab', "
+                    "'reload_tab', 'pin_tab', 'get_active_tab', 'list_tabs', 'click', 'type', 'get_dom'."
                 ),
                 required=True,
             ),

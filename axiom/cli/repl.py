@@ -28,8 +28,11 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.status import Status
+from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
+import rich.box
+
 
 import axiom.agents.native_orchestrator as nat_orch
 from axiom.agents.native_orchestrator import NativeOrchestrator
@@ -53,6 +56,8 @@ COMMANDS = {
     "/memory": "Manage persistent semantic memories (/memory list, /memory add <fact>)",
     "/rules": "Display active global and local project instructions",
     "/status": "Display live system, bridge, desktop, and tool telemetry",
+    "/doctor": "Run diagnostic health checks across all 6 subsystems",
+    "/undo": "Rollback the last modified file to its previous state",
     "/exit": "Quit the AXIOM REPL cleanly",
 }
 
@@ -63,6 +68,8 @@ slash_completer = WordCompleter(
         "/thought toggle": "Toggle reasoning visibility (Expanded <-> Collapsed)",
         "/memory list": "Display all stored semantic memories",
         "/memory add": "Store a permanent fact in semantic memory",
+        "/doctor": "Run diagnostic health checks across all 6 subsystems",
+        "/undo": "Rollback the last modified file to its previous state",
     },
     sentence=True,
     ignore_case=True,
@@ -530,6 +537,242 @@ class InlineRepl:
                 padding=(1, 2),
             ))
             console.print()
+            return True
+
+        elif cmd == "/undo":
+            from axiom.tools.workspace_file import ManageWorkspaceFileTool, get_last_modified_file
+
+            if len(parts) > 1:
+                target_path_str = " ".join(parts[1:]).strip()
+            else:
+                last_file = get_last_modified_file()
+                if not last_file:
+                    console.print("[dim yellow]No recent file modification detected in this session.[/dim yellow]\n")
+                    return True
+                target_path_str = str(last_file)
+
+            def _run_coro(coro):
+                import concurrent.futures
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = None
+                if loop and loop.is_running():
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                        return executor.submit(asyncio.run, coro).result()
+                else:
+                    return asyncio.run(coro)
+
+            tool = ManageWorkspaceFileTool()
+            res = _run_coro(tool.execute({"action": "rollback", "path": target_path_str}))
+
+            if not res.success:
+                err_msg = res.error or "Unknown error occurred during rollback."
+                console.print(f"[error]✗ Rollback Failed: {err_msg}[/error]\n")
+            else:
+                out = res.output or {}
+                panel_text = (
+                    f"[#9ece6a bold]✓ Rollback Successful[/#9ece6a bold]\n\n"
+                    f"[label]Restored:[/label] [value]{out.get('restored_path', target_path_str)}[/value]\n"
+                    f"[label]From:[/label] [dim]{out.get('backup_source', 'N/A')}[/dim]\n"
+                    f"[label]Size:[/label] [value]{out.get('bytes', 0)}[/value] bytes"
+                )
+                console.print()
+                console.print(Panel(
+                    panel_text,
+                    title="[title]AXIOM File Rollback[/title]",
+                    border_style="#9ece6a",
+                    padding=(1, 2),
+                ))
+                console.print()
+            return True
+
+        elif cmd == "/doctor":
+            import shutil
+            import subprocess
+            import socket
+
+            # 1. Ollama LLM Engine Check
+            ollama_status = "FAIL"
+            ollama_details = ""
+            base_url = getattr(self.config, "ollama_base_url", "http://127.0.0.1:11434").rstrip("/")
+            try:
+                import urllib.request
+                req = urllib.request.Request(f"{base_url}/api/tags", method="GET")
+                with urllib.request.urlopen(req, timeout=1.5) as resp:
+                    if resp.status == 200:
+                        tags_data = json.loads(resp.read().decode("utf-8"))
+                        models = [m.get("name", "") for m in tags_data.get("models", [])]
+                        target = self.config.ollama_model
+                        target_base = target.split(":")[0] if ":" in target else target
+                        resident = any(target == m or m.startswith(target_base) for m in models)
+                        if resident:
+                            ollama_status = "PASS"
+                            ollama_details = f"Online · Model '{target}' resident"
+                        else:
+                            ollama_status = "WARN"
+                            ollama_details = f"Online · Model '{target}' not resident in tags"
+            except Exception as e:
+                ollama_status = "FAIL"
+                ollama_details = f"Unreachable at {base_url} ({e})"
+
+            # 2. Desktop Compositor (Hyprland / Wayland)
+            hypr_sig = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE", "")
+            wayland_disp = os.environ.get("WAYLAND_DISPLAY", "")
+            x11_disp = os.environ.get("DISPLAY", "")
+            if hypr_sig and shutil.which("hyprctl"):
+                try:
+                    res = subprocess.run(["hyprctl", "version"], capture_output=True, text=True, timeout=1.0)
+                    if res.returncode == 0:
+                        desktop_check_status = "PASS"
+                        desktop_check_details = f"Hyprland active ({hypr_sig[:8]}...) · Wayland {wayland_disp or 'present'}"
+                    else:
+                        desktop_check_status = "WARN"
+                        desktop_check_details = f"Hyprland signature set but hyprctl exit code {res.returncode}"
+                except Exception as e:
+                    desktop_check_status = "WARN"
+                    desktop_check_details = f"Hyprland signature set but probe error ({e})"
+            elif wayland_disp or x11_disp:
+                desktop_check_status = "WARN"
+                desktop_check_details = f"Non-Hyprland display session ({wayland_disp or x11_disp})"
+            else:
+                desktop_check_status = "FAIL"
+                desktop_check_details = "No Wayland or X11 display server detected in environment"
+
+            # 3. Wayland Clipboard
+            has_copy = shutil.which("wl-copy") is not None
+            has_paste = shutil.which("wl-paste") is not None
+            if has_copy and has_paste:
+                try:
+                    subprocess.run(["wl-paste", "--no-newline"], capture_output=True, timeout=0.5)
+                    clip_status = "PASS"
+                    clip_details = "wl-copy & wl-paste operational"
+                except Exception:
+                    clip_status = "PASS"
+                    clip_details = "wl-copy & wl-paste installed"
+            else:
+                clip_status = "WARN"
+                missing_tools = []
+                if not has_copy:
+                    missing_tools.append("wl-copy")
+                if not has_paste:
+                    missing_tools.append("wl-paste")
+                clip_details = f"Missing clipboard tools: {', '.join(missing_tools)}"
+
+            # 4. Audio / MPRIS Bus
+            if shutil.which("playerctl"):
+                try:
+                    res = subprocess.run(["playerctl", "-l"], capture_output=True, text=True, timeout=1.0)
+                    players = [p.strip() for p in res.stdout.strip().splitlines() if p.strip()]
+                    if players:
+                        media_check_status = "PASS"
+                        media_check_details = f"playerctl active · Players: {', '.join(players)}"
+                    else:
+                        media_check_status = "PASS"
+                        media_check_details = "playerctl installed · No active players running"
+                except Exception as e:
+                    media_check_status = "WARN"
+                    media_check_details = f"playerctl probe error ({e})"
+            else:
+                media_check_status = "WARN"
+                media_check_details = "playerctl not installed in PATH"
+
+            # 5. Extension WebSocket Bridge
+            from axiom.tools.browser_extension import get_bridge
+            bridge = get_bridge()
+            is_listening = bridge.server is not None
+            clients = bridge.client_count if bridge else 0
+            port = bridge.port if bridge else 41144
+            sock_bound = False
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                    sock_bound = True
+            except Exception:
+                sock_bound = False
+
+            if is_listening or sock_bound:
+                if clients > 0:
+                    bridge_check_status = "PASS"
+                    bridge_check_details = f"Listening on ws://127.0.0.1:{port} · {clients} client(s) connected"
+                else:
+                    bridge_check_status = "WARN"
+                    bridge_check_details = f"Listening on ws://127.0.0.1:{port} · 0 browser clients connected"
+            else:
+                bridge_check_status = "FAIL"
+                bridge_check_details = f"Bridge server not listening on port {port}"
+
+            # 6. Dynamic Tool Registry
+            schemas = get_tool_schemas(0)
+            tool_names = set()
+            for s in schemas:
+                fn = s.get("function", {})
+                if fn.get("name"):
+                    tool_names.add(fn["name"])
+            required_tools = ["send_desktop_notification", "inspect_network", "manage_workspace_file"]
+            missing_tools = [t for t in required_tools if t not in tool_names]
+
+            if len(schemas) >= 30 and not missing_tools:
+                tool_check_status = "PASS"
+                tool_check_details = f"{len(schemas)} dynamic tools active across Tiers 1-3"
+            elif missing_tools:
+                tool_check_status = "WARN"
+                tool_check_details = f"{len(schemas)} tools active · Missing: {', '.join(missing_tools)}"
+            else:
+                tool_check_status = "WARN"
+                tool_check_details = f"Only {len(schemas)} tools active (< 30)"
+
+            subsystems = [
+                ("Ollama Engine", ollama_status, ollama_details),
+                ("Compositor", desktop_check_status, desktop_check_details),
+                ("Clipboard", clip_status, clip_details),
+                ("Media (MPRIS)", media_check_status, media_check_details),
+                ("Browser Bridge", bridge_check_status, bridge_check_details),
+                ("Tool Registry", tool_check_status, tool_check_details),
+            ]
+
+            table = Table(
+                title="[title]AXIOM Subsystem Health Diagnostics[/title]",
+                box=rich.box.ROUNDED,
+                border_style="#3b4261",
+                header_style="#7dcfff bold",
+                title_style="#7aa2f7 bold",
+                show_lines=True,
+            )
+            table.add_column("Subsystem", style="#a9b1d6 bold", width=18)
+            table.add_column("Status", justify="center", width=8)
+            table.add_column("Diagnostic Details", style="#c0caf5")
+
+            for name, status, details in subsystems:
+                badge = (
+                    "[#9ece6a bold]PASS[/#9ece6a bold]" if status == "PASS" else
+                    "[#e0af68 bold]WARN[/#e0af68 bold]" if status == "WARN" else
+                    "[#f7768e bold]FAIL[/#f7768e bold]"
+                )
+                table.add_row(name, badge, details)
+
+            console.print()
+            console.print(table)
+
+            pass_count = sum(1 for _, s, _ in subsystems if s == "PASS")
+            total_count = len(subsystems)
+            if pass_count == total_count:
+                console.print(f"\n[#9ece6a bold]✓ All {total_count}/{total_count} Subsystems Healthy[/#9ece6a bold]\n")
+            else:
+                console.print(f"\n[#e0af68 bold]⚠️ {total_count - pass_count} Subsystem(s) Require Attention ({pass_count}/{total_count} passing)[/#e0af68 bold]")
+                console.print("[dim]Remediation Recommendations:[/dim]")
+                if ollama_status != "PASS":
+                    console.print(f"  • [label]Ollama Engine:[/label] Run [value]ollama serve[/value] and ensure [value]ollama pull {self.config.ollama_model}[/value] is complete.")
+                if desktop_check_status != "PASS":
+                    console.print("  • [label]Compositor:[/label] Launch AXIOM within an active Hyprland / Wayland desktop session for window management.")
+                if clip_status != "PASS":
+                    console.print("  • [label]Clipboard:[/label] Install Wayland clipboard utilities ([value]sudo pacman -S wl-clipboard[/value]).")
+                if media_check_status != "PASS":
+                    console.print("  • [label]Media:[/label] Install [value]playerctl[/value] to control Spotify, Zen, and MPRIS audio.")
+                if bridge_check_status != "PASS":
+                    console.print("  • [label]Browser Bridge:[/label] Install extension in Zen/Firefox from [value]/tmp/axiom-extension.zip[/value] and open a browser window.")
+                if tool_check_status != "PASS":
+                    console.print("  • [label]Tool Registry:[/label] Inspect plugin manifests in [value]~/.config/axiom/tools.d/[/value].")
+                console.print()
             return True
 
         return False
