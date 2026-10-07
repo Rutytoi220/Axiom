@@ -282,7 +282,7 @@ TIER_2_TOOLS = {
 }
 
 
-def filter_tool_schemas_by_tier(schemas: List[Dict[str, Any]], tier: str) -> List[Dict[str, Any]]:
+def filter_tool_schemas_by_tier(schemas: List[Dict[str, Any]], tier: str, is_browser: bool = False) -> List[Dict[str, Any]]:
     """Filter dynamic tool schemas based on the detected automation tier.
 
     - Always includes core system tools: execute_command, manage_desktop_window.
@@ -291,21 +291,27 @@ def filter_tool_schemas_by_tier(schemas: List[Dict[str, Any]], tier: str) -> Lis
       send_desktop_notification, inspect_network).
     - If Tier 2: includes Tier 2 tools (interact_with_browser).
     - If Tier 3 / Ambiguous / General: includes the full registry.
+    - If is_browser is True, interact_with_ui is strictly purged from exposed schemas.
     """
     tier_lower = (tier or "").lower().strip()
     if tier_lower in ("tier1", "tier1_ipc", "1"):
         allowed = CORE_TOOLS | TIER_1_TOOLS
         filtered = [s for s in schemas if (s.get("function", {}).get("name") or s.get("name")) in allowed]
-        return filtered if filtered else list(schemas)
+        result = filtered if filtered else list(schemas)
     elif tier_lower in ("tier2", "tier2_browser", "2"):
         allowed = CORE_TOOLS | TIER_2_TOOLS
         filtered = [s for s in schemas if (s.get("function", {}).get("name") or s.get("name")) in allowed]
-        return filtered if filtered else list(schemas)
+        result = filtered if filtered else list(schemas)
     else:
-        return list(schemas)
+        result = list(schemas)
+
+    if is_browser:
+        result = [s for s in result if (s.get("function", {}).get("name") or s.get("name")) != "interact_with_ui"]
+
+    return result
 
 
-def get_tool_schemas(ring: int = 0, tier: Optional[str] = None) -> List[Dict[str, Any]]:
+def get_tool_schemas(ring: int = 0, tier: Optional[str] = None, is_browser: bool = False) -> List[Dict[str, Any]]:
     if not _schemas:
         load_plugins()
     filtered = []
@@ -319,8 +325,8 @@ def get_tool_schemas(ring: int = 0, tier: Optional[str] = None) -> List[Dict[str
         # Ring 0 has access to everything. Ring 3 only has access to Ring 3+.
         if tool_ring >= ring:
             filtered.append(s)
-    if tier:
-        filtered = filter_tool_schemas_by_tier(filtered, tier)
+    if tier or is_browser:
+        filtered = filter_tool_schemas_by_tier(filtered, tier or "", is_browser=is_browser)
     return filtered
 
 def get_tui_hints() -> Dict[str, str]:

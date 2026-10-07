@@ -3,7 +3,7 @@ import json
 import re
 import shutil
 import httpx
-from typing import Any, AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Dict, Optional
 from axiom.core.plugins import get_tool_schemas, execute_tool, get_tier_timeout
 
 REFUSAL_PHRASES = [
@@ -51,8 +51,8 @@ class NativeOrchestrator:
         return any(re.search(pat, t_lower) for pat in patterns)
 
     @staticmethod
-    async def get_active_window_context() -> Optional[str]:
-        """Query hyprctl activewindow -j non-blockingly and format telemetry header."""
+    async def get_active_window() -> Optional[Dict[str, Any]]:
+        """Query hyprctl activewindow -j non-blockingly and return active window dictionary."""
         if not shutil.which("hyprctl"):
             return None
         try:
@@ -64,14 +64,44 @@ class NativeOrchestrator:
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=1.0)
             if proc.returncode == 0 and stdout:
                 data = json.loads(stdout.decode())
-                title = data.get("title", "")
-                w_class = data.get("class", "")
-                workspace = data.get("workspace", {})
-                w_id = workspace.get("id", "") if isinstance(workspace, dict) else workspace
-                if title or w_class:
-                    return f'[Active Window: title="{title}", class="{w_class}", workspace={w_id}]'
+                if isinstance(data, dict):
+                    return data
         except Exception:
             pass
+        return None
+
+    @classmethod
+    def get_active_window_sync(cls) -> Optional[Dict[str, Any]]:
+        """Query hyprctl activewindow -j synchronously with quick timeout."""
+        if not shutil.which("hyprctl"):
+            return None
+        try:
+            import subprocess
+            res = subprocess.run(
+                ["hyprctl", "activewindow", "-j"],
+                capture_output=True,
+                timeout=0.5,
+            )
+            if res.returncode == 0 and res.stdout:
+                data = json.loads(res.stdout.decode())
+                if isinstance(data, dict):
+                    return data
+        except Exception:
+            pass
+        return None
+
+    @classmethod
+    async def get_active_window_context(cls) -> Optional[str]:
+        """Query hyprctl activewindow -j non-blockingly and format telemetry header."""
+        data = await cls.get_active_window()
+        if not data:
+            return None
+        title = data.get("title", "")
+        w_class = data.get("class", "")
+        workspace = data.get("workspace", {})
+        w_id = workspace.get("id", "") if isinstance(workspace, dict) else workspace
+        if title or w_class:
+            return f'[Active Window: title="{title}", class="{w_class}", workspace={w_id}]'
         return None
 
     def _build_system_prompt(self, base_directives: Optional[str] = None) -> str:
@@ -186,8 +216,6 @@ class NativeOrchestrator:
                 clean_name = clean_name[len("functions."):]
             elif clean_name.startswith("tools."):
                 clean_name = clean_name[len("tools."):]
-            if known_tools and clean_name not in known_tools:
-                return None
             if isinstance(args, str):
                 try:
                     args = json.loads(args)
@@ -195,6 +223,11 @@ class NativeOrchestrator:
                     pass
             if not isinstance(args, dict):
                 args = {}
+            # Guard against model confusing interact_with_ui with interact_with_browser on web elements
+            if clean_name == "interact_with_ui" and ("element_id" in args or args.get("action") in ("click_element", "fill_element")):
+                clean_name = "interact_with_browser"
+            if known_tools and clean_name not in known_tools:
+                return None
             return {
                 "type": "function",
                 "function": {
@@ -407,13 +440,36 @@ class NativeOrchestrator:
                 elif isinstance(c, list):
                     user_query_for_intent = " ".join(part.get("text", "") for part in c if isinstance(part, dict))
                 break
+        user_query_for_intent = re.sub(r"^\[Active Window:[^\]]*\]\s*", "", user_query_for_intent)
         is_interface_action = self.is_interface_action_query(user_query_for_intent)
 
-        # Inspect query intent and filter active schemas to prevent context budget overflows
-        tier = self.route_tier(user_query_for_intent)
+        # Inspect query intent, active window, and bridge connectivity to filter active schemas
+        active_window = await self.get_active_window()
+        bridge_connected = False
+        try:
+            from axiom.tools.browser_extension import get_bridge
+            bridge_connected = get_bridge().is_connected()
+        except Exception:
+            pass
+
+        tier = self.route_tier(
+            user_query_for_intent,
+            active_window=active_window,
+            bridge_connected=bridge_connected,
+        )
         from axiom.core.plugins import filter_tool_schemas_by_tier
+        from axiom.agents.actuator_arbiter import is_browser_window
+        browser_active = is_browser_window(active_window)
+
         active_tools = payload.get("tools") or get_tool_schemas(0)
-        payload["tools"] = filter_tool_schemas_by_tier(active_tools, tier)
+        payload["tools"] = filter_tool_schemas_by_tier(active_tools, tier, is_browser=browser_active)
+
+        # Strict negative gating: purge Tier 3 interact_with_ui whenever a browser window is active
+        if browser_active:
+            payload["tools"] = [
+                t for t in payload["tools"]
+                if (t.get("function", {}).get("name") or t.get("name")) != "interact_with_ui"
+            ]
 
         payload["model"] = config.ollama_model
 
@@ -710,60 +766,52 @@ class NativeOrchestrator:
                 async for chunk in self.generate_stream(payload, depth=depth + 1):
                     yield chunk
 
-    @staticmethod
-    def route_tier(task_description: str) -> str:
-        """Determines the automation tier based on task description.
+    @classmethod
+    def route_tier(
+        cls,
+        task_description: str,
+        active_window: Optional[Dict[str, Any]] = None,
+        bridge_connected: Optional[bool] = None,
+    ) -> str:
+        """Determines the automation tier based on task description, active window, and bridge status.
 
         Returns:
-            'tier1_ipc': For window/workspace management -> manage_desktop_window
-            'tier2_browser': For browser/web/DOM interaction -> interact_with_browser
-            'tier3_vision': Fallback for non-accessible canvas/games -> interact_with_ui
+            'tier1_ipc': For window/workspace/OS management
+            'tier2_browser': For browser/web/DOM interaction
+            'tier3_vision': Fallback for non-accessible canvas/games (when not a browser)
         """
-        task_lower = task_description.lower().strip()
+        from axiom.agents.actuator_arbiter import ActuatorArbiter
 
-        # Tier 3 explicit overrides (no DOM, canvas, game, pixel, screen coordinates, legacy)
-        tier3_overrides = [
-            r"\b(no dom|without dom|non-accessible|canvas|opengl|vulkan|game|spaceship|pixel|coordinates|legacy binary)\b",
-            r"\b(grounding|vision engine|screenshot)\b",
-        ]
-        for pattern in tier3_overrides:
-            if re.search(pattern, task_lower):
-                return "tier3_vision"
+        if active_window is None:
+            active_window = cls.get_active_window_sync()
 
-        # Tier 1 indicators (Window management & Hyprland IPC, Process, Clipboard, Journal, Media, Notifications, Network, Files)
-        tier1_patterns = [
-            r"\b(window|windows|workspace|workspaces|fullscreen|floating|tile|tiling)\b",
-            r"\b(focus|switch to|move to|close)\s+(window|workspace)\b",
-            r"\b(active window|list windows|hyprctl|hyprland)\b",
-            r"\b(process|processes|pid|kill\s+process|kill\s+pid|journal|journalctl|systemd|clipboard|wl-copy|wl-paste)\b",
-            r"\b(notify|notification|notify-send|alert)\b",
-            r"\b(network|gateway|ip\s+address|interfaces|tailscale|dns|ping|vpn|wifi)\b",
-            r"\b(media|music|playerctl|playback|volume|track|song|mpris)\b",
-            r"\b(file|files|patch|rollback|undo|backup)\b",
-            r"\b(command|bash|shell|terminal|exec|run command|cli)\b",
-        ]
-        for pattern in tier1_patterns:
-            if re.search(pattern, task_lower):
-                return "tier1_ipc"
+        if bridge_connected is None:
+            try:
+                from axiom.tools.browser_extension import get_bridge
+                bridge = get_bridge()
+                bridge_connected = bridge.is_connected()
+            except Exception:
+                bridge_connected = False
 
-        # Tier 2 indicators (Web browser, DOM, CDP, web apps)
-        tier2_patterns = [
-            r"\b(browser|chrome|chromium|brave|zen|firefox|monkeytype|gemini|youtube|electron)\b",
-            r"\b(dom|html|css selector|website|webpage|web page|web app|tab|url|href)\b",
-            r"\b(inspect|evaluate|javascript|js)\b",
-            r"\b(scroll|scroll_page|extract_page_content|extract\s+page|page\s+content|markdown|read\s+article|pin\s+tab|duplicate\s+tab|reload\s+tab)\b",
-        ]
-        for pattern in tier2_patterns:
-            if re.search(pattern, task_lower):
-                return "tier2_browser"
-
-        # Tier 3 (Vision fallback)
-        return "tier3_vision"
+        return ActuatorArbiter.arbitrate(
+            task=task_description,
+            active_window=active_window,
+            bridge_connected=bridge_connected,
+        )
 
     @classmethod
-    def get_tier_tool(cls, task_description: str) -> str:
+    def get_tier_tool(
+        cls,
+        task_description: str,
+        active_window: Optional[Dict[str, Any]] = None,
+        bridge_connected: Optional[bool] = None,
+    ) -> str:
         """Returns the primary tool name corresponding to the routed tier."""
-        tier = cls.route_tier(task_description)
+        tier = cls.route_tier(
+            task_description,
+            active_window=active_window,
+            bridge_connected=bridge_connected,
+        )
         task_lower = task_description.lower()
         if tier == "tier1_ipc":
             if any(k in task_lower for k in ("clipboard", "wl-copy", "wl-paste", "copy to clipboard", "paste")):
