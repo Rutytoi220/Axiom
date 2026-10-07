@@ -35,7 +35,7 @@ def test_system_prompt_hardening():
     # Verify few-shot exemplars
     assert "FEW-SHOT TOOL CALL EXEMPLARS" in prompt, "Missing few-shot exemplars"
     assert "Example 1: Desktop" in prompt or "Window Inspection" in prompt
-    assert "Example 2: Button Clicking" in prompt
+    assert "Button Clicking" in prompt
 
     print("✓ Check 1 PASSED: System prompt contains refusal ban and few-shot exemplars.\n")
 

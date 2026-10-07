@@ -50,6 +50,11 @@ HARDENED_SYSTEM_DIRECTIVES: str = """\
    - Tier 3: interact_with_ui (Vision grounding fallback)
 4. GROUNDED COLLABORATIVE PERSONA: When the user jokes, speaks casually, or references building you, acknowledge them naturally as an engineering collaborator without delivering philosophical lectures or robotic disclaimers about physical existence.
 
+### CRITICAL TOOL CALLING RULES:
+1. Output EXACTLY ONE tool call per response. NEVER concatenate multiple JSON tool calls.
+2. For multi-step tasks (e.g. open a page and interact with elements), emit the first tool call, wait for the observation result, and decide the next step based on the returned data.
+3. For web actions, always call 'get_page_snapshot' first to discover element IDs before attempting 'click_element' or 'fill_element'.
+
 ### TIER 2 BROWSER AUTOMATION RULES:
 - To switch to, focus, or open an existing browser tab, ALWAYS use:
   {"name": "interact_with_browser", "arguments": {"action": "switch_tab", "query": "<tab title or domain>"}}
@@ -88,6 +93,11 @@ You have direct instrumentation and tools that allow you to see and physically c
    - Tier 2: interact_with_browser (WebExtension & DOM actions)
    - Tier 3: interact_with_ui (Vision grounding fallback)
 4. GROUNDED COLLABORATIVE PERSONA: When the user jokes, speaks casually, or references building you, acknowledge them naturally as an engineering collaborator without delivering philosophical lectures or robotic disclaimers about physical existence.
+
+### CRITICAL TOOL CALLING RULES:
+1. Output EXACTLY ONE tool call per response. NEVER concatenate multiple JSON tool calls.
+2. For multi-step tasks (e.g. open a page and interact with elements), emit the first tool call, wait for the observation result, and decide the next step based on the returned data.
+3. For web actions, always call 'get_page_snapshot' first to discover element IDs before attempting 'click_element' or 'fill_element'.
 
 ### TIER 2 BROWSER AUTOMATION RULES:
 - To switch to, focus, or open an existing browser tab, ALWAYS use:
@@ -248,17 +258,19 @@ def extract_xml_tool_call(text: str) -> Optional[Dict[str, Any]]:
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
-        # Small models sometimes emit trailing prose after the JSON object.
-        # Find the outermost complete { … } and try again.
-        blob_match = re.search(r"\{.*\}", raw, re.DOTALL)
-        if blob_match:
+        # Small models sometimes emit concatenated JSON or trailing prose.
+        # Use raw_decode starting at the first '{'.
+        decoder = json.JSONDecoder()
+        brace_pos = raw.find("{")
+        if brace_pos != -1:
             try:
-                parsed = json.loads(blob_match.group(0))
+                cand, _ = decoder.raw_decode(raw, brace_pos)
+                if isinstance(cand, dict):
+                    parsed = cand
             except json.JSONDecodeError as exc:
-                logger.debug("extract_xml_tool_call: JSON parse failed: %s | raw=%r", exc, raw[:200])
-                return None
-        else:
-            logger.debug("extract_xml_tool_call: no JSON object found in <tool_call> block.")
+                logger.debug("extract_xml_tool_call: JSON raw_decode failed: %s | raw=%r", exc, raw[:200])
+        if not parsed:
+            logger.debug("extract_xml_tool_call: no valid JSON object found in <tool_call> block.")
             return None
 
     if not isinstance(parsed, dict):

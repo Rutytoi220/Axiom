@@ -153,11 +153,135 @@ class NativeOrchestrator:
                             return v
         except Exception:
             pass
+    @classmethod
+    def extract_first_tool_call(
+        cls,
+        text: str,
+        known_tools: Optional[set] = None,
+    ) -> Optional[dict]:
+        """Tolerantly extract the first valid JSON/XML tool call from model text.
+
+        Resolves issues with small models (e.g. Qwen-7B) emitting concatenated
+        JSON objects, markdown code fences, or reasoning text before tool calls.
+        Safely extracts and returns ONLY the first valid tool call, ignoring trailing
+        calls or text.
+        """
+        if not text:
+            return None
+
+        # 1. XML <tool_call> tags
+        if "<tool_call>" in text:
+            from axiom.core.system_prompt import extract_xml_tool_call
+            xml_res = extract_xml_tool_call(text)
+            if xml_res and "function" in xml_res:
+                fn = xml_res["function"]
+                name = fn.get("name", "")
+                if name.startswith("functions."):
+                    name = name[len("functions."):]
+                elif name.startswith("tools."):
+                    name = name[len("tools."):]
+                if not known_tools or name in known_tools:
+                    return {"name": name, "arguments": fn.get("arguments", {})}
+
+        candidate = text.strip()
+        # Clean enclosing markdown fences
+        if candidate.startswith("```json"):
+            candidate = candidate[7:]
+        elif candidate.startswith("```"):
+            candidate = candidate[3:]
+        if candidate.endswith("```"):
+            candidate = candidate[:-3]
+        candidate = candidate.strip()
+
+        # 2. Check if text starts with a JSON list of tool calls
+        if candidate.startswith("["):
+            try:
+                decoder = json.JSONDecoder()
+                parsed_list, _ = decoder.raw_decode(candidate, 0)
+                if isinstance(parsed_list, list) and parsed_list:
+                    first_item = parsed_list[0]
+                    if isinstance(first_item, dict):
+                        name = first_item.get("name") or first_item.get("tool")
+                        if name:
+                            if name.startswith("functions."):
+                                name = name[len("functions."):]
+                            elif name.startswith("tools."):
+                                name = name[len("tools."):]
+                            if not known_tools or name in known_tools:
+                                args = first_item.get("arguments", first_item.get("parameters", first_item.get("args", {})))
+                                if isinstance(args, str):
+                                    try:
+                                        args = json.loads(args)
+                                    except Exception:
+                                        pass
+                                return {"name": name, "arguments": args}
+            except Exception:
+                pass
+
+        # 3. Iterative JSONDecoder().raw_decode starting at each '{'
+        decoder = json.JSONDecoder()
+        idx = 0
+        while idx < len(candidate):
+            brace_pos = candidate.find("{", idx)
+            if brace_pos == -1:
+                break
+            try:
+                obj, end_pos = decoder.raw_decode(candidate, brace_pos)
+                if isinstance(obj, dict):
+                    name = None
+                    args = {}
+                    if "function" in obj and isinstance(obj["function"], dict) and "name" in obj["function"]:
+                        name = obj["function"]["name"]
+                        args = obj["function"].get("arguments", {})
+                    elif "name" in obj and isinstance(obj["name"], str):
+                        name = obj["name"]
+                        args = obj.get("arguments", obj.get("parameters", obj.get("args", {})))
+                    elif "tool" in obj and isinstance(obj["tool"], str):
+                        name = obj["tool"]
+                        args = obj.get("arguments", obj.get("parameters", obj.get("args", {})))
+
+                    if name:
+                        if name.startswith("functions."):
+                            name = name[len("functions."):]
+                        elif name.startswith("tools."):
+                            name = name[len("tools."):]
+                        if not known_tools or name in known_tools:
+                            if isinstance(args, str):
+                                try:
+                                    args = json.loads(args)
+                                except Exception:
+                                    pass
+                            return {"name": name, "arguments": args}
+                idx = brace_pos + 1
+            except json.JSONDecodeError:
+                idx = brace_pos + 1
+
+        # 4. Fallback regex search for single-level JSON tool call objects
+        for match in re.finditer(r'\{[^{}]*"name"\s*:\s*"([^"]+)"[^{}]*\}', candidate):
+            try:
+                extracted = json.loads(match.group(0))
+                if isinstance(extracted, dict) and "name" in extracted:
+                    name = extracted["name"]
+                    if name.startswith("functions."):
+                        name = name[len("functions."):]
+                    elif name.startswith("tools."):
+                        name = name[len("tools."):]
+                    if not known_tools or name in known_tools:
+                        args = extracted.get("arguments", extracted.get("parameters", extracted.get("args", {})))
+                        if isinstance(args, str):
+                            try:
+                                args = json.loads(args)
+                            except Exception:
+                                pass
+                        return {"name": name, "arguments": args}
+            except Exception:
+                pass
+
         return None
 
     async def generate_stream(self, payload: dict, depth: int = 0, is_retry: bool = False) -> AsyncGenerator[dict, None]:
-        if depth > 10:
-            yield {"choices": [{"delta": {"content": "\n[Error: Exceeded max tool execution depth]"}}]}
+        if depth >= 5:
+            yield {"choices": [{"delta": {"content": "\n[Notice: Reached maximum autonomous ReAct steps (5).]\n"}}]}
             return
 
         from axiom.config import get_config
@@ -230,13 +354,12 @@ class NativeOrchestrator:
             else:
                 payload["messages"][0]["content"] += f"\n\n{system_prompt_content}"
 
-            # Apply sliding window context budgeting to prevent HTTP 400 overflows
-            payload["messages"] = self.prune_messages(
-                payload.get("messages", []),
-                max_context_tokens=self.max_context_tokens,
-                reserve_tokens=1000,
-            )
-
+        # Apply sliding window context budgeting on every step to prevent HTTP 400 overflows
+        payload["messages"] = self.prune_messages(
+            payload.get("messages", []),
+            max_context_tokens=self.max_context_tokens,
+            reserve_tokens=1000,
+        )
         user_query_for_intent = ""
         for msg in reversed(payload.get("messages", [])):
             if msg.get("role") == "user":
@@ -307,7 +430,7 @@ class NativeOrchestrator:
                     is_reasoning = False
                     collected_assistant_text = []
                     buffered_chunks = []
-                    buffering = (depth == 0 and not is_retry and is_interface_action)
+                    buffering = (depth == 0 and not is_retry and is_interface_action) or (depth > 0)
                     refusal_detected = False
 
                     async for line in resp.aiter_lines():
@@ -338,7 +461,9 @@ class NativeOrchestrator:
 
                                 if "tool_calls" in delta:
                                     for tc in delta["tool_calls"]:
-                                        idx = tc["index"]
+                                        idx = tc.get("index", 0)
+                                        if idx > 0:
+                                            continue  # Enforce strictly ONE tool call per response
                                         while len(pending_tool_calls) <= idx:
                                             pending_tool_calls.append({"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
                                         if "id" in tc and tc["id"]:
@@ -352,18 +477,27 @@ class NativeOrchestrator:
                                 if buffering:
                                     if "tool_calls" in delta or pending_tool_calls:
                                         buffering = False
-                                        for b in buffered_chunks:
-                                            yield b
+                                        clean_so_far = "".join(collected_assistant_text)
+                                        if not clean_so_far.lstrip().startswith(("{", "[", "```", "<")):
+                                            for b in buffered_chunks:
+                                                yield b
                                         buffered_chunks.clear()
                                         yield data
                                     else:
                                         buffered_chunks.append(data)
                                         text_so_far = "".join(collected_assistant_text)
                                         clean_text = re.sub(r"<think>.*?</think>", "", text_so_far, flags=re.DOTALL)
+                                        stripped = clean_text.lstrip()
                                         if self.is_refusal(clean_text):
                                             refusal_detected = True
                                             break
-                                        elif len(clean_text) > 250:
+                                        elif stripped and not stripped.startswith(("{", "[", "```", "<")):
+                                            if depth > 0 or len(clean_text) > 250:
+                                                buffering = False
+                                                for b in buffered_chunks:
+                                                    yield b
+                                                buffered_chunks.clear()
+                                        elif len(clean_text) > 4000:
                                             buffering = False
                                             for b in buffered_chunks:
                                                 yield b
@@ -402,71 +536,38 @@ class NativeOrchestrator:
                 yield retry_chunk
             return
 
-        if buffered_chunks:
-            for b in buffered_chunks:
-                yield b
-            buffered_chunks.clear()
+        # Enforce single tool execution constraint if multiple tool calls were received
+        if len(pending_tool_calls) > 1:
+            pending_tool_calls = pending_tool_calls[:1]
 
         if not pending_tool_calls and collected_assistant_text:
             full_text = "".join(collected_assistant_text).strip()
-            candidate = full_text
-            if candidate.startswith("```json"):
-                candidate = candidate[7:]
-            elif candidate.startswith("```"):
-                candidate = candidate[3:]
-            if candidate.endswith("```"):
-                candidate = candidate[:-3]
-            candidate = candidate.strip()
-
             known_tools = set()
             if payload.get("tools"):
                 for t in payload["tools"]:
                     if isinstance(t, dict) and "function" in t and "name" in t["function"]:
                         known_tools.add(t["function"]["name"])
 
-            parsed_candidates = []
-            try:
-                parsed = json.loads(candidate)
-                if isinstance(parsed, dict) and "name" in parsed:
-                    if not known_tools or parsed["name"] in known_tools:
-                        parsed_candidates.append(parsed)
-                elif isinstance(parsed, list):
-                    for item in parsed:
-                        if isinstance(item, dict) and "name" in item:
-                            if not known_tools or item["name"] in known_tools:
-                                parsed_candidates.append(item)
-            except Exception:
-                pass
-
-            if not parsed_candidates:
-                match = re.search(r'\{[\s\S]*"name"\s*:\s*"([^"]+)"[\s\S]*\}', candidate)
-                if match:
-                    try:
-                        extracted = json.loads(match.group(0).rstrip('`').strip())
-                        if isinstance(extracted, dict) and "name" in extracted:
-                            if not known_tools or extracted["name"] in known_tools:
-                                parsed_candidates.append(extracted)
-                    except Exception:
-                        pass
-
-            for idx, candidate_dict in enumerate(parsed_candidates):
-                func_name = candidate_dict.get("name")
-                func_args = candidate_dict.get("arguments", candidate_dict.get("parameters", {}))
+            tool_call = self.extract_first_tool_call(full_text, known_tools)
+            if tool_call:
+                func_name = tool_call["name"]
+                func_args = tool_call.get("arguments", {})
                 func_args_str = json.dumps(func_args) if isinstance(func_args, dict) else str(func_args)
-                call_id = f"call_native_{idx}"
-                pending_tool_calls.append({
+                call_id = "call_native_0"
+                pending_tool_calls = [{
                     "id": call_id,
                     "type": "function",
                     "function": {
                         "name": func_name,
                         "arguments": func_args_str
                     }
-                })
+                }]
+                buffered_chunks.clear()
                 yield {
                     "choices": [{
                         "delta": {
                             "tool_calls": [{
-                                "index": idx,
+                                "index": 0,
                                 "id": call_id,
                                 "type": "function",
                                 "function": {
@@ -477,9 +578,12 @@ class NativeOrchestrator:
                         }
                     }]
                 }
-
-            if parsed_candidates:
                 collected_assistant_text = []
+
+        if not pending_tool_calls and buffered_chunks:
+            for b in buffered_chunks:
+                yield b
+            buffered_chunks.clear()
 
         if pending_tool_calls:
             assistant_msg = {
@@ -516,8 +620,17 @@ class NativeOrchestrator:
                 }
                 payload["messages"].append(tool_msg)
 
-            async for chunk in self.generate_stream(payload, depth=depth + 1):
-                yield chunk
+                session_id = payload.get("session_id")
+                if session_id:
+                    try:
+                        from axiom.db.memory import add_message
+                        add_message(session_id, "tool", f"[{func_name}] {res_str}")
+                    except Exception:
+                        pass
+
+            if depth < 5:
+                async for chunk in self.generate_stream(payload, depth=depth + 1):
+                    yield chunk
 
     @staticmethod
     def route_tier(task_description: str) -> str:

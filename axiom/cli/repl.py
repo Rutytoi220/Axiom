@@ -463,11 +463,17 @@ class InlineRepl:
         # 1. Commit user message to DB
         add_message(self.session_id, "user", user_prompt)
 
-        # 2. Build payload with dynamic tools
+        # 2. Build payload with dynamic tools and session history
         dynamic_tools = get_tool_schemas(0)
-        messages: List[Dict[str, Any]] = [
-            {"role": "user", "content": user_prompt}
-        ]
+        history = get_session_messages(self.session_id)
+        messages: List[Dict[str, Any]] = []
+        for h in history:
+            role = h.get("role")
+            content = h.get("content")
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content})
+        if not messages or messages[-1].get("content") != user_prompt:
+            messages.append({"role": "user", "content": user_prompt})
 
         payload = {
             "stream": True,
