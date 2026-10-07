@@ -685,6 +685,380 @@ async function handleCommand(msg) {
         break;
       }
 
+      case "scroll_page": {
+        const tab = await getTargetTab(msg);
+        if (!tab || !tab.id) {
+          sendReply({ id, success: false, action: "scroll_page", error: "No target tab available" });
+          return;
+        }
+
+        const direction = (msg.direction || "down").toLowerCase();
+        const amount = Number(msg.amount) || 600;
+        const reSnapshot = Boolean(msg.re_snapshot || msg.snapshot);
+
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: (dir, amt, doSnapshot) => {
+            const initialY = window.scrollY;
+            if (dir === "top") {
+              window.scrollTo({ top: 0, behavior: "instant" });
+            } else if (dir === "bottom") {
+              window.scrollTo({ top: document.body ? document.body.scrollHeight : 10000, behavior: "instant" });
+            } else if (dir === "up") {
+              window.scrollBy({ top: -amt, behavior: "instant" });
+            } else {
+              window.scrollBy({ top: amt, behavior: "instant" });
+            }
+
+            const docHeight = Math.max(
+              document.body ? document.body.scrollHeight : 0,
+              document.documentElement ? document.documentElement.scrollHeight : 0
+            );
+
+            const scrollData = {
+              success: true,
+              scrollY: window.scrollY,
+              scrollX: window.scrollX,
+              innerHeight: window.innerHeight,
+              scrollHeight: docHeight,
+              deltaY: window.scrollY - initialY,
+              direction: dir,
+            };
+
+            if (doSnapshot) {
+              const oldLabeled = document.querySelectorAll("[data-axiom-id]");
+              for (const el of oldLabeled) {
+                el.removeAttribute("data-axiom-id");
+              }
+              const selector = [
+                "a[href]",
+                "button",
+                "input",
+                "textarea",
+                "select",
+                '[role="button"]',
+                '[role="link"]',
+                "[onclick]",
+                '[tabindex]:not([tabindex="-1"])',
+              ].join(", ");
+
+              const candidates = Array.from(document.querySelectorAll(selector));
+              const items = [];
+              let index = 1;
+
+              for (const el of candidates) {
+                if (index > 50) break;
+                const rect = el.getBoundingClientRect();
+                const style = window.getComputedStyle(el);
+                if (
+                  rect.width === 0 ||
+                  rect.height === 0 ||
+                  style.display === "none" ||
+                  style.visibility === "hidden" ||
+                  parseFloat(style.opacity || "1") === 0
+                ) {
+                  continue;
+                }
+                el.setAttribute("data-axiom-id", String(index));
+                const tag = el.tagName.toLowerCase();
+                const item = { id: index, tag };
+                if (tag === "input" || tag === "textarea") {
+                  if (el.type) item.type = el.type;
+                  if (el.placeholder) item.placeholder = el.placeholder.slice(0, 100);
+                  if (el.value) item.value = el.value.slice(0, 100);
+                  if (el.name) item.name = el.name;
+                }
+                const ariaLabel = el.getAttribute("aria-label") || el.getAttribute("aria-labelledby") || "";
+                if (ariaLabel) item.aria_label = ariaLabel.trim().slice(0, 100);
+                const text = (el.innerText || el.textContent || "").trim().replace(/\s+/g, " ");
+                if (text && tag !== "input") item.text = text.slice(0, 100);
+                if (tag === "a") {
+                  const href = el.getAttribute("href") || "";
+                  if (href) item.href = href.slice(0, 120);
+                }
+                const role = el.getAttribute("role");
+                if (role) item.role = role;
+                items.push(item);
+                index++;
+              }
+
+              const summaryLines = items.map((it) => {
+                const parts = [`[${it.id}] <${it.tag}`];
+                if (it.type) parts.push(`type="${it.type}"`);
+                if (it.placeholder) parts.push(`placeholder="${it.placeholder}"`);
+                if (it.name) parts.push(`name="${it.name}"`);
+                if (it.role) parts.push(`role="${it.role}"`);
+                parts.push(">");
+                if (it.text) parts.push(`"${it.text}"`);
+                if (it.value) parts.push(`value="${it.value}"`);
+                if (it.aria_label) parts.push(`(aria: "${it.aria_label}")`);
+                if (it.href) parts.push(`(href: ${it.href})`);
+                return parts.join(" ");
+              });
+
+              scrollData.elements = items;
+              scrollData.summary = summaryLines.join("\n");
+              scrollData.count = items.length;
+            }
+
+            return scrollData;
+          },
+          args: [direction, amount, reSnapshot],
+        });
+
+        const execResult = results && results[0] ? results[0].result : { success: false, error: "Scroll execution produced no result" };
+        sendReply({ id, action: "scroll_page", ...execResult });
+        break;
+      }
+
+      case "extract_page_content": {
+        const tab = await getTargetTab(msg);
+        if (!tab || !tab.id) {
+          sendReply({ id, success: false, action: "extract_page_content", error: "No target tab available" });
+          return;
+        }
+
+        const mode = (msg.mode || "readable").toLowerCase();
+        const maxChars = Number(msg.max_chars) || 4000;
+
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: (extractMode, maxBudget) => {
+            const mainRoot = document.querySelector("article, main, [role='main'], #content, .content, .post-content") || document.body;
+            if (!mainRoot) {
+              return { success: false, error: "No document body available" };
+            }
+
+            const clone = mainRoot.cloneNode(true);
+            const noiseSelectors = [
+              "script",
+              "style",
+              "noscript",
+              "svg",
+              "iframe",
+              "nav",
+              "footer",
+              "header",
+              "form",
+              "[role='navigation']",
+              "[role='banner']",
+              "[role='complementary']",
+              "[aria-hidden='true']",
+              ".cookie",
+              ".cookie-banner",
+              ".cookies",
+              "[id*='cookie']",
+              "[class*='cookie']",
+              "[id*='consent']",
+              "[class*='consent']",
+              ".popup",
+              ".modal",
+              ".advert",
+              ".ad",
+              "[class*='advertisement']",
+            ];
+            try {
+              const toRemove = clone.querySelectorAll(noiseSelectors.join(", "));
+              for (const el of toRemove) {
+                el.remove();
+              }
+            } catch (_) {}
+
+            function domToMarkdown(node) {
+              if (node.nodeType === Node.TEXT_NODE) {
+                return node.nodeValue.replace(/\s+/g, " ");
+              }
+              if (node.nodeType !== Node.ELEMENT_NODE) {
+                return "";
+              }
+
+              const tag = node.tagName.toLowerCase();
+              let childText = "";
+              for (const child of node.childNodes) {
+                childText += domToMarkdown(child);
+              }
+              childText = childText.trim();
+
+              if (!childText && !["hr", "br", "img"].includes(tag)) {
+                return "";
+              }
+
+              switch (tag) {
+                case "h1":
+                  return `\n\n# ${childText}\n\n`;
+                case "h2":
+                  return `\n\n## ${childText}\n\n`;
+                case "h3":
+                  return `\n\n### ${childText}\n\n`;
+                case "h4":
+                case "h5":
+                case "h6":
+                  return `\n\n#### ${childText}\n\n`;
+                case "p":
+                  return `\n\n${childText}\n\n`;
+                case "li":
+                  return `\n- ${childText}`;
+                case "ul":
+                case "ol":
+                  return `\n\n${childText}\n\n`;
+                case "pre":
+                case "code":
+                  if (tag === "pre" || (node.parentElement && node.parentElement.tagName.toLowerCase() !== "pre")) {
+                    return `\n\`\`\`\n${node.innerText || childText}\n\`\`\`\n`;
+                  }
+                  return `\`${childText}\``;
+                case "blockquote":
+                  return `\n> ${childText.replace(/\n/g, "\n> ")}\n\n`;
+                case "a": {
+                  const href = node.getAttribute("href");
+                  if (href && !href.startsWith("javascript:")) {
+                    return `[${childText}](${href})`;
+                  }
+                  return childText;
+                }
+                case "strong":
+                case "b":
+                  return `**${childText}**`;
+                case "em":
+                case "i":
+                  return `*${childText}*`;
+                case "br":
+                  return "\n";
+                case "hr":
+                  return "\n---\n";
+                default:
+                  if (["div", "section", "article", "main", "table", "tr"].includes(tag)) {
+                    return `\n${childText}\n`;
+                  }
+                  return ` ${childText} `;
+              }
+            }
+
+            let markdown = domToMarkdown(clone);
+            markdown = markdown
+              .replace(/[ \t]+/g, " ")
+              .replace(/\n\s*\n\s*\n+/g, "\n\n")
+              .trim();
+
+            let truncated = false;
+            if (markdown.length > maxBudget) {
+              markdown = markdown.slice(0, maxBudget) + "\n\n[... content truncated for context budget]";
+              truncated = true;
+            }
+
+            return {
+              success: true,
+              title: document.title,
+              url: window.location.href,
+              content: markdown,
+              length: markdown.length,
+              truncated,
+            };
+          },
+          args: [mode, maxChars],
+        });
+
+        const execResult = results && results[0] ? results[0].result : { success: false, error: "Content extraction script produced no result" };
+        sendReply({ id, action: "extract_page_content", ...execResult });
+        break;
+      }
+
+      case "duplicate_tab": {
+        const tab = await getTargetTab(msg);
+        if (!tab || !tab.id) {
+          sendReply({ id, success: false, action: "duplicate_tab", error: "No target tab found to duplicate" });
+          return;
+        }
+        try {
+          const duplicated = await chrome.tabs.duplicate(tab.id);
+          sendReply({
+            id,
+            success: true,
+            action: "duplicate_tab",
+            tab_id: duplicated.id,
+            title: duplicated.title || "",
+            url: duplicated.url || "",
+          });
+        } catch (err) {
+          sendReply({ id, success: false, action: "duplicate_tab", error: `Failed to duplicate tab: ${err.message || String(err)}` });
+        }
+        break;
+      }
+
+      case "reload_tab": {
+        const tab = await getTargetTab(msg);
+        if (!tab || !tab.id) {
+          sendReply({ id, success: false, action: "reload_tab", error: "No target tab found to reload" });
+          return;
+        }
+        try {
+          const bypassCache = Boolean(msg.bypass_cache || msg.bypassCache);
+          await chrome.tabs.reload(tab.id, { bypassCache });
+          sendReply({
+            id,
+            success: true,
+            action: "reload_tab",
+            tab_id: tab.id,
+            title: tab.title || "",
+            url: tab.url || "",
+          });
+        } catch (err) {
+          sendReply({ id, success: false, action: "reload_tab", error: `Failed to reload tab: ${err.message || String(err)}` });
+        }
+        break;
+      }
+
+      case "pin_tab": {
+        const tab = await getTargetTab(msg);
+        if (!tab || !tab.id) {
+          sendReply({ id, success: false, action: "pin_tab", error: "No target tab found to pin" });
+          return;
+        }
+        try {
+          const pinned = msg.pinned !== undefined ? Boolean(msg.pinned) : !tab.pinned;
+          const updated = await chrome.tabs.update(tab.id, { pinned });
+          sendReply({
+            id,
+            success: true,
+            action: "pin_tab",
+            tab_id: updated.id,
+            pinned: Boolean(updated.pinned),
+            title: updated.title || "",
+          });
+        } catch (err) {
+          sendReply({ id, success: false, action: "pin_tab", error: `Failed to update tab pin state: ${err.message || String(err)}` });
+        }
+        break;
+      }
+
+      case "manage_browser_tabs": {
+        const subaction = (msg.operation || msg.tab_action || msg.subaction || "").toLowerCase().trim();
+        if (subaction === "duplicate") {
+          return handleCommand({ ...msg, action: "duplicate_tab" });
+        } else if (subaction === "reload") {
+          return handleCommand({ ...msg, action: "reload_tab" });
+        } else if (subaction === "pin" || subaction === "unpin") {
+          const pinVal = subaction === "pin";
+          return handleCommand({ ...msg, action: "pin_tab", pinned: msg.pinned !== undefined ? msg.pinned : pinVal });
+        } else if (subaction === "close") {
+          return handleCommand({ ...msg, action: "close_tab" });
+        } else if (subaction === "open") {
+          return handleCommand({ ...msg, action: "open_tab" });
+        } else if (subaction === "switch") {
+          return handleCommand({ ...msg, action: "switch_tab" });
+        } else if (subaction === "list") {
+          return handleCommand({ ...msg, action: "list_tabs" });
+        } else {
+          sendReply({
+            id,
+            success: false,
+            action: "manage_browser_tabs",
+            error: `Unsupported tab operation: '${subaction}'. Supported: 'duplicate', 'reload', 'pin', 'close', 'open', 'switch', 'list'.`,
+          });
+        }
+        break;
+      }
+
       default:
         sendReply({
           id,

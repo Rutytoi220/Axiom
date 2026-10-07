@@ -4,7 +4,7 @@ import re
 import shutil
 import httpx
 from typing import AsyncGenerator, Optional
-from axiom.core.plugins import get_tool_schemas, execute_tool
+from axiom.core.plugins import get_tool_schemas, execute_tool, get_tier_timeout
 
 REFUSAL_PHRASES = [
     "cannot see your screen",
@@ -607,12 +607,22 @@ class NativeOrchestrator:
                 if func_name == "interact_with_ui" and ("element_id" in func_args or func_args.get("action") in ("click_element", "fill_element")):
                     func_name = "interact_with_browser"
 
+                timeout = get_tier_timeout(func_name)
+                timeout_int = int(timeout)
                 try:
-                    tool_result = await execute_tool(func_name, **func_args)
+                    tool_result = await asyncio.wait_for(
+                        execute_tool(func_name, **func_args),
+                        timeout=timeout,
+                    )
                     
                     if not isinstance(tool_result, str):
                         tool_result = json.dumps(tool_result, indent=2)
                     res_str = tool_result
+                except (TimeoutError, asyncio.TimeoutError):
+                    res_str = json.dumps({
+                        "success": False,
+                        "error": f"Tool execution timed out after {timeout_int}s. Try a faster Tier 1 command or verify active window.",
+                    })
                 except Exception as e:
                     res_str = json.dumps({"error": str(e), "status": "tool_execution_failed"})
 
@@ -656,11 +666,12 @@ class NativeOrchestrator:
             if re.search(pattern, task_lower):
                 return "tier3_vision"
 
-        # Tier 1 indicators (Window management & Hyprland IPC)
+        # Tier 1 indicators (Window management & Hyprland IPC, Process, Clipboard, Journal)
         tier1_patterns = [
             r"\b(window|windows|workspace|workspaces|fullscreen|floating|tile|tiling)\b",
             r"\b(focus|switch to|move to|close)\s+(window|workspace)\b",
             r"\b(active window|list windows|hyprctl|hyprland)\b",
+            r"\b(process|processes|pid|kill\s+process|kill\s+pid|journal|journalctl|systemd|clipboard|wl-copy|wl-paste)\b",
         ]
         for pattern in tier1_patterns:
             if re.search(pattern, task_lower):
@@ -671,6 +682,7 @@ class NativeOrchestrator:
             r"\b(browser|chrome|chromium|brave|zen|firefox|monkeytype|gemini|youtube|electron)\b",
             r"\b(dom|html|css selector|website|webpage|web page|web app|tab|url|href)\b",
             r"\b(inspect|evaluate|javascript|js)\b",
+            r"\b(scroll|scroll_page|extract_page_content|extract\s+page|page\s+content|markdown|read\s+article|pin\s+tab|duplicate\s+tab|reload\s+tab)\b",
         ]
         for pattern in tier2_patterns:
             if re.search(pattern, task_lower):
@@ -683,6 +695,15 @@ class NativeOrchestrator:
     def get_tier_tool(cls, task_description: str) -> str:
         """Returns the primary tool name corresponding to the routed tier."""
         tier = cls.route_tier(task_description)
+        task_lower = task_description.lower()
+        if tier == "tier1_ipc":
+            if any(k in task_lower for k in ("clipboard", "wl-copy", "wl-paste", "copy to clipboard", "paste")):
+                return "manage_system_clipboard"
+            if any(k in task_lower for k in ("journal", "journalctl", "systemd log", "service log")):
+                return "query_system_journal"
+            if any(k in task_lower for k in ("process", "pid", "kill")):
+                return "manage_system_process"
+            return "manage_desktop_window"
         tier_map = {
             "tier1_ipc": "manage_desktop_window",
             "tier2_browser": "interact_with_browser",

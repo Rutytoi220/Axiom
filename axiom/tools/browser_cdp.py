@@ -32,8 +32,10 @@ class InteractWithBrowserTool(BaseTool):
                 "Tier 2 Semantic UI Automation: Browser and tab automation via AXIOM WebExtension bridge. "
                 "Use 'click_element' with 'element_id' from the latest get_page_snapshot to click buttons, links, or controls on the page. "
                 "Actions: 'get_page_snapshot' (list numbered interactive elements), 'click_element' (click by element_id), "
-                "'fill_element' (type text into element_id), 'switch_tab' (focus tab by query), 'open_tab' (open url), "
-                "'close_tab' (close tab), 'get_active_tab', 'list_tabs', 'click' (DOM selector), 'type', 'get_dom'."
+                "'fill_element' (type text into element_id), 'scroll_page' (scroll down/up/top/bottom), "
+                "'extract_page_content' (extract clean markdown content up to 4000 chars), "
+                "'switch_tab' (focus tab by query), 'open_tab' (open url), 'close_tab' (close tab), "
+                "'duplicate_tab', 'reload_tab', 'pin_tab', 'get_active_tab', 'list_tabs', 'click' (DOM selector), 'type', 'get_dom'."
             ),
         )
         self.parameters = [
@@ -41,8 +43,8 @@ class InteractWithBrowserTool(BaseTool):
                 name="action",
                 type="string",
                 description=(
-                    "The browser action: 'get_page_snapshot', 'click_element', 'fill_element', "
-                    "'switch_tab', 'open_tab', 'close_tab', 'get_active_tab', 'list_tabs', 'click', 'type', 'get_dom'."
+                    "The browser action: 'get_page_snapshot', 'click_element', 'fill_element', 'scroll_page', 'extract_page_content', "
+                    "'switch_tab', 'open_tab', 'close_tab', 'duplicate_tab', 'reload_tab', 'pin_tab', 'get_active_tab', 'list_tabs', 'click', 'type', 'get_dom'."
                 ),
                 required=True,
             ),
@@ -59,6 +61,34 @@ class InteractWithBrowserTool(BaseTool):
                 description="Whether to submit the form after filling the element (used with fill_element).",
                 required=False,
                 default=False,
+            ),
+            ToolParameter(
+                name="direction",
+                type="string",
+                description="Scroll direction when action is 'scroll_page': 'down', 'up', 'top', or 'bottom' (default: 'down').",
+                required=False,
+                default="down",
+            ),
+            ToolParameter(
+                name="amount",
+                type="integer",
+                description="Scroll offset in pixels when action is 'scroll_page' (default: 600).",
+                required=False,
+                default=600,
+            ),
+            ToolParameter(
+                name="mode",
+                type="string",
+                description="Content extraction mode when action is 'extract_page_content': 'readable' or 'markdown' (default: 'readable').",
+                required=False,
+                default="readable",
+            ),
+            ToolParameter(
+                name="pinned",
+                type="boolean",
+                description="Pin state when action is 'pin_tab': true to pin, false to unpin.",
+                required=False,
+                default=None,
             ),
             ToolParameter(
                 name="query",

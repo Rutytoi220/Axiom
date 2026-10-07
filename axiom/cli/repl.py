@@ -496,8 +496,20 @@ class InlineRepl:
 
             hint = f"Executing {name}..."
             console.print(f"\n  [tool.badge]⚡ Tool Dispatch:[/tool.badge] [tool.name]{name}[/tool.name] [dim]{json.dumps(kwargs)}[/dim]")
-            with console.status(f"  [#e0af68]{hint}[/#e0af68]", spinner="dots"):
-                res = await original_execute(name, **kwargs)
+            from axiom.core.plugins import get_tier_timeout
+            timeout = get_tier_timeout(name)
+            timeout_int = int(timeout)
+            try:
+                with console.status(f"  [#e0af68]{hint}[/#e0af68]", spinner="dots"):
+                    res = await asyncio.wait_for(original_execute(name, **kwargs), timeout=timeout)
+            except (TimeoutError, asyncio.TimeoutError):
+                err_dict = {
+                    "success": False,
+                    "error": f"Tool execution timed out after {timeout_int}s. Try a faster Tier 1 command or verify active window.",
+                }
+                res = json.dumps(err_dict)
+                console.print(f"  [bold red]✗ {name} timed out ({timeout_int}s)[/bold red]\n")
+                return res
 
             # Summarize result cleanly
             res_str = str(res)

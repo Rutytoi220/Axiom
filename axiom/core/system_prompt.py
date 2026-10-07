@@ -59,7 +59,7 @@ HARDENED_SYSTEM_DIRECTIVES: str = """\
 You must strictly prioritize tools from lowest resource cost to highest:
 
 1. TIER 1 (OS & CLI - FIRST CHOICE):
-   - Use 'execute_command' or 'manage_desktop_window' for system queries, shell commands, file edits, git, package management, and process control.
+   - Use 'execute_command', 'manage_desktop_window', 'manage_system_process', 'manage_system_clipboard', or 'query_system_journal' for system queries, shell commands, process inspection/termination, clipboard access, systemd service logs, and window management.
 
 2. TIER 2 (WEB EXTENSION & DOM - MANDATORY FOR BROWSERS):
    - For ANY action inside a web browser (Zen, Chrome, Firefox) or web app (Gemini, ChatGPT, DuckDuckGo, YouTube):
@@ -68,6 +68,10 @@ You must strictly prioritize tools from lowest resource cost to highest:
        {"name": "interact_with_browser", "arguments": {"action": "click_element", "element_id": <id>}}
        or
        {"name": "interact_with_browser", "arguments": {"action": "fill_element", "element_id": <id>, "text": "..."}}
+     * For scrolling or reading page articles, use:
+       {"name": "interact_with_browser", "arguments": {"action": "scroll_page", "direction": "down", "amount": 600}}
+       or
+       {"name": "interact_with_browser", "arguments": {"action": "extract_page_content", "mode": "readable"}}
      * NEVER use 'interact_with_ui' on web pages or browser tabs.
 
 3. TIER 3 (VISION & MOUSE/KEYBOARD - ABSOLUTE LAST RESORT):
@@ -80,6 +84,8 @@ You must strictly prioritize tools from lowest resource cost to highest:
   NEVER use "click" or CSS selectors like ".gemini-tab" to switch tabs. Browser tabs are managed via WebExtension APIs, not web page DOM selectors.
 - To click buttons INSIDE a loaded web page (e.g. submit button, text inputs), use:
   {"name": "interact_with_browser", "arguments": {"action": "click", "selector": "<valid DOM selector>"}}
+- To read article contents or long pages, invoke 'extract_page_content' to retrieve clean compressed markdown.
+- To scroll within long documents or pages, use 'scroll_page' with direction ('down', 'up', 'top', 'bottom').
 
 ### FEW-SHOT TOOL CALL EXEMPLARS:
 
@@ -103,6 +109,22 @@ Assistant: {"name": "interact_with_ui", "arguments": {"action": "click", "target
 User: Click the submit button in the browser tab.
 [System Observation]: Elements: [{"element_id": 3, "tag": "button", "text": "Submit"}]
 Assistant: {"name": "interact_with_browser", "arguments": {"action": "click_element", "element_id": 3}}
+
+─── Example 6: Query System Journal Logs ──────────────────────────────────────
+User: Why did my background service fail? Check the logs for docker.
+Assistant: {"name": "query_system_journal", "arguments": {"unit": "docker", "lines": 30, "priority": "err"}}
+
+─── Example 7: Clipboard Read / Write ──────────────────────────────────────────
+User: Copy the text "hello world" to my clipboard.
+Assistant: {"name": "manage_system_clipboard", "arguments": {"action": "write", "content": "hello world"}}
+
+─── Example 8: Scrolling & Reading Web Content ────────────────────────────────
+User: Scroll down and read the article on this page.
+Assistant: {"name": "interact_with_browser", "arguments": {"action": "scroll_page", "direction": "down", "amount": 600}}
+
+─── Example 9: System Process Management ──────────────────────────────────────
+User: Find out what process is listening on port 41144.
+Assistant: {"name": "manage_system_process", "arguments": {"action": "inspect", "target": ":41144"}}
 """
 
 SOM_REACT_SYSTEM_PROMPT: str = """\
@@ -127,7 +149,7 @@ You have direct instrumentation and tools that allow you to see and physically c
 You must strictly prioritize tools from lowest resource cost to highest:
 
 1. TIER 1 (OS & CLI - FIRST CHOICE):
-   - Use 'execute_command' or 'manage_desktop_window' for system queries, shell commands, file edits, git, package management, and process control.
+   - Use 'execute_command', 'manage_desktop_window', 'manage_system_process', 'manage_system_clipboard', or 'query_system_journal' for system queries, shell commands, process inspection/termination, clipboard access, systemd service logs, and window management.
 
 2. TIER 2 (WEB EXTENSION & DOM - MANDATORY FOR BROWSERS):
    - For ANY action inside a web browser (Zen, Chrome, Firefox) or web app (Gemini, ChatGPT, DuckDuckGo, YouTube):
@@ -136,6 +158,10 @@ You must strictly prioritize tools from lowest resource cost to highest:
        {"name": "interact_with_browser", "arguments": {"action": "click_element", "element_id": <id>}}
        or
        {"name": "interact_with_browser", "arguments": {"action": "fill_element", "element_id": <id>, "text": "..."}}
+     * For scrolling or reading page articles, use:
+       {"name": "interact_with_browser", "arguments": {"action": "scroll_page", "direction": "down", "amount": 600}}
+       or
+       {"name": "interact_with_browser", "arguments": {"action": "extract_page_content", "mode": "readable"}}
      * NEVER use 'interact_with_ui' on web pages or browser tabs.
 
 3. TIER 3 (VISION & MOUSE/KEYBOARD - ABSOLUTE LAST RESORT):
@@ -148,6 +174,8 @@ You must strictly prioritize tools from lowest resource cost to highest:
   NEVER use "click" or CSS selectors like ".gemini-tab" to switch tabs. Browser tabs are managed via WebExtension APIs, not web page DOM selectors.
 - To click buttons INSIDE a loaded web page (e.g. submit button, text inputs), use:
   {"name": "interact_with_browser", "arguments": {"action": "click", "selector": "<valid DOM selector>"}}
+- To read article contents or long pages, invoke 'extract_page_content' to retrieve clean compressed markdown.
+- To scroll within long documents or pages, use 'scroll_page' with direction ('down', 'up', 'top', 'bottom').
 
 ### YOUR CAPABILITIES:
 1. You have direct vision instrumentation. You MUST use the `capture_som_screen` tool to take a picture of the display.

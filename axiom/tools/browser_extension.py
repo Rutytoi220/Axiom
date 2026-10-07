@@ -45,6 +45,8 @@ class BrowserResult(dict):
             or ({"closed_tab_id": self.get("closed_tab_id"), "title": self.get("title")} if "closed_tab_id" in self else None)
             or ({"clicked_id": self.get("clicked_id"), "tag": self.get("tag"), "text": self.get("text")} if "clicked_id" in self else None)
             or ({"element_id": self.get("element_id"), "text": self.get("text"), "submitted": self.get("submitted")} if "element_id" in self and "submitted" in self else None)
+            or ({"scrollY": self.get("scrollY"), "innerHeight": self.get("innerHeight"), "scrollHeight": self.get("scrollHeight")} if "scrollY" in self else None)
+            or ({"pinned": self.get("pinned"), "tab_id": self.get("tab_id")} if "pinned" in self else None)
             or self
         )
 

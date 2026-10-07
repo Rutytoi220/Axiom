@@ -20,32 +20,103 @@ def load_plugins() -> None:
 
     TOOLS_DIR.mkdir(parents=True, exist_ok=True)
     
-    # Ensure core semantic memory tool is provisioned
-    rem_fact_file = TOOLS_DIR / "remember_fact.py"
-    if not rem_fact_file.exists():
-        rem_fact_code = (
-            "import json\n"
-            "from axiom.tools.memory import RememberFactTool\n\n"
-            "_tool = RememberFactTool()\n\n"
-            "TOOL_SCHEMA = {\n"
-            '    "type": "function",\n'
-            '    "function": {\n'
-            '        "name": _tool.name,\n'
-            '        "description": _tool.description,\n'
-            '        "parameters": _tool.schema,\n'
-            "    }\n"
-            "}\n"
-            'TUI_HINT = "🧠 Remembering fact in semantic memory..."\n'
-            "REQUIRED_RING = 0\n\n"
-            "async def execute(fact: str = '', **kwargs) -> str:\n"
-            '    params = {"fact": fact, **kwargs}\n'
-            "    res = await _tool.execute(params)\n"
-            "    return json.dumps(res.to_dict(tool=_tool.name, arguments=params))\n"
-        )
-        try:
-            rem_fact_file.write_text(rem_fact_code, encoding="utf-8")
-        except Exception:
-            pass
+    # Ensure core semantic memory and Tier 1 OS tools are provisioned
+    provisions = [
+        (
+            TOOLS_DIR / "remember_fact.py",
+            (
+                "import json\n"
+                "from axiom.tools.memory import RememberFactTool\n\n"
+                "_tool = RememberFactTool()\n\n"
+                "TOOL_SCHEMA = {\n"
+                '    "type": "function",\n'
+                '    "function": {\n'
+                '        "name": _tool.name,\n'
+                '        "description": _tool.description,\n'
+                '        "parameters": _tool.schema,\n'
+                "    }\n"
+                "}\n"
+                'TUI_HINT = "🧠 Remembering fact in semantic memory..."\n'
+                "REQUIRED_RING = 0\n\n"
+                "async def execute(fact: str = '', **kwargs) -> str:\n"
+                '    params = {"fact": fact, **kwargs}\n'
+                "    res = await _tool.execute(params)\n"
+                "    return json.dumps(res.to_dict(tool=_tool.name, arguments=params))\n"
+            ),
+        ),
+        (
+            TOOLS_DIR / "manage_system_process.py",
+            (
+                "import json\n"
+                "from axiom.tools.os_system import ManageSystemProcessTool\n\n"
+                "_tool = ManageSystemProcessTool()\n\n"
+                "TOOL_SCHEMA = {\n"
+                '    "type": "function",\n'
+                '    "function": {\n'
+                '        "name": _tool.name,\n'
+                '        "description": _tool.description,\n'
+                '        "parameters": _tool.schema,\n'
+                "    }\n"
+                "}\n"
+                'TUI_HINT = "⚙️ Managing Linux system processes..."\n'
+                "REQUIRED_RING = 0\n\n"
+                "async def execute(action: str = 'list', target: str = '', signal: int = 15, **kwargs) -> str:\n"
+                '    params = {"action": action, "target": target, "signal": signal, **kwargs}\n'
+                "    res = await _tool.execute(params)\n"
+                "    return json.dumps(res.to_dict(tool=_tool.name, arguments=params))\n"
+            ),
+        ),
+        (
+            TOOLS_DIR / "manage_system_clipboard.py",
+            (
+                "import json\n"
+                "from axiom.tools.os_system import ManageSystemClipboardTool\n\n"
+                "_tool = ManageSystemClipboardTool()\n\n"
+                "TOOL_SCHEMA = {\n"
+                '    "type": "function",\n'
+                '    "function": {\n'
+                '        "name": _tool.name,\n'
+                '        "description": _tool.description,\n'
+                '        "parameters": _tool.schema,\n'
+                "    }\n"
+                "}\n"
+                'TUI_HINT = "📋 Managing system clipboard..."\n'
+                "REQUIRED_RING = 0\n\n"
+                "async def execute(action: str = 'read', content: str = '', **kwargs) -> str:\n"
+                '    params = {"action": action, "content": content, **kwargs}\n'
+                "    res = await _tool.execute(params)\n"
+                "    return json.dumps(res.to_dict(tool=_tool.name, arguments=params))\n"
+            ),
+        ),
+        (
+            TOOLS_DIR / "query_system_journal.py",
+            (
+                "import json\n"
+                "from axiom.tools.os_system import QuerySystemJournalTool\n\n"
+                "_tool = QuerySystemJournalTool()\n\n"
+                "TOOL_SCHEMA = {\n"
+                '    "type": "function",\n'
+                '    "function": {\n'
+                '        "name": _tool.name,\n'
+                '        "description": _tool.description,\n'
+                '        "parameters": _tool.schema,\n'
+                "    }\n"
+                "}\n"
+                'TUI_HINT = "📜 Querying systemd journal logs..."\n'
+                "REQUIRED_RING = 0\n\n"
+                "async def execute(lines: int = 30, unit: str = '', priority: str = '', **kwargs) -> str:\n"
+                '    params = {"lines": lines, "unit": unit, "priority": priority, **kwargs}\n'
+                "    res = await _tool.execute(params)\n"
+                "    return json.dumps(res.to_dict(tool=_tool.name, arguments=params))\n"
+            ),
+        ),
+    ]
+    for target_file, code_content in provisions:
+        if not target_file.exists():
+            try:
+                target_file.write_text(code_content, encoding="utf-8")
+            except Exception:
+                pass
 
     for path in TOOLS_DIR.glob("*.py"):
         if path.name.startswith("__"):
@@ -95,6 +166,22 @@ def get_tui_hints() -> Dict[str, str]:
         load_plugins()
     return dict(_tui_hints)
 
+TIER_TIMEOUTS: Dict[str, float] = {
+    "interact_with_ui": 35.0,
+    "vision": 35.0,
+    "capture_som_screen": 35.0,
+    "click_tag": 35.0,
+    "interact_with_browser": 10.0,
+}
+
+def get_tier_timeout(tool_name: str) -> float:
+    """Return execution latency budget for a given tool name:
+    Tier 1 (CLI/OS): 8.0s
+    Tier 2 (Browser Extension): 10.0s
+    Tier 3 (VLM Grounding): 35.0s
+    """
+    return TIER_TIMEOUTS.get(tool_name, 8.0)
+
 async def execute_tool(name: str, **kwargs) -> str:
     if not _executors:
         load_plugins()
@@ -115,14 +202,19 @@ async def execute_tool(name: str, **kwargs) -> str:
         else:
             return func(**kwargs)
             
+    timeout = get_tier_timeout(name)
+    timeout_int = int(timeout)
     try:
         res = await asyncio.wait_for(
             asyncio.to_thread(thread_worker),
-            timeout=30.0
+            timeout=timeout
         )
         return str(res)
-    except TimeoutError:
-        return "Tool execution failed: Timeout after 30s"
+    except (TimeoutError, asyncio.TimeoutError):
+        return json.dumps({
+            "success": False,
+            "error": f"Tool execution timed out after {timeout_int}s. Try a faster Tier 1 command or verify active window.",
+        })
     except Exception as e:
         return f"Tool execution failed: {e}"
 
