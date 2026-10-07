@@ -55,6 +55,25 @@ HARDENED_SYSTEM_DIRECTIVES: str = """\
 2. For multi-step tasks (e.g. open a page and interact with elements), emit the first tool call, wait for the observation result, and decide the next step based on the returned data.
 3. For web actions, always call 'get_page_snapshot' first to discover element IDs before attempting 'click_element' or 'fill_element'.
 
+### STRICT THREE-TIER TOOL ROUTING HIERARCHY:
+You must strictly prioritize tools from lowest resource cost to highest:
+
+1. TIER 1 (OS & CLI - FIRST CHOICE):
+   - Use 'execute_command' or 'manage_desktop_window' for system queries, shell commands, file edits, git, package management, and process control.
+
+2. TIER 2 (WEB EXTENSION & DOM - MANDATORY FOR BROWSERS):
+   - For ANY action inside a web browser (Zen, Chrome, Firefox) or web app (Gemini, ChatGPT, DuckDuckGo, YouTube):
+     * ALWAYS use 'interact_with_browser'.
+     * If interactive elements are numbered from 'get_page_snapshot', you MUST use:
+       {"name": "interact_with_browser", "arguments": {"action": "click_element", "element_id": <id>}}
+       or
+       {"name": "interact_with_browser", "arguments": {"action": "fill_element", "element_id": <id>, "text": "..."}}
+     * NEVER use 'interact_with_ui' on web pages or browser tabs.
+
+3. TIER 3 (VISION & MOUSE/KEYBOARD - ABSOLUTE LAST RESORT):
+   - 'interact_with_ui' is EXCLUSIVELY for native desktop GUI apps that have no CLI, no API, and no DOM (e.g. Blender, GIMP, native dialogs, games, non-HTML canvas).
+   - If the target is inside a browser, 'interact_with_ui' is STRICTLY FORBIDDEN.
+
 ### TIER 2 BROWSER AUTOMATION RULES:
 - To switch to, focus, or open an existing browser tab, ALWAYS use:
   {"name": "interact_with_browser", "arguments": {"action": "switch_tab", "query": "<tab title or domain>"}}
@@ -76,9 +95,14 @@ Assistant: {"name": "interact_with_browser", "arguments": {"action": "switch_tab
 User: Click the "Start Test" button on Monkeytype.
 Assistant: {"name": "interact_with_browser", "arguments": {"action": "click", "selector": "button:has-text('Start Test')"}}
 
-─── Example 4: Visual UI Clicking Fallback ────────────────────────────────────
-User: Click the submit button on the screen.
+─── Example 4: Visual UI Clicking Fallback (Native Apps Only) ──────────────────
+User: Click the submit button on the screen in a native non-browser application.
 Assistant: {"name": "interact_with_ui", "arguments": {"action": "click", "target": "submit button"}}
+
+─── Example 5: Numbered Element Interaction After Snapshot ─────────────────────
+User: Click the submit button in the browser tab.
+[System Observation]: Elements: [{"element_id": 3, "tag": "button", "text": "Submit"}]
+Assistant: {"name": "interact_with_browser", "arguments": {"action": "click_element", "element_id": 3}}
 """
 
 SOM_REACT_SYSTEM_PROMPT: str = """\
@@ -98,6 +122,25 @@ You have direct instrumentation and tools that allow you to see and physically c
 1. Output EXACTLY ONE tool call per response. NEVER concatenate multiple JSON tool calls.
 2. For multi-step tasks (e.g. open a page and interact with elements), emit the first tool call, wait for the observation result, and decide the next step based on the returned data.
 3. For web actions, always call 'get_page_snapshot' first to discover element IDs before attempting 'click_element' or 'fill_element'.
+
+### STRICT THREE-TIER TOOL ROUTING HIERARCHY:
+You must strictly prioritize tools from lowest resource cost to highest:
+
+1. TIER 1 (OS & CLI - FIRST CHOICE):
+   - Use 'execute_command' or 'manage_desktop_window' for system queries, shell commands, file edits, git, package management, and process control.
+
+2. TIER 2 (WEB EXTENSION & DOM - MANDATORY FOR BROWSERS):
+   - For ANY action inside a web browser (Zen, Chrome, Firefox) or web app (Gemini, ChatGPT, DuckDuckGo, YouTube):
+     * ALWAYS use 'interact_with_browser'.
+     * If interactive elements are numbered from 'get_page_snapshot', you MUST use:
+       {"name": "interact_with_browser", "arguments": {"action": "click_element", "element_id": <id>}}
+       or
+       {"name": "interact_with_browser", "arguments": {"action": "fill_element", "element_id": <id>, "text": "..."}}
+     * NEVER use 'interact_with_ui' on web pages or browser tabs.
+
+3. TIER 3 (VISION & MOUSE/KEYBOARD - ABSOLUTE LAST RESORT):
+   - 'interact_with_ui' is EXCLUSIVELY for native desktop GUI apps that have no CLI, no API, and no DOM (e.g. Blender, GIMP, native dialogs, games, non-HTML canvas).
+   - If the target is inside a browser, 'interact_with_ui' is STRICTLY FORBIDDEN.
 
 ### TIER 2 BROWSER AUTOMATION RULES:
 - To switch to, focus, or open an existing browser tab, ALWAYS use:

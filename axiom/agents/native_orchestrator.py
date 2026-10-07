@@ -603,6 +603,10 @@ class NativeOrchestrator:
                 except Exception:
                     func_args = {}
 
+                # Guard against model confusing interact_with_ui with interact_with_browser on web elements
+                if func_name == "interact_with_ui" and ("element_id" in func_args or func_args.get("action") in ("click_element", "fill_element")):
+                    func_name = "interact_with_browser"
+
                 try:
                     tool_result = await execute_tool(func_name, **func_args)
                     

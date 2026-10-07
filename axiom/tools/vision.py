@@ -42,7 +42,12 @@ class InteractWithUITool(BaseTool):
         super().__init__(
             tool_id="interact_with_ui",
             name="interact_with_ui",
-            description="Autonomously finds and interacts with a UI element on the screen based on a text instruction. Used for clicking buttons, typing into fields, etc."
+            description=(
+                "Autonomously finds and interacts with a UI element on the screen based on a text instruction. "
+                "Used for clicking buttons, typing into fields, etc. "
+                "STRICT RESTRICTION: DO NOT use this tool for web browsers or web pages. "
+                "If interacting with a browser tab, you MUST use interact_with_browser with click_element or fill_element."
+            ),
         )
         self.parameters = [
             ToolParameter(
@@ -76,9 +81,31 @@ class InteractWithUITool(BaseTool):
 
     async def execute(self, params: Dict[str, Any]) -> ToolResult:
         import asyncio
+        # Guard against Tier 3 regression on web browser elements
+        if "element_id" in params or params.get("action") in ("click_element", "fill_element"):
+            return ToolResult(
+                False,
+                error=(
+                    "STRICT RESTRICTION: DO NOT use interact_with_ui for web elements. "
+                    "'element_id' belongs to interact_with_browser. "
+                    "You MUST use interact_with_browser with action='click_element' or 'fill_element'."
+                ),
+            )
+
         instruction = params.get("instruction")
         if not instruction:
             return ToolResult(False, error="instruction is required.")
+
+        lower_inst = instruction.lower()
+        if any(term in lower_inst for term in ["get_page_snapshot", "click_element", "fill_element"]) or \
+           ("element #" in lower_inst or "element id" in lower_inst):
+            return ToolResult(
+                False,
+                error=(
+                    "STRICT RESTRICTION: DO NOT use interact_with_ui on web elements or browser pages. "
+                    "You MUST use interact_with_browser with action='click_element' or 'fill_element'."
+                ),
+            )
 
         image_bytes = None
         

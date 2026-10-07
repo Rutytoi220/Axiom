@@ -488,6 +488,12 @@ class InlineRepl:
         async def inline_execute_tool(name: str, **kwargs):
             if in_think:
                 end_thought()
+
+            # Automatic guardrail: prevent Tier 3 regression on browser elements
+            if name == "interact_with_ui" and ("element_id" in kwargs or kwargs.get("action") in ("click_element", "fill_element")):
+                console.print(f"\n  [dim yellow]⚡ Tier Route Correction:[/dim yellow] Redirecting 'interact_with_ui' with element_id to Tier 2 'interact_with_browser'")
+                name = "interact_with_browser"
+
             hint = f"Executing {name}..."
             console.print(f"\n  [tool.badge]⚡ Tool Dispatch:[/tool.badge] [tool.name]{name}[/tool.name] [dim]{json.dumps(kwargs)}[/dim]")
             with console.status(f"  [#e0af68]{hint}[/#e0af68]", spinner="dots"):

@@ -341,6 +341,98 @@ def test_native_api_multiple_tool_calls_enforcement():
     print("✓ Check 5 PASSED: Native API multi-tool calls clamped to index 0 strictly.\n")
 
 
+def test_three_tier_hierarchy_and_guardrails():
+    print("[CHECK 6] Testing Three-Tier Routing Hierarchy & Tier 3 Guardrails...")
+    from axiom.tools.browser_cdp import InteractWithBrowserTool
+    from axiom.tools.vision import InteractWithUITool
+
+    # 1. Check prompt hierarchy section
+    for prompt_text, name in [
+        (HARDENED_SYSTEM_DIRECTIVES, "HARDENED_SYSTEM_DIRECTIVES"),
+        (SOM_REACT_SYSTEM_PROMPT, "SOM_REACT_SYSTEM_PROMPT"),
+    ]:
+        assert "STRICT THREE-TIER TOOL ROUTING HIERARCHY:" in prompt_text, f"Missing routing hierarchy in {name}"
+        assert "TIER 1 (OS & CLI - FIRST CHOICE):" in prompt_text, f"Missing Tier 1 in {name}"
+        assert "TIER 2 (WEB EXTENSION & DOM - MANDATORY FOR BROWSERS):" in prompt_text, f"Missing Tier 2 in {name}"
+        assert "TIER 3 (VISION & MOUSE/KEYBOARD - ABSOLUTE LAST RESORT):" in prompt_text, f"Missing Tier 3 in {name}"
+        assert "NEVER use 'interact_with_ui' on web pages or browser tabs." in prompt_text, f"Missing prohibition in {name}"
+        assert "If the target is inside a browser, 'interact_with_ui' is STRICTLY FORBIDDEN." in prompt_text, f"Missing prohibition in {name}"
+
+    # 2. Check tool descriptions
+    ui_tool = InteractWithUITool()
+    browser_tool = InteractWithBrowserTool()
+
+    assert "STRICT RESTRICTION: DO NOT use this tool for web browsers or web pages" in ui_tool.description
+    assert "If interacting with a browser tab, you MUST use interact_with_browser with click_element or fill_element." in ui_tool.description
+    assert "Use 'click_element' with 'element_id' from the latest get_page_snapshot" in browser_tool.description
+
+    # 3. Check InteractWithUITool execution guardrail against web element queries
+    async def run_guardrail_test():
+        # element_id passed directly
+        res = await ui_tool.execute({"instruction": "click", "element_id": 2})
+        assert res.success is False
+        assert "STRICT RESTRICTION" in res.error
+
+        # action=click_element passed
+        res = await ui_tool.execute({"action": "click_element", "instruction": "click button"})
+        assert res.success is False
+        assert "STRICT RESTRICTION" in res.error
+
+        # instruction mentioning snapshot element #
+        res = await ui_tool.execute({"instruction": "Click element #3 on the webpage"})
+        assert res.success is False
+        assert "STRICT RESTRICTION" in res.error
+
+    asyncio.run(run_guardrail_test())
+
+    # 4. Check NativeOrchestrator redirection
+    orch = NativeOrchestrator()
+    executed_tools = []
+
+    async def mock_execute(name, **kwargs):
+        executed_tools.append((name, kwargs))
+        return {"status": "ok"}
+
+    @contextlib.asynccontextmanager
+    async def mock_erroneous_vlm_stream(method, url, **kwargs):
+        resp = AsyncMock()
+        resp.status_code = 200
+        # Model erroneously dispatched interact_with_ui with element_id after snapshot
+        lines = [
+            'data: {"choices": [{"delta": {"content": "{\\"name\\": \\"interact_with_ui\\", \\"arguments\\": {\\"action\\": \\"click_element\\", \\"element_id\\": 4}}"}}]}',
+            "data: [DONE]",
+        ]
+
+        async def aiter_lines():
+            for l in lines:
+                yield l
+
+        resp.aiter_lines = aiter_lines
+        yield resp
+
+    async def run_redirect_test():
+        payload = {
+            "messages": [{"role": "user", "content": "Click element 4 on Google"}],
+        }
+
+        with patch("axiom.agents.native_orchestrator.execute_tool", side_effect=mock_execute), \
+             patch.object(orch, "get_active_window_context", return_value=None), \
+             patch("httpx.AsyncClient") as mock_client:
+
+            mock_client.return_value.__aenter__.return_value.stream = mock_erroneous_vlm_stream
+            mock_client.return_value.__aenter__.return_value.post = AsyncMock()
+
+            async for chunk in orch.generate_stream(payload, depth=4):
+                pass
+
+            assert len(executed_tools) == 1, f"Expected 1 tool execution, got {len(executed_tools)}"
+            assert executed_tools[0][0] == "interact_with_browser", f"Expected redirection to interact_with_browser, got {executed_tools[0][0]}"
+            assert executed_tools[0][1]["element_id"] == 4
+
+    asyncio.run(run_redirect_test())
+    print("✓ Check 6 PASSED: Hierarchy, tool descriptions, and Tier 3 guardrails validated.\n")
+
+
 if __name__ == "__main__":
     print("============================================================")
     print("AXIOM AUTONOMOUS MULTI-STEP REACT LOOP & SINGLE TOOL TEST")
@@ -350,6 +442,8 @@ if __name__ == "__main__":
     test_autonomous_react_loop_and_single_dispatch()
     test_max_depth_bound()
     test_native_api_multiple_tool_calls_enforcement()
+    test_three_tier_hierarchy_and_guardrails()
     print("============================================================")
     print("✅ ALL REACT LOOP & SINGLE TOOL DISPATCH CHECKS PASSED!")
     print("============================================================")
+

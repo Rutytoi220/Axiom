@@ -30,6 +30,7 @@ class InteractWithBrowserTool(BaseTool):
             name="interact_with_browser",
             description=(
                 "Tier 2 Semantic UI Automation: Browser and tab automation via AXIOM WebExtension bridge. "
+                "Use 'click_element' with 'element_id' from the latest get_page_snapshot to click buttons, links, or controls on the page. "
                 "Actions: 'get_page_snapshot' (list numbered interactive elements), 'click_element' (click by element_id), "
                 "'fill_element' (type text into element_id), 'switch_tab' (focus tab by query), 'open_tab' (open url), "
                 "'close_tab' (close tab), 'get_active_tab', 'list_tabs', 'click' (DOM selector), 'type', 'get_dom'."
