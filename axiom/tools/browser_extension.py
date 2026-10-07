@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Set
 import websockets
 from websockets.server import WebSocketServer
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("axiom.browser_bridge")
 
 DEFAULT_BRIDGE_HOST = "127.0.0.1"
 DEFAULT_BRIDGE_PORT = 41144
@@ -34,7 +34,15 @@ class BrowserResult(dict):
 
     @property
     def output(self) -> Any:
-        return self.get("result") or self.get("tabs") or self.get("tab") or self.get("content")
+        return (
+            self.get("result")
+            or self.get("tabs")
+            or self.get("tab")
+            or self.get("content")
+            or ({"tab_id": self.get("tab_id"), "title": self.get("title"), "url": self.get("url")} if "tab_id" in self else None)
+            or ({"closed_tab_id": self.get("closed_tab_id"), "title": self.get("title")} if "closed_tab_id" in self else None)
+            or self
+        )
 
 
 class BrowserExtensionBridge:
@@ -98,10 +106,9 @@ class BrowserExtensionBridge:
                     msg_type = data.get("type")
                     msg_action = data.get("action")
                     if msg_type == "ping" or msg_action == "ping":
+                        logger.debug("Heartbeat ping received from extension.")
                         pong_payload = {"type": "pong", "id": data.get("id")}
                         await websocket.send(json.dumps(pong_payload))
-                        logger.debug("[AXIOM Extension Bridge] Received ping from %s, replied with pong", remote)
-                        print("  [Heartbeat] Extension ping received → Daemon replied pong", flush=True)
                         continue
 
                     msg_id = data.get("id")
@@ -118,16 +125,26 @@ class BrowserExtensionBridge:
             logger.info("[AXIOM Extension Bridge] Browser extension disconnected: %s", remote)
 
     async def start_server(self) -> None:
-        """Starts the WebSocket server on 127.0.0.1:41144."""
+        """Starts the WebSocket server on 127.0.0.1:41144 with socket reuse."""
         async with self._get_lock():
             if self.server is not None:
                 return
             try:
-                self.server = await websockets.serve(
-                    self._handle_client,
-                    self.host,
-                    self.port,
-                )
+                try:
+                    self.server = await websockets.serve(
+                        self._handle_client,
+                        self.host,
+                        self.port,
+                        reuse_address=True,
+                        reuse_port=True,
+                    )
+                except (TypeError, OSError):
+                    self.server = await websockets.serve(
+                        self._handle_client,
+                        self.host,
+                        self.port,
+                        reuse_address=True,
+                    )
                 logger.info("[AXIOM Extension Bridge] Daemon listening on ws://%s:%d", self.host, self.port)
             except OSError as exc:
                 logger.warning("[AXIOM Extension Bridge] Failed to bind ws://%s:%d: %s", self.host, self.port, exc)
@@ -148,9 +165,13 @@ class BrowserExtensionBridge:
             self.active_clients.clear()
 
             if self.server is not None:
-                self.server.close()
-                await self.server.wait_closed()
-                self.server = None
+                try:
+                    self.server.close()
+                    await self.server.wait_closed()
+                except Exception as exc:
+                    logger.debug("[AXIOM Extension Bridge] Error closing server: %s", exc)
+                finally:
+                    self.server = None
                 logger.info("[AXIOM Extension Bridge] Daemon shut down.")
 
     async def ensure_server(self) -> None:
@@ -219,6 +240,8 @@ async def interact_with_browser(
     query: str = "",
     selector: str = "",
     text: str = "",
+    url: str = "",
+    tab_id: Any = None,
     **kwargs: Any,
 ) -> BrowserResult:
     """Interacts with browser via local WebExtension WebSocket bridge.
@@ -226,6 +249,9 @@ async def interact_with_browser(
     Actions:
       - list_tabs: Query list of open tabs with IDs, titles, URLs, active state.
       - switch_tab: Matches tab titles or URLs against query and switches focus.
+      - open_tab: Opens a new tab with given URL.
+      - close_tab: Closes the tab matching tab_id or query.
+      - get_active_tab: Returns details of currently focused tab.
       - click: Evaluates document.querySelector(selector).click() in active tab.
       - type: Dispatches synthetic input/typing to selector in active tab.
       - get_dom: Returns text and structure content of active tab.
@@ -238,5 +264,16 @@ async def interact_with_browser(
         cmd_args["selector"] = selector
     if text:
         cmd_args["text"] = text
+    if url:
+        cmd_args["url"] = url
+    if tab_id is not None and tab_id != "":
+        cmd_args["tab_id"] = tab_id
 
     return await bridge.send_command(action, timeout=5.0, **cmd_args)
+
+
+def __getattr__(name: str) -> Any:
+    if name == "InteractWithBrowserTool":
+        from axiom.tools.browser_cdp import InteractWithBrowserTool
+        return InteractWithBrowserTool
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

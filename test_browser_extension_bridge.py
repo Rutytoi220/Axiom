@@ -1,8 +1,11 @@
 """Verification Harness for AXIOM Browser Extension & Local WebSocket Bridge."""
 
 import asyncio
+import contextlib
+import io
 import json
 from pathlib import Path
+import sys
 import websockets
 
 from axiom.tools.browser_extension import (
@@ -38,6 +41,9 @@ def test_extension_scaffold():
     assert "axiom_keep_alive" in bg_code, "axiom_keep_alive alarm missing in background.js"
     assert "ping" in bg_code, "ping keep-alive loop missing in background.js"
     assert "switch_tab" in bg_code, "switch_tab handler missing in background.js"
+    assert "open_tab" in bg_code, "open_tab handler missing in background.js"
+    assert "get_active_tab" in bg_code, "get_active_tab handler missing in background.js"
+    assert "close_tab" in bg_code, "close_tab handler missing in background.js"
     assert "click" in bg_code, "click handler missing in background.js"
     assert "type" in bg_code, "type handler missing in background.js"
     assert "get_dom" in bg_code, "get_dom handler missing in background.js"
@@ -56,12 +62,13 @@ async def run_bridge_lifecycle_tests():
     from axiom.tools.browser_cdp import InteractWithBrowserTool
     tool = InteractWithBrowserTool()
 
-    # 0. Verify InteractWithBrowserTool schema does NOT contain 'port' and contains 'query'
+    # 0. Verify InteractWithBrowserTool schema does NOT contain 'port' and contains 'query' & 'url'
     schema = tool.schema
     properties = schema.get("properties", {})
     assert "port" not in properties, "InteractWithBrowserTool.schema must NOT contain 'port'!"
     assert "query" in properties, "InteractWithBrowserTool.schema should contain 'query'!"
-    print("  → InteractWithBrowserTool.schema verified: 'port' purged, 'query' present.")
+    assert "url" in properties, "InteractWithBrowserTool.schema should contain 'url'!"
+    print("  → InteractWithBrowserTool.schema verified: 'port' purged, 'query' and 'url' present.")
 
     bridge = get_bridge()
     await bridge.start_server()
@@ -93,6 +100,17 @@ async def run_bridge_lifecycle_tests():
             assert bridge.is_connected() is True
             print(f"  → Mock extension connected to {ws_uri} (active clients: {bridge.client_count})")
 
+            # 2a. Verify heartbeat ping frames produce ZERO sys.stdout writes
+            captured_stdout = io.StringIO()
+            with contextlib.redirect_stdout(captured_stdout):
+                await client_ws.send(json.dumps({"type": "ping", "id": "test_hb_1"}))
+                pong_raw = await asyncio.wait_for(client_ws.recv(), timeout=2.0)
+                pong = json.loads(pong_raw)
+                assert pong.get("type") == "pong"
+                assert pong.get("id") == "test_hb_1"
+            assert captured_stdout.getvalue() == "", f"Heartbeat ping produced unexpected stdout: {captured_stdout.getvalue()}"
+            print("  → Heartbeat ping verified: Replied with pong and produced ZERO stdout writes.")
+
             # Background task to emulate background.js responses
             async def mock_extension_worker():
                 try:
@@ -103,15 +121,56 @@ async def run_bridge_lifecycle_tests():
                         action = msg.get("action")
 
                         if action == "switch_tab":
+                            query = (msg.get("query") or "").lower()
+                            if query == "nonexistent":
+                                reply = {
+                                    "id": req_id,
+                                    "success": False,
+                                    "action": "switch_tab",
+                                    "error": f"No open tab matching query: '{msg.get('query')}'",
+                                    "open_tabs": [
+                                        {"id": 101, "title": "Google Gemini", "url": "https://gemini.google.com"},
+                                        {"id": 102, "title": "Monkeytype", "url": "https://monkeytype.com"},
+                                    ],
+                                }
+                            else:
+                                reply = {
+                                    "id": req_id,
+                                    "success": True,
+                                    "action": "switch_tab",
+                                    "tab": {
+                                        "id": 101,
+                                        "title": "Google Gemini - AI Chat",
+                                        "url": "https://gemini.google.com/app",
+                                    },
+                                }
+                        elif action == "open_tab":
                             reply = {
                                 "id": req_id,
                                 "success": True,
-                                "action": "switch_tab",
-                                "tab": {
-                                    "id": 101,
-                                    "title": "Google Gemini - AI Chat",
-                                    "url": "https://gemini.google.com/app",
-                                },
+                                "action": "open_tab",
+                                "tab_id": 103,
+                                "title": "Hacker News",
+                                "url": msg.get("url") or "https://news.ycombinator.com",
+                            }
+                        elif action == "get_active_tab":
+                            reply = {
+                                "id": req_id,
+                                "success": True,
+                                "action": "get_active_tab",
+                                "tab_id": 101,
+                                "title": "Google Gemini - AI Chat",
+                                "url": "https://gemini.google.com/app",
+                                "active": True,
+                            }
+                        elif action == "close_tab":
+                            reply = {
+                                "id": req_id,
+                                "success": True,
+                                "action": "close_tab",
+                                "closed_tab_id": 102,
+                                "title": "Monkeytype",
+                                "url": "https://monkeytype.com",
                             }
                         elif action == "list_tabs":
                             reply = {
@@ -156,47 +215,87 @@ async def run_bridge_lifecycle_tests():
             worker_task = asyncio.create_task(mock_extension_worker())
 
             try:
-                # 3. Test switch_tab (Target requirement)
+                # 3. Test switch_tab (Successful match)
                 res_switch = await interact_with_browser("switch_tab", query="gemini")
                 assert res_switch.success is True, f"switch_tab failed: {res_switch.error}"
                 assert res_switch["tab"]["title"] == "Google Gemini - AI Chat"
                 print(f"  → switch_tab roundtrip verified: Focused '{res_switch['tab']['title']}'")
 
-                # 4. Test list_tabs
+                # 4. Test switch_tab (Unmatched fallback with open_tabs)
+                res_unmatched = await interact_with_browser("switch_tab", query="nonexistent")
+                assert res_unmatched.success is False
+                assert "No open tab matching query" in res_unmatched.error
+                assert "open_tabs" in res_unmatched
+                print(f"  → switch_tab unmatched fallback verified: {res_unmatched.error}")
+
+                # 5. Test open_tab
+                res_open = await interact_with_browser("open_tab", url="https://news.ycombinator.com")
+                assert res_open.success is True, f"open_tab failed: {res_open.error}"
+                assert res_open.get("tab_id") == 103
+                assert "news.ycombinator.com" in res_open.get("url")
+                print(f"  → open_tab roundtrip verified: Tab {res_open.get('tab_id')} at {res_open.get('url')}")
+
+                # 6. Test get_active_tab
+                res_active = await interact_with_browser("get_active_tab")
+                assert res_active.success is True, f"get_active_tab failed: {res_active.error}"
+                assert res_active.get("tab_id") == 101
+                assert res_active.get("title") == "Google Gemini - AI Chat"
+                print(f"  → get_active_tab roundtrip verified: Tab {res_active.get('tab_id')} ('{res_active.get('title')}')")
+
+                # 7. Test close_tab
+                res_close = await interact_with_browser("close_tab", query="monkeytype")
+                assert res_close.success is True, f"close_tab failed: {res_close.error}"
+                assert res_close.get("closed_tab_id") == 102
+                print(f"  → close_tab roundtrip verified: Closed tab {res_close.get('closed_tab_id')}")
+
+                # 8. Test list_tabs
                 res_tabs = await interact_with_browser("list_tabs")
                 assert res_tabs.success is True
                 assert len(res_tabs["tabs"]) == 2
                 print(f"  → list_tabs roundtrip verified: Retrieved {len(res_tabs['tabs'])} tabs")
 
-                # 5. Test click
+                # 9. Test click
                 res_click = await interact_with_browser("click", selector="button.submit")
                 assert res_click.success is True
                 assert "Clicked" in res_click["result"]
                 print(f"  → click roundtrip verified: {res_click['result']}")
 
-                # 6. Test type
+                # 10. Test type
                 res_type = await interact_with_browser("type", selector="input#search", text="hello axiom")
                 assert res_type.success is True
                 assert "hello axiom" in res_type["result"]
                 print(f"  → type roundtrip verified: {res_type['result']}")
 
-                # 7. Test get_dom
+                # 11. Test get_dom
                 res_dom = await interact_with_browser("get_dom")
                 assert res_dom.success is True
                 assert "Gemini" in res_dom["content"]
                 print(f"  → get_dom roundtrip verified: Content length {len(res_dom['content'])} chars")
 
-                # 8. Test InteractWithBrowserTool routes cleanly through extension when connected
+                # 12. Test InteractWithBrowserTool routes cleanly through extension when connected
                 tool_res = await tool.execute({"action": "click", "selector": "button.submit"})
                 assert tool_res.success is True
                 assert "Clicked" in str(tool_res.output)
                 print("  → InteractWithBrowserTool routed to extension bridge seamlessly when connected.")
 
-                # 9. Verify calling execute({"action": "switch_tab", "query": "gemini"}) routes cleanly to extension bridge without throwing a CDP connection error
-                tool_switch = await tool.execute({"action": "switch_tab", "query": "gemini"})
-                assert tool_switch.success is True, f"tool switch_tab failed: {tool_switch.error}"
-                assert "Gemini" in str(tool_switch.output)
-                print("  → InteractWithBrowserTool.execute('switch_tab') verified without CDP connection error.")
+                # 13. Verify calling execute open_tab, get_active_tab, close_tab, switch_tab via tool
+                tool_open = await tool.execute({"action": "open_tab", "url": "https://news.ycombinator.com"})
+                assert tool_open.success is True
+                assert tool_open.output.get("tab_id") == 103
+
+                tool_active = await tool.execute({"action": "get_active_tab"})
+                assert tool_active.success is True
+                assert tool_active.output.get("tab_id") == 101
+
+                tool_close = await tool.execute({"action": "close_tab", "query": "monkeytype"})
+                assert tool_close.success is True
+                assert tool_close.output.get("closed_tab_id") == 102
+
+                tool_switch_fail = await tool.execute({"action": "switch_tab", "query": "nonexistent"})
+                assert tool_switch_fail.success is False
+                assert "Open tabs:" in tool_switch_fail.error
+                assert "Hint: Use action='open_tab'" in tool_switch_fail.error
+                print("  → InteractWithBrowserTool tab operations and error hints verified.")
 
             finally:
                 worker_task.cancel()
@@ -208,7 +307,16 @@ async def run_bridge_lifecycle_tests():
     finally:
         await bridge.stop_server()
 
-    print("✓ Check 2 PASSED: End-to-end WebSocket bridge roundtrip fully operational.\n")
+    # 14. Verify starting and stopping bridge sequentially does not raise [Errno 98]
+    print("  → Testing sequential start/stop cycles for [Errno 98] re-bind resilience...")
+    for cycle in range(3):
+        await bridge.start_server()
+        assert bridge.server is not None, f"Failed to restart bridge server on cycle {cycle + 1}"
+        await bridge.stop_server()
+        assert bridge.server is None
+    print("  → Sequential start/stop cycles passed without [Errno 98].")
+
+    print("✓ Check 2 PASSED: End-to-end WebSocket bridge roundtrip and lifecycle fully operational.\n")
 
 
 def test_main():

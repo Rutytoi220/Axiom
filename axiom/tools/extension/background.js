@@ -183,43 +183,18 @@ async function handleCommand(msg) {
         }
 
         if (!matched) {
-          let openUrl = null;
-          if (query.startsWith("http://") || query.startsWith("https://")) {
-            openUrl = query;
-          } else if (query.includes(".") && !query.includes(" ")) {
-            openUrl = `https://${query}`;
-          } else if (query === "gemini") {
-            openUrl = "https://gemini.google.com";
-          } else if (query === "monkeytype") {
-            openUrl = "https://monkeytype.com";
-          } else if (query === "youtube") {
-            openUrl = "https://youtube.com";
-          } else if (query === "github") {
-            openUrl = "https://github.com";
-          }
-
-          if (openUrl) {
-            try {
-              const newTab = await chrome.tabs.create({ url: openUrl, active: true });
-              sendReply({
-                id,
-                success: true,
-                action: "switch_tab",
-                tab: {
-                  id: newTab.id,
-                  title: newTab.title || query,
-                  url: newTab.url || openUrl,
-                },
-              });
-              return;
-            } catch (_) {}
-          }
-
+          const openTabs = allTabs.map((t) => ({
+            id: t.id,
+            title: t.title || "",
+            url: t.url || "",
+            active: Boolean(t.active),
+          }));
           sendReply({
             id,
             success: false,
             action: "switch_tab",
-            error: `No tab found matching query: '${query || tabId}'`,
+            error: `No open tab matching query: '${query || tabId}'`,
+            open_tabs: openTabs,
           });
           return;
         }
@@ -241,6 +216,123 @@ async function handleCommand(msg) {
             url: matched.url || "",
           },
         });
+        break;
+      }
+
+      case "open_tab": {
+        let url = (msg.url || msg.query || "about:blank").trim();
+        if (url && !url.includes("://") && !url.startsWith("about:") && !url.startsWith("chrome:")) {
+          url = `https://${url}`;
+        }
+        try {
+          const tab = await chrome.tabs.create({ url, active: true });
+          sendReply({
+            id,
+            success: true,
+            action: "open_tab",
+            tab_id: tab.id,
+            title: tab.title || "",
+            url: tab.url || url,
+          });
+        } catch (err) {
+          sendReply({
+            id,
+            success: false,
+            action: "open_tab",
+            error: `Failed to open tab: ${err.message || String(err)}`,
+          });
+        }
+        break;
+      }
+
+      case "get_active_tab": {
+        try {
+          let activeTabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+          if (!activeTabs || activeTabs.length === 0) {
+            activeTabs = await chrome.tabs.query({ active: true });
+          }
+          if (!activeTabs || activeTabs.length === 0) {
+            activeTabs = await chrome.tabs.query({});
+          }
+
+          if (activeTabs && activeTabs.length > 0) {
+            const tab = activeTabs[0];
+            sendReply({
+              id,
+              success: true,
+              action: "get_active_tab",
+              tab_id: tab.id,
+              title: tab.title || "",
+              url: tab.url || "",
+              active: Boolean(tab.active),
+            });
+          } else {
+            sendReply({
+              id,
+              success: false,
+              action: "get_active_tab",
+              error: "No active tab found",
+            });
+          }
+        } catch (err) {
+          sendReply({
+            id,
+            success: false,
+            action: "get_active_tab",
+            error: `Failed to get active tab: ${err.message || String(err)}`,
+          });
+        }
+        break;
+      }
+
+      case "close_tab": {
+        const tabId = msg.tab_id ? Number(msg.tab_id) : null;
+        const query = (msg.query || msg.filter || msg.target || msg.title || msg.url || "").toLowerCase().trim();
+        try {
+          const allTabs = await chrome.tabs.query({});
+          let target = null;
+          if (tabId) {
+            target = allTabs.find((t) => t.id === tabId);
+          } else if (query) {
+            target = allTabs.find(
+              (t) =>
+                (t.title && t.title.toLowerCase().includes(query)) ||
+                (t.url && t.url.toLowerCase().includes(query))
+            );
+          } else {
+            const activeTabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+            if (activeTabs && activeTabs.length > 0) {
+              target = activeTabs[0];
+            }
+          }
+
+          if (!target || !target.id) {
+            sendReply({
+              id,
+              success: false,
+              action: "close_tab",
+              error: `No tab found to close matching '${query || tabId || "active"}'`,
+            });
+            return;
+          }
+
+          await chrome.tabs.remove(target.id);
+          sendReply({
+            id,
+            success: true,
+            action: "close_tab",
+            closed_tab_id: target.id,
+            title: target.title || "",
+            url: target.url || "",
+          });
+        } catch (err) {
+          sendReply({
+            id,
+            success: false,
+            action: "close_tab",
+            error: `Failed to close tab: ${err.message || String(err)}`,
+          });
+        }
         break;
       }
 

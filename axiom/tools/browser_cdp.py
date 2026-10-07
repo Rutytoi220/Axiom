@@ -30,21 +30,29 @@ class InteractWithBrowserTool(BaseTool):
             name="interact_with_browser",
             description=(
                 "Tier 2 Semantic UI Automation: Browser and tab automation via AXIOM WebExtension bridge. "
-                "Actions: 'switch_tab' (focus tab by title/domain query), 'list_tabs', 'click' (DOM selector), "
-                "'type' (input text into selector), 'get_dom' (retrieve page text)."
+                "Actions: 'switch_tab' (focus tab by title/domain query), 'open_tab' (open new tab with url), "
+                "'close_tab' (close tab by id/query), 'get_active_tab' (get focused tab info), 'list_tabs', "
+                "'click' (DOM selector), 'type' (input text into selector), 'get_dom' (retrieve page text)."
             ),
         )
         self.parameters = [
             ToolParameter(
                 name="action",
                 type="string",
-                description="The browser action: 'switch_tab', 'list_tabs', 'click', 'type', 'get_dom'.",
+                description="The browser action: 'switch_tab', 'open_tab', 'close_tab', 'get_active_tab', 'list_tabs', 'click', 'type', 'get_dom'.",
                 required=True,
             ),
             ToolParameter(
                 name="query",
                 type="string",
-                description="Tab title, domain, or URL query to search and switch to when action is 'switch_tab'.",
+                description="Tab title, domain, or URL query to search and switch to when action is 'switch_tab' or 'close_tab'.",
+                required=False,
+                default="",
+            ),
+            ToolParameter(
+                name="url",
+                type="string",
+                description="Target URL to open when action is 'open_tab'.",
                 required=False,
                 default="",
             ),
@@ -156,7 +164,11 @@ class InteractWithBrowserTool(BaseTool):
                     ext_res = await bridge.send_command(action, **ext_params)
                     if ext_res.success:
                         return ToolResult(True, output=ext_res.output or ext_res)
-                    return ToolResult(False, error=ext_res.error or "Extension command failed")
+                    error_msg = ext_res.error or "Extension command failed"
+                    if "open_tabs" in ext_res:
+                        tabs_summary = ", ".join([f"'{t.get('title') or t.get('url')}'" for t in ext_res["open_tabs"]])
+                        error_msg = f"{error_msg}. Open tabs: [{tabs_summary}]. Hint: Use action='open_tab' with url='<url>' to open a new tab."
+                    return ToolResult(False, error=error_msg)
                 else:
                     return ToolResult(
                         False,
