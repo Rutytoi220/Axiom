@@ -15,7 +15,7 @@ REFUSAL_PHRASES = [
 ]
 
 class NativeOrchestrator:
-    def __init__(self, max_context_tokens: int = 4096):
+    def __init__(self, max_context_tokens: int = 32768):
         self.max_context_tokens = max_context_tokens
 
     @classmethod
@@ -371,8 +371,11 @@ class NativeOrchestrator:
                 break
         is_interface_action = self.is_interface_action_query(user_query_for_intent)
 
-        if not payload.get("tools"):
-            payload["tools"] = get_tool_schemas(0)
+        # Inspect query intent and filter active schemas to prevent context budget overflows
+        tier = self.route_tier(user_query_for_intent)
+        from axiom.core.plugins import filter_tool_schemas_by_tier
+        active_tools = payload.get("tools") or get_tool_schemas(0)
+        payload["tools"] = filter_tool_schemas_by_tier(active_tools, tier)
 
         payload["model"] = config.ollama_model
 
@@ -396,9 +399,11 @@ class NativeOrchestrator:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        # Enforce 100% GPU layer offload and adequate context size in Ollama
-        payload.setdefault("options", {})["num_gpu"] = 99
-        payload["options"].setdefault("num_ctx", max(self.max_context_tokens, 8192))
+        # Enforce 100% GPU layer offload and adequate context size in Ollama (32K)
+        options = payload.setdefault("options", {})
+        if "num_ctx" not in options or options["num_ctx"] < 32768:
+            options["num_ctx"] = 32768
+        options.setdefault("num_gpu", 99)
 
         try:
             async with httpx.AsyncClient(timeout=2.0) as client:
@@ -406,7 +411,7 @@ class NativeOrchestrator:
                     f"{base_url}/api/generate",
                     json={
                         "model": payload["model"],
-                        "options": {"num_ctx": max(self.max_context_tokens, 8192), "num_gpu": 99},
+                        "options": {"num_ctx": 32768, "num_gpu": 99},
                         "keep_alive": "5m",
                     },
                 )
@@ -666,12 +671,17 @@ class NativeOrchestrator:
             if re.search(pattern, task_lower):
                 return "tier3_vision"
 
-        # Tier 1 indicators (Window management & Hyprland IPC, Process, Clipboard, Journal)
+        # Tier 1 indicators (Window management & Hyprland IPC, Process, Clipboard, Journal, Media, Notifications, Network, Files)
         tier1_patterns = [
             r"\b(window|windows|workspace|workspaces|fullscreen|floating|tile|tiling)\b",
             r"\b(focus|switch to|move to|close)\s+(window|workspace)\b",
             r"\b(active window|list windows|hyprctl|hyprland)\b",
             r"\b(process|processes|pid|kill\s+process|kill\s+pid|journal|journalctl|systemd|clipboard|wl-copy|wl-paste)\b",
+            r"\b(notify|notification|notify-send|alert)\b",
+            r"\b(network|gateway|ip\s+address|interfaces|tailscale|dns|ping|vpn|wifi)\b",
+            r"\b(media|music|playerctl|playback|volume|track|song|mpris)\b",
+            r"\b(file|files|patch|rollback|undo|backup)\b",
+            r"\b(command|bash|shell|terminal|exec|run command|cli)\b",
         ]
         for pattern in tier1_patterns:
             if re.search(pattern, task_lower):
@@ -703,6 +713,14 @@ class NativeOrchestrator:
                 return "query_system_journal"
             if any(k in task_lower for k in ("process", "pid", "kill")):
                 return "manage_system_process"
+            if any(k in task_lower for k in ("notify", "notification", "alert")):
+                return "send_desktop_notification"
+            if any(k in task_lower for k in ("network", "gateway", "tailscale", "dns", "ping", "vpn")):
+                return "inspect_network"
+            if any(k in task_lower for k in ("media", "music", "volume", "playerctl", "playback")):
+                return "manage_media_playback"
+            if any(k in task_lower for k in ("file", "rollback", "undo", "patch")):
+                return "manage_workspace_file"
             return "manage_desktop_window"
         tier_map = {
             "tier1_ipc": "manage_desktop_window",

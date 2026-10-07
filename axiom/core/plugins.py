@@ -2,7 +2,7 @@ import os
 import sys
 import importlib.util
 from pathlib import Path
-from typing import Any, Dict, List, Callable, Awaitable
+from typing import Any, Dict, List, Callable, Awaitable, Optional
 
 TOOLS_DIR = Path.home() / ".config" / "axiom" / "tools.d"
 
@@ -198,6 +198,35 @@ def load_plugins() -> None:
                 "    return json.dumps(res.to_dict(tool=_tool.name, arguments=params))\n"
             ),
         ),
+        (
+            TOOLS_DIR / "execute_command.py",
+            (
+                "import subprocess\n\n"
+                "TOOL_SCHEMA = {\n"
+                '    "type": "function",\n'
+                '    "function": {\n'
+                '        "name": "execute_command",\n'
+                '        "description": "Executes a shell command via bash and returns stdout and stderr.",\n'
+                '        "parameters": {\n'
+                '            "type": "object",\n'
+                '            "properties": {\n'
+                '                "command": {"type": "string", "description": "Command to execute"}\n'
+                '            },\n'
+                '            "required": ["command"]\n'
+                '        }\n'
+                '    }\n'
+                "}\n"
+                'TUI_HINT = "⚙️ Executing system command..."\n'
+                "REQUIRED_RING = 0\n\n"
+                "async def execute(command: str = '', **kwargs) -> str:\n"
+                "    try:\n"
+                "        proc = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=60)\n"
+                "        body = (proc.stdout or '') + (proc.stderr or '')\n"
+                '        return f"Exit code {proc.returncode}\\n{body}".strip() if body else f"Exit code {proc.returncode}"\n'
+                "    except Exception as e:\n"
+                '        return f"Error executing command: {e}"\n'
+            ),
+        ),
     ]
     for target_file, code_content in provisions:
         if not target_file.exists():
@@ -233,7 +262,50 @@ def load_plugins() -> None:
             except Exception as e:
                 print(f"\033[1;31m[Warning] Failed to load plugin {path.name}: {e}\033[0m")
 
-def get_tool_schemas(ring: int = 0) -> List[Dict[str, Any]]:
+CORE_TOOLS = {
+    "execute_command",
+    "manage_desktop_window",
+}
+
+TIER_1_TOOLS = {
+    "manage_system_process",
+    "manage_system_clipboard",
+    "query_system_journal",
+    "manage_media_playback",
+    "manage_workspace_file",
+    "send_desktop_notification",
+    "inspect_network",
+}
+
+TIER_2_TOOLS = {
+    "interact_with_browser",
+}
+
+
+def filter_tool_schemas_by_tier(schemas: List[Dict[str, Any]], tier: str) -> List[Dict[str, Any]]:
+    """Filter dynamic tool schemas based on the detected automation tier.
+
+    - Always includes core system tools: execute_command, manage_desktop_window.
+    - If Tier 1: includes Tier 1 tools (manage_system_process, manage_system_clipboard,
+      query_system_journal, manage_media_playback, manage_workspace_file,
+      send_desktop_notification, inspect_network).
+    - If Tier 2: includes Tier 2 tools (interact_with_browser).
+    - If Tier 3 / Ambiguous / General: includes the full registry.
+    """
+    tier_lower = (tier or "").lower().strip()
+    if tier_lower in ("tier1", "tier1_ipc", "1"):
+        allowed = CORE_TOOLS | TIER_1_TOOLS
+        filtered = [s for s in schemas if (s.get("function", {}).get("name") or s.get("name")) in allowed]
+        return filtered if filtered else list(schemas)
+    elif tier_lower in ("tier2", "tier2_browser", "2"):
+        allowed = CORE_TOOLS | TIER_2_TOOLS
+        filtered = [s for s in schemas if (s.get("function", {}).get("name") or s.get("name")) in allowed]
+        return filtered if filtered else list(schemas)
+    else:
+        return list(schemas)
+
+
+def get_tool_schemas(ring: int = 0, tier: Optional[str] = None) -> List[Dict[str, Any]]:
     if not _schemas:
         load_plugins()
     filtered = []
@@ -247,6 +319,8 @@ def get_tool_schemas(ring: int = 0) -> List[Dict[str, Any]]:
         # Ring 0 has access to everything. Ring 3 only has access to Ring 3+.
         if tool_ring >= ring:
             filtered.append(s)
+    if tier:
+        filtered = filter_tool_schemas_by_tier(filtered, tier)
     return filtered
 
 def get_tui_hints() -> Dict[str, str]:

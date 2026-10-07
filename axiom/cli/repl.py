@@ -786,7 +786,9 @@ class InlineRepl:
         add_message(self.session_id, "user", user_prompt)
 
         # 2. Build payload with dynamic tools and session history
-        dynamic_tools = get_tool_schemas(0)
+        tier = self.orchestrator.route_tier(user_prompt)
+        from axiom.core.plugins import filter_tool_schemas_by_tier
+        dynamic_tools = filter_tool_schemas_by_tier(get_tool_schemas(0), tier)
         history = get_session_messages(self.session_id)
         messages: List[Dict[str, Any]] = []
         for h in history:
