@@ -359,6 +359,28 @@ class NativeOrchestrator:
         config = get_config()
         base_url = getattr(config, "ollama_base_url", "http://127.0.0.1:11434").rstrip("/")
 
+        # Inspect if preceding turn was a failed tool execution requiring actuator recovery
+        is_recovery_turn = False
+        recovery_hint = ""
+        allowed_recovery_actions = []
+
+        messages = payload.get("messages", [])
+        if messages:
+            for m in reversed(messages):
+                if m.get("role") == "user" and "[ACTUATOR RECOVERY REQUIRED]" in str(m.get("content", "")):
+                    continue
+                if m.get("role") == "tool":
+                    c = str(m.get("content", ""))
+                    if "[Tool Error]:" in c:
+                        is_recovery_turn = True
+                        recovery_hint = m.get("remedy_hint") or ""
+                        if not recovery_hint and "Recovery Hint:" in c:
+                            recovery_hint = c.split("Recovery Hint:", 1)[1].strip()
+                        allowed_recovery_actions = m.get("allowed_actions") or []
+                    break
+                elif m.get("role") == "assistant" and m.get("tool_calls"):
+                    break
+
         if depth == 0:
             # Eagerly ensure WebExtension bridge server is running on 127.0.0.1:41144
             try:
@@ -388,7 +410,7 @@ class NativeOrchestrator:
 
             system_prompt_content = self._build_system_prompt()
 
-            # Query semantic memory for relevant context
+            # Query relevance-based persistent memory (Phase 2 token-budgeted hydration)
             user_prompt = ""
             for msg in reversed(payload.get("messages", [])):
                 if msg.get("role") == "user":
@@ -399,19 +421,24 @@ class NativeOrchestrator:
                         user_prompt = " ".join(part.get("text", "") for part in c if isinstance(part, dict))
                     break
 
-            if user_prompt:
+            if user_prompt and not is_retry and not is_recovery_turn:
                 try:
-                    from axiom.memory.semantic import search_memories
+                    from axiom.memory.hydration import hydrate_context_memory
                     clean_search = re.sub(r"\[Active Window:.*?\]\n?", "", user_prompt).strip()
-                    recalled = search_memories(clean_search, top_k=3)
-                    if recalled:
-                        mem_block = (
-                            "\n\n[RECALLED SEMANTIC MEMORIES]\n"
-                            "<recalled_memory>\n"
-                            + "\n".join(f"- {m}" for m in recalled)
-                            + "\n</recalled_memory>"
-                        )
-                        system_prompt_content += mem_block
+                    mem_block = hydrate_context_memory(clean_search, max_tokens=350)
+                    if mem_block:
+                        system_prompt_content += f"\n\n{mem_block}"
+                    else:
+                        from axiom.memory.semantic import search_memories
+                        recalled = search_memories(clean_search, top_k=3)
+                        if recalled:
+                            mem_block = (
+                                "\n\n[Contextual Memory]:\n"
+                                "<recalled_memory>\n"
+                                + "\n".join(f"- {m}" for m in recalled)
+                                + "\n</recalled_memory>"
+                            )
+                            system_prompt_content += mem_block
                 except Exception:
                     pass
 
@@ -442,28 +469,6 @@ class NativeOrchestrator:
                 break
         user_query_for_intent = re.sub(r"^\[Active Window:[^\]]*\]\s*", "", user_query_for_intent)
         is_interface_action = self.is_interface_action_query(user_query_for_intent)
-
-        # Inspect if preceding turn was a failed tool execution requiring actuator recovery
-        is_recovery_turn = False
-        recovery_hint = ""
-        allowed_recovery_actions = []
-
-        messages = payload.get("messages", [])
-        if messages:
-            for m in reversed(messages):
-                if m.get("role") == "user" and "[ACTUATOR RECOVERY REQUIRED]" in str(m.get("content", "")):
-                    continue
-                if m.get("role") == "tool":
-                    c = str(m.get("content", ""))
-                    if "[Tool Error]:" in c:
-                        is_recovery_turn = True
-                        recovery_hint = m.get("remedy_hint") or ""
-                        if not recovery_hint and "Recovery Hint:" in c:
-                            recovery_hint = c.split("Recovery Hint:", 1)[1].strip()
-                        allowed_recovery_actions = m.get("allowed_actions") or []
-                    break
-                elif m.get("role") == "assistant" and m.get("tool_calls"):
-                    break
 
         # Inspect query intent, active window, and bridge connectivity to filter active schemas
         active_window = await self.get_active_window()

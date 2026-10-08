@@ -340,6 +340,111 @@ class MemoryStore:
                     pass
                 return []
 
+    def get_relevant_memories(
+        self,
+        query: str,
+        max_tokens: int = 350,
+        category: Optional[str] = None,
+        limit: int = 15,
+        update_access: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """Retrieve active memories scored by composite relevance within a hard token budget.
+
+        Composite Score:
+            normalized_bm25 * recency_decay * (1.0 + min(access_count * 0.05, 0.5)) * confidence
+
+        Where:
+            - normalized_bm25 is normalized positive BM25 relevance score from FTS5.
+            - recency_decay is a smooth decay factor: 1.0 / (1.0 + 0.05 * age_in_days).
+            - utility_boost is (1.0 + min(access_count * 0.05, 0.5)).
+            - confidence is the memory confidence weight.
+        """
+        query_str = (query or "").strip()
+        if not query_str:
+            return []
+
+        candidates = self.search(
+            query=query_str,
+            category=category,
+            limit=max(limit * 2, 30),
+            include_inactive=False,
+        )
+        if not candidates:
+            return []
+
+        now = time.time()
+        raw_ranks = [abs(float(c.get("bm25_rank", 1.0))) for c in candidates]
+        max_rank = max(raw_ranks) if raw_ranks else 1.0
+        if max_rank <= 0.0:
+            max_rank = 1.0
+
+        scored_candidates = []
+        for c in candidates:
+            raw_bm25 = abs(float(c.get("bm25_rank", 1.0)))
+            normalized_bm25 = raw_bm25 / max_rank
+
+            updated_at = float(c.get("updated_at", now))
+            age_days = max(0.0, (now - updated_at) / 86400.0)
+            recency_decay = 1.0 / (1.0 + 0.05 * age_days)
+
+            access_count = int(c.get("access_count", 0))
+            utility_boost = 1.0 + min(access_count * 0.05, 0.5)
+
+            confidence = float(c.get("confidence", 1.0))
+
+            composite_score = normalized_bm25 * recency_decay * utility_boost * confidence
+            c_copy = dict(c)
+            c_copy["composite_score"] = composite_score
+            scored_candidates.append(c_copy)
+
+        scored_candidates.sort(key=lambda x: x["composite_score"], reverse=True)
+
+        try:
+            from axiom.agents.native_orchestrator import NativeOrchestrator
+            count_fn = NativeOrchestrator.count_tokens
+        except Exception:
+            def count_fn(text: str) -> int:
+                words = len(text.split())
+                return max(len(text) // 4, int(words * 1.3), 1)
+
+        header = "[Contextual Memory]:\n<recalled_memory>\n"
+        footer = "\n</recalled_memory>"
+
+        selected: List[Dict[str, Any]] = []
+        current_lines: List[str] = []
+
+        for candidate in scored_candidates:
+            cat = candidate.get("category", "preference")
+            key = candidate.get("key")
+            content = candidate.get("content", "")
+            if key:
+                line = f"- ({cat}) {key}: {content}"
+            else:
+                line = f"- ({cat}) {content}"
+
+            test_block = header + "\n".join(current_lines + [line]) + footer
+            if count_fn(test_block) <= max_tokens:
+                selected.append(candidate)
+                current_lines.append(line)
+            else:
+                break
+
+        if update_access and selected:
+            try:
+                with self._write_lock:
+                    with self._get_conn() as conn:
+                        for s in selected:
+                            conn.execute(
+                                "UPDATE memories SET access_count = access_count + 1 WHERE id = ?",
+                                (s["id"],),
+                            )
+                            s["access_count"] += 1
+                        conn.commit()
+            except Exception:
+                pass
+
+        return selected
+
     def update(
         self,
         memory_id: int,
