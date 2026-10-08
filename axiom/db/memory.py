@@ -217,6 +217,80 @@ class MemoryStore:
                 conn.commit()
                 return new_id
 
+    def _infer_fact_key(self, content: str, category: str) -> Optional[str]:
+        """Infer an appropriate unique key for contradiction resolution and superseding."""
+        text = content.strip()
+        lower = text.lower()
+
+        # 1. Check for explicit key prefix e.g. "user.shell: zsh" or "theme = tokyo-night"
+        prefix_match = re.match(r"^([a-zA-Z0-9_\.-]{2,30})\s*[:=]\s*(.+)$", text)
+        if prefix_match:
+            k = prefix_match.group(1).lower()
+            if not k.startswith("http") and not k.startswith("note"):
+                return k
+
+        # 2. Check canonical domain key patterns
+        domain_patterns = [
+            (r"\b(shell|zsh|bash|fish|nushell)\b", "user.shell"),
+            (r"\b(editor|vim|neovim|nvim|emacs|vscode|sublime|nano)\b", "user.editor"),
+            (r"\b(theme|tokyo[\s_-]?night|catppuccin|dracula|gruvbox|solarized|nord)\b", "user.theme"),
+            (r"\b(browser|firefox|chrome|chromium|brave|safari)\b", "user.browser"),
+            (r"\b(git\s+rebase|git\s+merge|git\s+commit|git\s+branch|git\s+workflow)\b", "workflow.git"),
+            (r"\b(python|rust|golang|nodejs|typescript|javascript)\b.*\b(prefer|version|standard)\b", "user.language"),
+            (r"\b(postgres|postgresql|mysql|sqlite|redis|mongodb)\b", "homelab.db"),
+            (r"\b(docker|podman|container|compose)\b", "homelab.container"),
+            (r"\b(server\s+ip|ip\s+address|host\b|port\s+\d+)\b", "environment.server"),
+            (r"\b(os|distro|ubuntu|debian|arch[\s_-]?linux|fedora|nixos|macos)\b", "environment.os"),
+        ]
+
+        for pat, matched_key in domain_patterns:
+            if re.search(pat, lower):
+                return matched_key
+
+        # 3. Match against existing active keys in the same category
+        try:
+            with self._get_conn() as conn:
+                rows = conn.execute(
+                    "SELECT key, content FROM memories WHERE category = ? AND is_active = 1 AND key IS NOT NULL",
+                    (category,),
+                ).fetchall()
+                for row in rows:
+                    existing_key = row["key"]
+                    existing_content = row["content"].lower()
+                    existing_tokens = set(re.findall(r"\w{4,}", existing_content))
+                    new_tokens = set(re.findall(r"\w{4,}", lower))
+                    overlap = existing_tokens.intersection(new_tokens)
+                    if len(overlap) >= 2:
+                        return existing_key
+        except Exception:
+            pass
+
+        return None
+
+    def store_fact(
+        self,
+        content: str,
+        category: str = "preference",
+        key: Optional[str] = None,
+        confidence: float = 1.0,
+    ) -> int:
+        """Store a fact with key inference and automatic contradiction/superseding resolution.
+
+        If key is None, infers an appropriate key based on common entity patterns
+        or existing active memories in the same category.
+        """
+        content = str(content).strip()
+        if not content:
+            raise ValueError("Memory content cannot be empty.")
+
+        if category not in VALID_CATEGORIES:
+            category = "preference"
+
+        if not key:
+            key = self._infer_fact_key(content, category)
+
+        return self.store(content=content, category=category, key=key, confidence=confidence)
+
     def get(self, memory_id: int) -> Optional[Dict[str, Any]]:
         """Retrieve a memory by ID (active or inactive) and increment its access count."""
         with self._get_conn() as conn:
@@ -642,3 +716,15 @@ def search_historical_context(
         except sqlite3.OperationalError:
             # Fallback if query syntax is invalid
             return []
+
+
+def store_fact(
+    content: str,
+    category: str = "preference",
+    key: Optional[str] = None,
+    confidence: float = 1.0,
+    db_path: Optional[str] = None,
+) -> int:
+    """Convenience top-level wrapper to store a fact via MemoryStore."""
+    store = MemoryStore(db_path=db_path)
+    return store.store_fact(content=content, category=category, key=key, confidence=confidence)

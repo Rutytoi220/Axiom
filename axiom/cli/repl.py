@@ -1003,9 +1003,17 @@ class InlineRepl:
 
     async def do_exit(self) -> None:
         """Performs cleanup and graceful teardown of background services."""
+        if hasattr(self, "session_id") and self.session_id:
+            try:
+                from axiom.memory.promotion import promote_session_facts
+                promote_session_facts(self.session_id)
+            except Exception:
+                pass
+
         if hasattr(self, "bridge") and self.bridge:
             await self.bridge.stop_server()
             self._bridge_server = None
+
 
     async def run_loop(self) -> None:
         """Main non-blocking interactive loop."""

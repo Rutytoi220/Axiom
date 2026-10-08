@@ -268,6 +268,13 @@ def load_plugins() -> None:
             except Exception as e:
                 print(f"\033[1;31m[Warning] Failed to load plugin {path.name}: {e}\033[0m")
 
+    # Autonomous Capability Indexing into persistent MemoryStore
+    try:
+        from axiom.memory.capability_indexer import index_tool_capabilities
+        index_tool_capabilities()
+    except Exception:
+        pass
+
 
 TIER_1_BUILTIN = {
     "manage_system_process",
@@ -624,3 +631,10 @@ def reload_plugin(path: Path) -> None:
                     
         except Exception as e:
             print(f"\033[1;31m[Warning] Failed to load plugin {path.name}: {e}\033[0m")
+
+    try:
+        from axiom.memory.capability_indexer import index_tool_capabilities
+        index_tool_capabilities()
+    except Exception:
+        pass
+
