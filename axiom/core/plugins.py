@@ -11,14 +11,20 @@ _rings: Dict[str, int] = {}
 _executors: Dict[str, Callable[..., Awaitable[str]]] = {}
 _tui_hints: Dict[str, str] = {}
 _capabilities: Dict[str, Any] = {}
+_plugin_file_paths: Dict[str, Path] = {}
+
+def get_plugin_file_paths() -> Dict[str, Path]:
+    """Return a mapping of registered dynamic tool names to their file paths on disk."""
+    return dict(_plugin_file_paths)
 
 def load_plugins() -> None:
-    global _schemas, _executors, _tui_hints, _capabilities
+    global _schemas, _executors, _tui_hints, _capabilities, _plugin_file_paths
     _schemas.clear()
     _rings.clear()
     _executors.clear()
     _tui_hints.clear()
     _capabilities.clear()
+    _plugin_file_paths.clear()
 
     TOOLS_DIR.mkdir(parents=True, exist_ok=True)
     
@@ -265,6 +271,7 @@ def load_plugins() -> None:
                         _tui_hints[name] = getattr(mod, "TUI_HINT")
 
                     _capabilities[name] = _extract_capability(mod, name)
+                    _plugin_file_paths[name] = path
             except Exception as e:
                 print(f"\033[1;31m[Warning] Failed to load plugin {path.name}: {e}\033[0m")
 
@@ -616,43 +623,48 @@ def reload_plugin(path: Any) -> None:
         return
 
     if not path.is_file() or not path.name.endswith(".py"):
-        return
-        
+        raise FileNotFoundError(f"Plugin file not found: {path}")
+
     module_name = f"axiom.dynamic_tools.{path.stem}"
 
-    
     # Clean up sys.modules cache to force a fresh import
     if module_name in sys.modules:
         del sys.modules[module_name]
-        
+
     spec = importlib.util.spec_from_file_location(module_name, path)
-    if spec and spec.loader:
-        mod = importlib.util.module_from_spec(spec)
-        try:
-            spec.loader.exec_module(mod)
-            
-            if hasattr(mod, "TOOL_SCHEMA") and hasattr(mod, "execute"):
-                schema = getattr(mod, "TOOL_SCHEMA")
-                fn = schema.setdefault("function", {})
-                params = fn.get("parameters")
-                if not params or not isinstance(params, dict) or params.get("type") in ("", None) or params.get("properties") is None:
-                    fn["parameters"] = {"type": "object", "properties": {}}
-                name = fn["name"]
-                
-                # Remove existing schema if it exists
-                global _schemas, _executors, _tui_hints, _capabilities
-                _schemas = [s for s in _schemas if s["function"]["name"] != name]
-                
-                _schemas.append(schema)
-                _executors[name] = getattr(mod, "execute")
-                _rings[name] = getattr(mod, "REQUIRED_RING", 0)
-                _capabilities[name] = _extract_capability(mod, name)
-                
-                if hasattr(mod, "TUI_HINT"):
-                    _tui_hints[name] = getattr(mod, "TUI_HINT")
-                    
-        except Exception as e:
-            print(f"\033[1;31m[Warning] Failed to load plugin {path.name}: {e}\033[0m")
+    if not spec or not spec.loader:
+        raise ImportError(f"Could not load spec for plugin at {path}")
+
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+
+        if hasattr(mod, "TOOL_SCHEMA") and hasattr(mod, "execute"):
+            schema = getattr(mod, "TOOL_SCHEMA")
+            fn = schema.setdefault("function", {})
+            params = fn.get("parameters")
+            if not params or not isinstance(params, dict) or params.get("type") in ("", None) or params.get("properties") is None:
+                fn["parameters"] = {"type": "object", "properties": {}}
+            name = fn["name"]
+
+            # Remove existing schema if it exists
+            global _schemas, _executors, _tui_hints, _capabilities, _plugin_file_paths
+            _schemas = [s for s in _schemas if (s.get("function", {}).get("name") or s.get("name")) != name]
+
+            _schemas.append(schema)
+            _executors[name] = getattr(mod, "execute")
+            _rings[name] = getattr(mod, "REQUIRED_RING", 0)
+            _capabilities[name] = _extract_capability(mod, name)
+            _plugin_file_paths[name] = path
+
+            if hasattr(mod, "TUI_HINT"):
+                _tui_hints[name] = getattr(mod, "TUI_HINT")
+        else:
+            raise ValueError(f"Plugin {path.name} must export TOOL_SCHEMA and execute()")
+
+    except Exception as e:
+        print(f"\033[1;31m[Warning] Failed to load plugin {path.name}: {e}\033[0m")
+        raise
 
     try:
         from axiom.memory.capability_indexer import index_tool_capabilities
@@ -668,7 +680,7 @@ def unregister_plugin(name: str) -> bool:
     cleans up sys.modules, and resynchronizes DynamicCapabilitySet.
     Returns True if the tool was found and removed, False otherwise.
     """
-    global _schemas, _executors, _rings, _tui_hints, _capabilities
+    global _schemas, _executors, _rings, _tui_hints, _capabilities, _plugin_file_paths
 
     found = False
 
@@ -691,6 +703,10 @@ def unregister_plugin(name: str) -> bool:
 
     if name in _capabilities:
         del _capabilities[name]
+        found = True
+
+    if name in _plugin_file_paths:
+        del _plugin_file_paths[name]
         found = True
 
     module_name = f"axiom.dynamic_tools.{name}"

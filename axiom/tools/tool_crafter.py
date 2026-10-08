@@ -12,10 +12,12 @@ import json
 import logging
 import os
 import re
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from axiom.core.plugins import reload_plugin, unregister_plugin
 from axiom.db.memory import MemoryStore
 from axiom.tools.core import ToolResult
 from axiom.tools.validator import ToolValidator
@@ -155,17 +157,54 @@ async def craft_tool(
             error=f"Failed to write tool to {target_file}: {e}",
         )
 
-    # Hot reload
+    # Hot reload with Rollback
     try:
-        from axiom.core.plugins import reload_plugin
         reload_plugin(target_file)
-    except Exception as e:
-        logger.warning("reload_plugin failed for %s: %s", target_file, e)
+    except Exception as err:
+        logger.warning("reload_plugin failed for %s: %s. Rolling back installation.", target_file, err)
+        # Rollback: remove target_file immediately
+        if target_file.exists():
+            try:
+                target_file.unlink()
+            except OSError:
+                pass
+
+        # Clean up any partial schemas or cached modules
+        try:
+            unregister_plugin(clean_name)
+        except Exception:
+            pass
+
+        # Soft-delete capability record if created in MemoryStore
+        try:
+            cap_record = store.get_by_key(f"tool.{clean_name}")
+            if cap_record:
+                store.delete(cap_record["id"], hard_delete=False)
+            with store._write_lock:
+                with store._get_conn() as conn:
+                    conn.execute(
+                        "UPDATE memories SET is_active = 0, updated_at = ? WHERE key = ? AND is_active = 1",
+                        (time.time(), f"tool.{clean_name}"),
+                    )
+                    conn.commit()
+        except Exception:
+            pass
+
+        try:
+            from axiom.memory.capability_indexer import reconcile_tool_capabilities
+            reconcile_tool_capabilities(store=store, tools_dir=target_dir)
+        except Exception:
+            pass
+
+        return ToolResult(
+            success=False,
+            error=f"Installation failed during reload: {err}. File and runtime state rolled back.",
+        )
 
     # Confirm capability indexed into MemoryStore
     try:
         from axiom.memory.capability_indexer import index_tool_capabilities
-        index_tool_capabilities(store=store)
+        index_tool_capabilities(store=store, tools_dir=target_dir)
     except Exception as e:
         logger.warning("Capability indexing failed for %s: %s", clean_name, e)
 

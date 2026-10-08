@@ -19,6 +19,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from axiom.core.plugins import reload_plugin, unregister_plugin
 from axiom.db.memory import MemoryStore
 from axiom.tools.core import ToolResult
 from axiom.tools.validator import ToolValidator
@@ -195,6 +196,15 @@ class ToolManager:
                 error=f"Tool '{clean_name}' does not exist in {target_dir}. Cannot update non-existent tool.",
             )
 
+        # Preserve existing working code prior to replacement
+        try:
+            backup_code = target_file.read_text(encoding="utf-8")
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error=f"Failed to read existing tool code for backup: {e}",
+            )
+
         # 1. Comprehensive Validation Gate
         validator = ToolValidator()
         val_res = await validator.validate_all(code, test_params=test_params)
@@ -236,18 +246,52 @@ class ToolManager:
                 error=f"Failed to write updated tool to {target_file}: {e}",
             )
 
-        # 4. Hot Reload
+        # 4. Hot Reload with Rollback
         try:
-            from axiom.core.plugins import reload_plugin
             reload_plugin(target_file)
-        except Exception as e:
-            logger.warning("Hot-reload encountered an error for %s: %s", target_file, e)
+        except Exception as err:
+            logger.warning(
+                "Hot-reload encountered an error for %s: %s. Rolling back to previous version.",
+                target_file,
+                err,
+            )
+            # Rollback: restore previous working code atomically
+            restore_tmp = target_dir / f".tmp_restore_{clean_name}_{uuid.uuid4().hex}.py"
+            try:
+                restore_tmp.write_text(backup_code, encoding="utf-8")
+                restore_tmp.replace(target_file)
+            except Exception as restore_err:
+                logger.error("Failed to restore backup code to %s: %s", target_file, restore_err)
+                if restore_tmp.exists():
+                    try:
+                        restore_tmp.unlink()
+                    except OSError:
+                        pass
+
+            # Re-run reload_plugin on restored file
+            try:
+                reload_plugin(target_file)
+            except Exception as r_err:
+                logger.warning("Failed to reload restored plugin for %s: %s", target_file, r_err)
+
+            # Re-index capability to reflect restored version
+            try:
+                from axiom.memory.capability_indexer import index_tool_capabilities
+                store = MemoryStore(db_path=db_path)
+                index_tool_capabilities(store=store, tools_dir=target_dir)
+            except Exception:
+                pass
+
+            return ToolResult(
+                success=False,
+                error=f"Update failed during reload: {err}. Previous tool version was restored.",
+            )
 
         # 5. Supersede capability in MemoryStore
         try:
             from axiom.memory.capability_indexer import index_tool_capabilities
             store = MemoryStore(db_path=db_path)
-            index_tool_capabilities(store=store)
+            index_tool_capabilities(store=store, tools_dir=target_dir)
         except Exception as e:
             logger.warning("Capability indexing encountered an error for %s: %s", clean_name, e)
 
@@ -324,6 +368,12 @@ class ToolManager:
                     (time.time(), f"tool.{clean_name}"),
                 )
                 conn.commit()
+
+        try:
+            from axiom.memory.capability_indexer import reconcile_tool_capabilities
+            reconcile_tool_capabilities(store=store, tools_dir=target_dir)
+        except Exception:
+            pass
 
         return ToolResult(
             success=True,
