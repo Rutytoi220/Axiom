@@ -389,15 +389,46 @@ class InlineRepl:
                 return True
 
         elif cmd == "/tools":
-            schemas = get_tool_schemas(0)
-            console.print(f"\n[title]Registered Dynamic Tools ({len(schemas)}):[/title]")
-            for s in schemas:
-                fn = s.get("function", {})
-                name = fn.get("name", "")
-                desc = fn.get("description", "")
-                console.print(f"  [tool.badge]•[/tool.badge] [tool.name]{name}[/tool.name]: [dim]{desc}[/dim]")
-            console.print()
-            return True
+            subcmd = parts[1].lower().strip() if len(parts) > 1 else "list"
+            if subcmd in ("remove", "delete"):
+                if len(parts) < 3:
+                    console.print("[error]Usage: /tools remove <tool_name>[/error]\n")
+                    return True
+                target_name = parts[2].strip()
+                from axiom.tools.tool_manager import ToolManager
+                res = ToolManager.delete_tool(target_name)
+                if res.success:
+                    console.print(f"[success]✓ Successfully removed dynamic tool '{target_name}'.[/success]\n")
+                else:
+                    console.print(f"[error]Failed to remove tool '{target_name}': {res.error}[/error]\n")
+                return True
+            else:
+                from axiom.tools.tool_manager import ToolManager
+                dynamic_tools = ToolManager.list_tools()
+
+                table = Table(
+                    title="Active Dynamic Tools",
+                    box=rich.box.ROUNDED,
+                    show_header=True,
+                    header_style="bold #7aa2f7",
+                )
+                table.add_column("Tool Name", style="bold #e0af68")
+                table.add_column("Tier", justify="center", style="#7dcfff")
+                table.add_column("Ring", justify="center", style="#bb9af7")
+                table.add_column("Description", style="#c0caf5")
+
+                for t in dynamic_tools:
+                    table.add_row(
+                        t["name"],
+                        str(t["tier"]),
+                        str(t["ring"]),
+                        t["description"] or "-",
+                    )
+
+                console.print()
+                console.print(table)
+                console.print(f"[dim]Total: {len(dynamic_tools)} dynamic tools installed. Use /tools remove <name> to delete.[/dim]\n")
+                return True
 
         elif cmd == "/memory":
             subcmd = parts[1].lower().strip() if len(parts) > 1 else "list"

@@ -290,7 +290,7 @@ TIER_1_BUILTIN = {
 def _extract_capability(mod: Any, name: str):
     from axiom.tools.core import ToolCapability
 
-    if name == "create_tool":
+    if name in ("create_tool", "manage_tools"):
         return ToolCapability(
             tier=None,
             is_core=False,
@@ -659,4 +659,49 @@ def reload_plugin(path: Any) -> None:
         index_tool_capabilities()
     except Exception:
         pass
+
+
+def unregister_plugin(name: str) -> bool:
+    """Unregister a dynamic tool from memory and registries.
+
+    Removes the tool from _schemas, _executors, _rings, _tui_hints, and _capabilities,
+    cleans up sys.modules, and resynchronizes DynamicCapabilitySet.
+    Returns True if the tool was found and removed, False otherwise.
+    """
+    global _schemas, _executors, _rings, _tui_hints, _capabilities
+
+    found = False
+
+    orig_len = len(_schemas)
+    _schemas = [s for s in _schemas if (s.get("function", {}).get("name") or s.get("name")) != name]
+    if len(_schemas) != orig_len:
+        found = True
+
+    if name in _executors:
+        del _executors[name]
+        found = True
+
+    if name in _rings:
+        del _rings[name]
+        found = True
+
+    if name in _tui_hints:
+        del _tui_hints[name]
+        found = True
+
+    if name in _capabilities:
+        del _capabilities[name]
+        found = True
+
+    module_name = f"axiom.dynamic_tools.{name}"
+    if module_name in sys.modules:
+        del sys.modules[module_name]
+        found = True
+
+    CORE_TOOLS._sync()
+    TIER_1_TOOLS._sync()
+    TIER_2_TOOLS._sync()
+    TIER_3_TOOLS._sync()
+
+    return found
 

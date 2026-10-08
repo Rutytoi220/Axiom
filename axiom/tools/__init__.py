@@ -35,11 +35,23 @@ __all__ = [
     'SomKeyTool',
     'FileTeleportTool',
     'TaskSchedulerTool',
+    'ToolManager',
+    'PROTECTED_TOOLS',
+    'list_dynamic_tools',
+    'update_dynamic_tool',
+    'delete_dynamic_tool',
 ]
 
 from .core import BaseTool, ToolParameter, ToolResult
 from .validator import ToolValidator, ValidationResult
 from .tool_crafter import craft_tool
+from .tool_manager import (
+    ToolManager,
+    PROTECTED_TOOLS,
+    list_dynamic_tools,
+    update_dynamic_tool,
+    delete_dynamic_tool,
+)
 from .file_teleport import FileTeleportTool
 from .task_scheduler import TaskSchedulerTool
 
