@@ -290,7 +290,17 @@ TIER_1_BUILTIN = {
 def _extract_capability(mod: Any, name: str):
     from axiom.tools.core import ToolCapability
 
+    if name == "create_tool":
+        return ToolCapability(
+            tier=None,
+            is_core=False,
+            requires_bridge=False,
+            requires_window=False,
+            token_cost=150,
+        )
+
     if mod is not None:
+
         if hasattr(mod, "CAPABILITY") and isinstance(mod.CAPABILITY, ToolCapability):
             return mod.CAPABILITY
         if hasattr(mod, "TIER"):
@@ -593,11 +603,23 @@ async def execute_tool(name: str, **kwargs) -> str:
         return f"Tool execution failed: {e}"
 
 
-def reload_plugin(path: Path) -> None:
+def reload_plugin(path: Any) -> None:
+    if isinstance(path, str):
+        path_str = path
+        if not path_str.endswith(".py"):
+            path = TOOLS_DIR / f"{path_str}.py"
+        elif not os.path.isabs(path_str):
+            path = TOOLS_DIR / path_str
+        else:
+            path = Path(path_str)
+    elif not isinstance(path, Path):
+        return
+
     if not path.is_file() or not path.name.endswith(".py"):
         return
         
     module_name = f"axiom.dynamic_tools.{path.stem}"
+
     
     # Clean up sys.modules cache to force a fresh import
     if module_name in sys.modules:

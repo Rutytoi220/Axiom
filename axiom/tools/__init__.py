@@ -12,6 +12,7 @@ __all__ = [
     'BaseTool',
     'ToolValidator',
     'ValidationResult',
+    'craft_tool',
     'EchoTool',
     'ShellTool',
     'FileReadTool',
@@ -38,8 +39,10 @@ __all__ = [
 
 from .core import BaseTool, ToolParameter, ToolResult
 from .validator import ToolValidator, ValidationResult
+from .tool_crafter import craft_tool
 from .file_teleport import FileTeleportTool
 from .task_scheduler import TaskSchedulerTool
+
 
 from abc import ABC
 from typing import Any, Dict, List, Optional
