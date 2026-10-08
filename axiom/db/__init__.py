@@ -7,6 +7,8 @@ from axiom.db.memory import (
     get_session_messages,
     get_all_sessions,
     get_db_path,
+    MemoryStore,
+    VALID_CATEGORIES,
 )
 
 __all__ = [
@@ -17,4 +19,6 @@ __all__ = [
     "get_session_messages",
     "get_all_sessions",
     "get_db_path",
+    "MemoryStore",
+    "VALID_CATEGORIES",
 ]

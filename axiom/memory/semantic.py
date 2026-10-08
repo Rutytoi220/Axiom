@@ -6,6 +6,7 @@ to in-memory NumPy + SQLite.
 """
 import json
 import math
+import time
 import asyncio
 import logging
 from typing import Any, Dict, List, Optional, Protocol
@@ -418,10 +419,14 @@ def add_memory(fact: str, db_path: Optional[str] = None) -> int:
     emb = generate_embedding(fact)
     blob = serialize_embedding(emb)
 
+    now = time.time()
     with get_connection(path) as conn:
         cursor = conn.execute(
-            "INSERT INTO memories (content, embedding) VALUES (?, ?)",
-            (fact, blob),
+            """
+            INSERT INTO memories (category, content, confidence, is_active, created_at, updated_at, embedding)
+            VALUES ('preference', ?, 1.0, 1, ?, ?, ?)
+            """,
+            (fact, now, now, blob),
         )
         conn.commit()
         return cursor.lastrowid or -1
@@ -441,7 +446,7 @@ def search_memories(
     init_db(path)
 
     with get_connection(path) as conn:
-        cursor = conn.execute("SELECT id, content, embedding FROM memories")
+        cursor = conn.execute("SELECT id, content, embedding FROM memories WHERE is_active = 1")
         rows = cursor.fetchall()
 
     if not rows:
@@ -483,7 +488,7 @@ def get_all_memories(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
     init_db(path)
     with get_connection(path) as conn:
         cursor = conn.execute(
-            "SELECT id, content, created_at FROM memories ORDER BY id DESC"
+            "SELECT id, content, created_at FROM memories WHERE is_active = 1 ORDER BY id DESC"
         )
         return [dict(row) for row in cursor.fetchall()]
 
