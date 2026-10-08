@@ -114,6 +114,12 @@ function scheduleReconnect() {
 }
 
 function sendReply(data) {
+  if (typeof global !== "undefined" && typeof global.__axiomSendReplyHook === "function") {
+    try {
+      global.__axiomSendReplyHook(data);
+      return;
+    } catch (_) {}
+  }
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(data));
   } else {
@@ -196,9 +202,151 @@ function waitForSettled(options = {}) {
   });
 }
 
+function isElementVisible(el) {
+  if (!el) return false;
+  if (typeof el.getBoundingClientRect === "function" && typeof window !== "undefined" && typeof window.getComputedStyle === "function") {
+    try {
+      const style = window.getComputedStyle(el);
+      if (style) {
+        if (
+          style.display === "none" ||
+          style.visibility === "hidden" ||
+          parseFloat(style.opacity || "1") === 0
+        ) {
+          return false;
+        }
+      }
+      const rect = el.getBoundingClientRect();
+      if (rect && rect.width === 0 && rect.height === 0 && el.offsetParent === null) {
+        const root = typeof el.getRootNode === "function" ? el.getRootNode() : null;
+        if (!root || root === document) {
+          return false;
+        }
+      }
+    } catch (_) {}
+  }
+  return true;
+}
+
+function clearOldLabels(root, maxDepth = 10, currentDepth = 0, seenRoots = new Set()) {
+  if (!root || currentDepth > maxDepth || seenRoots.has(root)) return;
+  seenRoots.add(root);
+  try {
+    const old = Array.from(root.querySelectorAll("[data-axiom-id]"));
+    for (const el of old) el.removeAttribute("data-axiom-id");
+  } catch (_) {}
+  try {
+    const all = Array.from(root.querySelectorAll("*"));
+    for (const el of all) {
+      if (el.shadowRoot && el.shadowRoot.mode === "open") {
+        clearOldLabels(el.shadowRoot, maxDepth, currentDepth + 1, seenRoots);
+      } else if (el.tagName === "IFRAME" || el.tagName === "FRAME") {
+        try {
+          const doc = el.contentDocument || (el.contentWindow && el.contentWindow.document);
+          if (doc) clearOldLabels(doc, maxDepth, currentDepth + 1, seenRoots);
+        } catch (_) {}
+      }
+    }
+  } catch (_) {}
+}
+
+function collectInteractiveElements(root, maxDepth = 10, currentDepth = 0, seenRoots = new Set(), extraSelector = "") {
+  const interactive = [];
+  if (!root || currentDepth > maxDepth || seenRoots.has(root)) return interactive;
+  seenRoots.add(root);
+
+  const baseSelector = [
+    "a[href]",
+    "button",
+    "input",
+    "textarea",
+    "select",
+    '[role="button"]',
+    '[role="link"]',
+    '[role="checkbox"]',
+    '[role="tab"]',
+    '[role="menuitem"]',
+    "[onclick]",
+    '[tabindex]:not([tabindex="-1"])',
+  ].join(", ");
+
+  const selector = extraSelector ? `${baseSelector}, ${extraSelector}` : baseSelector;
+
+  try {
+    const nodes = Array.from(root.querySelectorAll(selector));
+    for (const el of nodes) {
+      if (isElementVisible(el)) {
+        interactive.push(el);
+      }
+    }
+  } catch (_) {}
+
+  try {
+    const allElements = Array.from(root.querySelectorAll("*"));
+    for (const el of allElements) {
+      if (el.shadowRoot && el.shadowRoot.mode === "open") {
+        const shadowChildren = collectInteractiveElements(el.shadowRoot, maxDepth, currentDepth + 1, seenRoots, extraSelector);
+        for (const child of shadowChildren) {
+          interactive.push(child);
+        }
+      } else if (el.tagName === "IFRAME" || el.tagName === "FRAME") {
+        try {
+          const frameDoc = el.contentDocument || (el.contentWindow && el.contentWindow.document);
+          if (frameDoc && (frameDoc.body || frameDoc.documentElement)) {
+            const frameChildren = collectInteractiveElements(frameDoc, maxDepth, currentDepth + 1, seenRoots, extraSelector);
+            for (const child of frameChildren) {
+              interactive.push(child);
+            }
+          }
+        } catch (e) {
+          // Cross-origin SecurityError - ignore safely
+        }
+      }
+    }
+  } catch (_) {}
+
+  return interactive;
+}
+
+function findDeepElement(root, selector, maxDepth = 10, currentDepth = 0, seenRoots = new Set()) {
+  if (!root || currentDepth > maxDepth || seenRoots.has(root)) return null;
+  seenRoots.add(root);
+
+  try {
+    const el = root.querySelector(selector);
+    if (el) return el;
+  } catch (_) {}
+
+  try {
+    const all = Array.from(root.querySelectorAll("*"));
+    for (const node of all) {
+      if (node.shadowRoot && node.shadowRoot.mode === "open") {
+        const found = findDeepElement(node.shadowRoot, selector, maxDepth, currentDepth + 1, seenRoots);
+        if (found) return found;
+      } else if (node.tagName === "IFRAME" || node.tagName === "FRAME") {
+        try {
+          const frameDoc = node.contentDocument || (node.contentWindow && node.contentWindow.document);
+          if (frameDoc) {
+            const found = findDeepElement(frameDoc, selector, maxDepth, currentDepth + 1, seenRoots);
+            if (found) return found;
+          }
+        } catch (_) {}
+      }
+    }
+  } catch (_) {}
+
+  return null;
+}
+
 function resolveElement(sel, elemId) {
   if (elemId == null) {
-    const el = document.querySelector(sel);
+    let el = null;
+    try {
+      el = document.querySelector(sel);
+    } catch (_) {}
+    if (!el) {
+      el = findDeepElement(document, sel);
+    }
     if (!el) {
       return {
         element: null,
@@ -214,7 +362,14 @@ function resolveElement(sel, elemId) {
   }
 
   // Fast-Path: Query [data-axiom-id="${elemId}"]
-  const fastNode = document.querySelector(`[data-axiom-id="${elemId}"]`);
+  const fastSelector = `[data-axiom-id="${elemId}"]`;
+  let fastNode = null;
+  try {
+    fastNode = document.querySelector(fastSelector);
+  } catch (_) {}
+  if (!fastNode) {
+    fastNode = findDeepElement(document, fastSelector);
+  }
   if (fastNode && fastNode.isConnected) {
     return { element: fastNode, errorResult: null };
   }
@@ -234,53 +389,30 @@ function resolveElement(sel, elemId) {
     };
   }
 
-  const interactiveSelector = [
-    "a[href]",
-    "button",
-    "input",
-    "textarea",
-    "select",
-    '[role="button"]',
-    '[role="link"]',
-    "[onclick]",
-    '[tabindex]:not([tabindex="-1"])',
-  ].join(", ");
-
   const matchCandidate = (c) => {
     if (!c || !c.isConnected) return false;
 
     // Visibility check
-    if (typeof c.getBoundingClientRect === "function" && typeof window.getComputedStyle === "function") {
-      try {
-        const rect = c.getBoundingClientRect();
-        const style = window.getComputedStyle(c);
-        if (
-          style.display === "none" ||
-          style.visibility === "hidden" ||
-          parseFloat(style.opacity || "1") === 0
-        ) {
-          return false;
-        }
-        if (rect.width === 0 && rect.height === 0 && c.offsetParent === null) {
-          return false;
-        }
-      } catch (_) {}
+    if (!isElementVisible(c)) {
+      return false;
     }
 
     // 1. Tag
-    if (fp.tag && c.tagName.toLowerCase() !== fp.tag.toLowerCase()) return false;
+    if (fp.tag && c.tagName && c.tagName.toLowerCase() !== fp.tag.toLowerCase()) return false;
     // 2. Role
-    const cRole = c.getAttribute("role") || "";
+    const cRole = (typeof c.getAttribute === "function" ? c.getAttribute("role") : c.role) || "";
     if (fp.role && cRole !== fp.role) return false;
     // 3. Type
-    const cType = c.getAttribute("type") || (c.type || "");
+    const cType = (typeof c.getAttribute === "function" ? c.getAttribute("type") : null) || c.type || "";
     if (fp.type && cType !== fp.type) return false;
     // 4. Name
-    const cName = c.getAttribute("name") || (c.name || "");
+    const cName = (typeof c.getAttribute === "function" ? c.getAttribute("name") : null) || c.name || "";
     if (fp.name && cName !== fp.name) return false;
 
     // 5. Matching textSnippet or ariaLabel
-    const cAria = (c.getAttribute("aria-label") || c.getAttribute("aria-labelledby") || "").trim().slice(0, 40);
+    const cAria = (
+      (typeof c.getAttribute === "function" ? (c.getAttribute("aria-label") || c.getAttribute("aria-labelledby")) : null) || ""
+    ).trim().slice(0, 40);
     const cText = (c.innerText || c.textContent || "").trim().slice(0, 40);
 
     if (fp.ariaLabel && fp.textSnippet) {
@@ -295,8 +427,8 @@ function resolveElement(sel, elemId) {
   };
 
   const findMatches = () => {
-    const sel = interactiveSelector + (fp.tag ? `, ${fp.tag}` : "");
-    const nodes = Array.from(document.querySelectorAll(sel));
+    const extra = (fp && fp.tag) ? fp.tag : "";
+    const nodes = collectInteractiveElements(document, 10, 0, new Set(), extra);
     return nodes.filter(matchCandidate);
   };
 
@@ -322,16 +454,16 @@ function resolveElement(sel, elemId) {
 
   // 0 matches found: Trigger exactly one internal bounded retry: take an inline snapshot refresh, re-attempt fingerprint match once.
   try {
-    const freshCandidates = Array.from(document.querySelectorAll(interactiveSelector));
+    const freshCandidates = collectInteractiveElements(document);
     let freshIdx = 1;
     for (const fel of freshCandidates) {
       if (freshIdx > 50) break;
       fel.setAttribute("data-axiom-id", String(freshIdx));
-      const fTag = fel.tagName.toLowerCase();
-      const fRole = fel.getAttribute("role") || "";
-      const fType = fel.getAttribute("type") || "";
-      const fName = fel.getAttribute("name") || "";
-      const fAria = fel.getAttribute("aria-label") || fel.getAttribute("aria-labelledby") || "";
+      const fTag = (fel.tagName || "").toLowerCase();
+      const fRole = (typeof fel.getAttribute === "function" ? fel.getAttribute("role") : fel.role) || "";
+      const fType = (typeof fel.getAttribute === "function" ? fel.getAttribute("type") : null) || fel.type || "";
+      const fName = (typeof fel.getAttribute === "function" ? fel.getAttribute("name") : null) || fel.name || "";
+      const fAria = (typeof fel.getAttribute === "function" ? (fel.getAttribute("aria-label") || fel.getAttribute("aria-labelledby")) : null) || "";
       const fText = (fel.innerText || fel.textContent || "").trim().slice(0, 40);
       if (typeof window !== "undefined") {
         window.__axiomFingerprints = window.__axiomFingerprints || {};
@@ -881,53 +1013,136 @@ async function handleCommand(msg) {
         const results = await chrome.scripting.executeScript({
           target: { tabId: tab.id },
           func: () => {
-            // Clean up any old labels first
-            const oldLabeled = document.querySelectorAll("[data-axiom-id]");
-            for (const el of oldLabeled) {
-              el.removeAttribute("data-axiom-id");
+            function isElementVisible(el) {
+              if (!el) return false;
+              if (typeof el.getBoundingClientRect === "function" && typeof window !== "undefined" && typeof window.getComputedStyle === "function") {
+                try {
+                  const style = window.getComputedStyle(el);
+                  if (style) {
+                    if (
+                      style.display === "none" ||
+                      style.visibility === "hidden" ||
+                      parseFloat(style.opacity || "1") === 0
+                    ) {
+                      return false;
+                    }
+                  }
+                  const rect = el.getBoundingClientRect();
+                  if (rect && rect.width === 0 && rect.height === 0 && el.offsetParent === null) {
+                    const root = typeof el.getRootNode === "function" ? el.getRootNode() : null;
+                    if (!root || root === document) {
+                      return false;
+                    }
+                  }
+                } catch (_) {}
+              }
+              return true;
             }
+
+            function clearOldLabels(root, maxDepth = 10, currentDepth = 0, seenRoots = new Set()) {
+              if (!root || currentDepth > maxDepth || seenRoots.has(root)) return;
+              seenRoots.add(root);
+              try {
+                const old = Array.from(root.querySelectorAll("[data-axiom-id]"));
+                for (const el of old) el.removeAttribute("data-axiom-id");
+              } catch (_) {}
+              try {
+                const all = Array.from(root.querySelectorAll("*"));
+                for (const el of all) {
+                  if (el.shadowRoot && el.shadowRoot.mode === "open") {
+                    clearOldLabels(el.shadowRoot, maxDepth, currentDepth + 1, seenRoots);
+                  } else if (el.tagName === "IFRAME" || el.tagName === "FRAME") {
+                    try {
+                      const doc = el.contentDocument || (el.contentWindow && el.contentWindow.document);
+                      if (doc) clearOldLabels(doc, maxDepth, currentDepth + 1, seenRoots);
+                    } catch (_) {}
+                  }
+                }
+              } catch (_) {}
+            }
+
+            function collectInteractiveElements(root, maxDepth = 10, currentDepth = 0, seenRoots = new Set(), extraSelector = "") {
+              const interactive = [];
+              if (!root || currentDepth > maxDepth || seenRoots.has(root)) return interactive;
+              seenRoots.add(root);
+
+              const baseSelector = [
+                "a[href]",
+                "button",
+                "input",
+                "textarea",
+                "select",
+                '[role="button"]',
+                '[role="link"]',
+                '[role="checkbox"]',
+                '[role="tab"]',
+                '[role="menuitem"]',
+                "[onclick]",
+                '[tabindex]:not([tabindex="-1"])',
+              ].join(", ");
+
+              const selector = extraSelector ? `${baseSelector}, ${extraSelector}` : baseSelector;
+
+              try {
+                const nodes = Array.from(root.querySelectorAll(selector));
+                for (const el of nodes) {
+                  if (isElementVisible(el)) {
+                    interactive.push(el);
+                  }
+                }
+              } catch (_) {}
+
+              try {
+                const allElements = Array.from(root.querySelectorAll("*"));
+                for (const el of allElements) {
+                  if (el.shadowRoot && el.shadowRoot.mode === "open") {
+                    const shadowChildren = collectInteractiveElements(el.shadowRoot, maxDepth, currentDepth + 1, seenRoots, extraSelector);
+                    for (const child of shadowChildren) {
+                      interactive.push(child);
+                    }
+                  } else if (el.tagName === "IFRAME" || el.tagName === "FRAME") {
+                    try {
+                      const frameDoc = el.contentDocument || (el.contentWindow && el.contentWindow.document);
+                      if (frameDoc && (frameDoc.body || frameDoc.documentElement)) {
+                        const frameChildren = collectInteractiveElements(frameDoc, maxDepth, currentDepth + 1, seenRoots, extraSelector);
+                        for (const child of frameChildren) {
+                          interactive.push(child);
+                        }
+                      }
+                    } catch (e) {
+                      // Cross-origin SecurityError - ignore safely
+                    }
+                  }
+                }
+              } catch (_) {}
+
+              return interactive;
+            }
+
+            // Clean up any old labels first
+            clearOldLabels(document);
 
             window.__axiomFingerprints = {};
 
-            const selector = [
-              "a[href]",
-              "button",
-              "input",
-              "textarea",
-              "select",
-              '[role="button"]',
-              '[role="link"]',
-              "[onclick]",
-              '[tabindex]:not([tabindex="-1"])',
-            ].join(", ");
-
-            const candidates = Array.from(document.querySelectorAll(selector));
+            const candidates = collectInteractiveElements(document);
             const items = [];
             let index = 1;
 
             for (const el of candidates) {
               if (index > 50) break; // Capped at 50 most relevant elements
 
-              const rect = el.getBoundingClientRect();
-              const style = window.getComputedStyle(el);
-              if (
-                rect.width === 0 ||
-                rect.height === 0 ||
-                style.display === "none" ||
-                style.visibility === "hidden" ||
-                parseFloat(style.opacity || "1") === 0
-              ) {
+              if (!isElementVisible(el)) {
                 continue;
               }
 
               // Tag element with transient attribute
               el.setAttribute("data-axiom-id", String(index));
 
-              const tag = el.tagName.toLowerCase();
-              const role = el.getAttribute("role") || "";
-              const type = el.getAttribute("type") || (el.type || "");
-              const name = el.getAttribute("name") || (el.name || "");
-              const ariaLabel = el.getAttribute("aria-label") || el.getAttribute("aria-labelledby") || "";
+              const tag = (el.tagName || "").toLowerCase();
+              const role = (typeof el.getAttribute === "function" ? el.getAttribute("role") : el.role) || "";
+              const type = (typeof el.getAttribute === "function" ? el.getAttribute("type") : null) || el.type || "";
+              const name = (typeof el.getAttribute === "function" ? el.getAttribute("name") : null) || el.name || "";
+              const ariaLabel = (typeof el.getAttribute === "function" ? (el.getAttribute("aria-label") || el.getAttribute("aria-labelledby")) : null) || "";
               const textSnippet = (el.innerText || el.textContent || "").trim().slice(0, 40);
 
               window.__axiomFingerprints[index] = {
@@ -945,10 +1160,10 @@ async function handleCommand(msg) {
               };
 
               if (tag === "input" || tag === "textarea") {
-                if (el.type) item.type = el.type;
+                if (type) item.type = type;
                 if (el.placeholder) item.placeholder = el.placeholder.slice(0, 100);
                 if (el.value) item.value = el.value.slice(0, 100);
-                if (el.name) item.name = el.name;
+                if (name) item.name = name;
               }
 
               if (ariaLabel) item.aria_label = ariaLabel.trim().slice(0, 100);
@@ -959,7 +1174,7 @@ async function handleCommand(msg) {
               }
 
               if (tag === "a") {
-                const href = el.getAttribute("href") || "";
+                const href = (typeof el.getAttribute === "function" ? el.getAttribute("href") : el.href) || "";
                 if (href) item.href = href.slice(0, 120);
               }
               if (role) item.role = role;
@@ -981,6 +1196,21 @@ async function handleCommand(msg) {
               if (it.href) parts.push(`(href: ${it.href})`);
               return parts.join(" ");
             });
+
+            // Note any restricted cross-origin frames
+            try {
+              const allFrames = Array.from(document.querySelectorAll("iframe, frame"));
+              for (const f of allFrames) {
+                try {
+                  const doc = f.contentDocument || (f.contentWindow && f.contentWindow.document);
+                  if (!doc) {
+                    summaryLines.push("[iframe: cross-origin restricted]");
+                  }
+                } catch (_) {
+                  summaryLines.push("[iframe: cross-origin restricted]");
+                }
+              }
+            } catch (_) {}
 
             return {
               title: document.title,
@@ -1061,9 +1291,129 @@ async function handleCommand(msg) {
               });
             }
 
+            function isElementVisible(el) {
+              if (!el) return false;
+              if (typeof el.getBoundingClientRect === "function" && typeof window !== "undefined" && typeof window.getComputedStyle === "function") {
+                try {
+                  const style = window.getComputedStyle(el);
+                  if (style) {
+                    if (
+                      style.display === "none" ||
+                      style.visibility === "hidden" ||
+                      parseFloat(style.opacity || "1") === 0
+                    ) {
+                      return false;
+                    }
+                  }
+                  const rect = el.getBoundingClientRect();
+                  if (rect && rect.width === 0 && rect.height === 0 && el.offsetParent === null) {
+                    const root = typeof el.getRootNode === "function" ? el.getRootNode() : null;
+                    if (!root || root === document) {
+                      return false;
+                    }
+                  }
+                } catch (_) {}
+              }
+              return true;
+            }
+
+            function collectInteractiveElements(root, maxDepth = 10, currentDepth = 0, seenRoots = new Set(), extraSelector = "") {
+              const interactive = [];
+              if (!root || currentDepth > maxDepth || seenRoots.has(root)) return interactive;
+              seenRoots.add(root);
+
+              const baseSelector = [
+                "a[href]",
+                "button",
+                "input",
+                "textarea",
+                "select",
+                '[role="button"]',
+                '[role="link"]',
+                '[role="checkbox"]',
+                '[role="tab"]',
+                '[role="menuitem"]',
+                "[onclick]",
+                '[tabindex]:not([tabindex="-1"])',
+              ].join(", ");
+
+              const selector = extraSelector ? `${baseSelector}, ${extraSelector}` : baseSelector;
+
+              try {
+                const nodes = Array.from(root.querySelectorAll(selector));
+                for (const el of nodes) {
+                  if (isElementVisible(el)) {
+                    interactive.push(el);
+                  }
+                }
+              } catch (_) {}
+
+              try {
+                const allElements = Array.from(root.querySelectorAll("*"));
+                for (const el of allElements) {
+                  if (el.shadowRoot && el.shadowRoot.mode === "open") {
+                    const shadowChildren = collectInteractiveElements(el.shadowRoot, maxDepth, currentDepth + 1, seenRoots, extraSelector);
+                    for (const child of shadowChildren) {
+                      interactive.push(child);
+                    }
+                  } else if (el.tagName === "IFRAME" || el.tagName === "FRAME") {
+                    try {
+                      const frameDoc = el.contentDocument || (el.contentWindow && el.contentWindow.document);
+                      if (frameDoc && (frameDoc.body || frameDoc.documentElement)) {
+                        const frameChildren = collectInteractiveElements(frameDoc, maxDepth, currentDepth + 1, seenRoots, extraSelector);
+                        for (const child of frameChildren) {
+                          interactive.push(child);
+                        }
+                      }
+                    } catch (e) {
+                      // Cross-origin SecurityError - ignore safely
+                    }
+                  }
+                }
+              } catch (_) {}
+
+              return interactive;
+            }
+
+            function findDeepElement(root, selector, maxDepth = 10, currentDepth = 0, seenRoots = new Set()) {
+              if (!root || currentDepth > maxDepth || seenRoots.has(root)) return null;
+              seenRoots.add(root);
+
+              try {
+                const el = root.querySelector(selector);
+                if (el) return el;
+              } catch (_) {}
+
+              try {
+                const all = Array.from(root.querySelectorAll("*"));
+                for (const node of all) {
+                  if (node.shadowRoot && node.shadowRoot.mode === "open") {
+                    const found = findDeepElement(node.shadowRoot, selector, maxDepth, currentDepth + 1, seenRoots);
+                    if (found) return found;
+                  } else if (node.tagName === "IFRAME" || node.tagName === "FRAME") {
+                    try {
+                      const frameDoc = node.contentDocument || (node.contentWindow && node.contentWindow.document);
+                      if (frameDoc) {
+                        const found = findDeepElement(frameDoc, selector, maxDepth, currentDepth + 1, seenRoots);
+                        if (found) return found;
+                      }
+                    } catch (_) {}
+                  }
+                }
+              } catch (_) {}
+
+              return null;
+            }
+
             function resolveElement(targetSel, targetElemId) {
               if (targetElemId == null) {
-                const el = document.querySelector(targetSel);
+                let el = null;
+                try {
+                  el = document.querySelector(targetSel);
+                } catch (_) {}
+                if (!el) {
+                  el = findDeepElement(document, targetSel);
+                }
                 if (!el) {
                   return {
                     element: null,
@@ -1079,7 +1429,14 @@ async function handleCommand(msg) {
               }
 
               // Fast-Path: Query [data-axiom-id="${targetElemId}"]
-              const fastNode = document.querySelector(`[data-axiom-id="${targetElemId}"]`);
+              const fastSelector = `[data-axiom-id="${targetElemId}"]`;
+              let fastNode = null;
+              try {
+                fastNode = document.querySelector(fastSelector);
+              } catch (_) {}
+              if (!fastNode) {
+                fastNode = findDeepElement(document, fastSelector);
+              }
               if (fastNode && fastNode.isConnected) {
                 return { element: fastNode, errorResult: null };
               }
@@ -1099,46 +1456,23 @@ async function handleCommand(msg) {
                 };
               }
 
-              const interactiveSelector = [
-                "a[href]",
-                "button",
-                "input",
-                "textarea",
-                "select",
-                '[role="button"]',
-                '[role="link"]',
-                "[onclick]",
-                '[tabindex]:not([tabindex="-1"])',
-              ].join(", ");
-
               const matchCandidate = (c) => {
                 if (!c || !c.isConnected) return false;
-                if (typeof c.getBoundingClientRect === "function" && typeof window.getComputedStyle === "function") {
-                  try {
-                    const rect = c.getBoundingClientRect();
-                    const style = window.getComputedStyle(c);
-                    if (
-                      style.display === "none" ||
-                      style.visibility === "hidden" ||
-                      parseFloat(style.opacity || "1") === 0
-                    ) {
-                      return false;
-                    }
-                    if (rect.width === 0 && rect.height === 0 && c.offsetParent === null) {
-                      return false;
-                    }
-                  } catch (_) {}
+                if (!isElementVisible(c)) {
+                  return false;
                 }
 
-                if (fp.tag && c.tagName.toLowerCase() !== fp.tag.toLowerCase()) return false;
-                const cRole = c.getAttribute("role") || "";
+                if (fp.tag && c.tagName && c.tagName.toLowerCase() !== fp.tag.toLowerCase()) return false;
+                const cRole = (typeof c.getAttribute === "function" ? c.getAttribute("role") : c.role) || "";
                 if (fp.role && cRole !== fp.role) return false;
-                const cType = c.getAttribute("type") || (c.type || "");
+                const cType = (typeof c.getAttribute === "function" ? c.getAttribute("type") : null) || c.type || "";
                 if (fp.type && cType !== fp.type) return false;
-                const cName = c.getAttribute("name") || (c.name || "");
+                const cName = (typeof c.getAttribute === "function" ? c.getAttribute("name") : null) || c.name || "";
                 if (fp.name && cName !== fp.name) return false;
 
-                const cAria = (c.getAttribute("aria-label") || c.getAttribute("aria-labelledby") || "").trim().slice(0, 40);
+                const cAria = (
+                  (typeof c.getAttribute === "function" ? (c.getAttribute("aria-label") || c.getAttribute("aria-labelledby")) : null) || ""
+                ).trim().slice(0, 40);
                 const cText = (c.innerText || c.textContent || "").trim().slice(0, 40);
 
                 if (fp.ariaLabel && fp.textSnippet) {
@@ -1153,8 +1487,8 @@ async function handleCommand(msg) {
               };
 
               const findMatches = () => {
-                const querySel = interactiveSelector + (fp.tag ? `, ${fp.tag}` : "");
-                const nodes = Array.from(document.querySelectorAll(querySel));
+                const extra = (fp && fp.tag) ? fp.tag : "";
+                const nodes = collectInteractiveElements(document, 10, 0, new Set(), extra);
                 return nodes.filter(matchCandidate);
               };
 
@@ -1178,16 +1512,16 @@ async function handleCommand(msg) {
 
               // 0 matches found: Trigger exactly one internal bounded retry
               try {
-                const freshCandidates = Array.from(document.querySelectorAll(interactiveSelector));
+                const freshCandidates = collectInteractiveElements(document);
                 let freshIdx = 1;
                 for (const fel of freshCandidates) {
                   if (freshIdx > 50) break;
                   fel.setAttribute("data-axiom-id", String(freshIdx));
-                  const fTag = fel.tagName.toLowerCase();
-                  const fRole = fel.getAttribute("role") || "";
-                  const fType = fel.getAttribute("type") || "";
-                  const fName = fel.getAttribute("name") || "";
-                  const fAria = fel.getAttribute("aria-label") || fel.getAttribute("aria-labelledby") || "";
+                  const fTag = (fel.tagName || "").toLowerCase();
+                  const fRole = (typeof fel.getAttribute === "function" ? fel.getAttribute("role") : fel.role) || "";
+                  const fType = (typeof fel.getAttribute === "function" ? fel.getAttribute("type") : null) || fel.type || "";
+                  const fName = (typeof fel.getAttribute === "function" ? fel.getAttribute("name") : null) || fel.name || "";
+                  const fAria = (typeof fel.getAttribute === "function" ? (fel.getAttribute("aria-label") || fel.getAttribute("aria-labelledby")) : null) || "";
                   const fText = (fel.innerText || fel.textContent || "").trim().slice(0, 40);
                   if (typeof window !== "undefined") {
                     window.__axiomFingerprints = window.__axiomFingerprints || {};
@@ -1346,9 +1680,129 @@ async function handleCommand(msg) {
               });
             }
 
+            function isElementVisible(el) {
+              if (!el) return false;
+              if (typeof el.getBoundingClientRect === "function" && typeof window !== "undefined" && typeof window.getComputedStyle === "function") {
+                try {
+                  const style = window.getComputedStyle(el);
+                  if (style) {
+                    if (
+                      style.display === "none" ||
+                      style.visibility === "hidden" ||
+                      parseFloat(style.opacity || "1") === 0
+                    ) {
+                      return false;
+                    }
+                  }
+                  const rect = el.getBoundingClientRect();
+                  if (rect && rect.width === 0 && rect.height === 0 && el.offsetParent === null) {
+                    const root = typeof el.getRootNode === "function" ? el.getRootNode() : null;
+                    if (!root || root === document) {
+                      return false;
+                    }
+                  }
+                } catch (_) {}
+              }
+              return true;
+            }
+
+            function collectInteractiveElements(root, maxDepth = 10, currentDepth = 0, seenRoots = new Set(), extraSelector = "") {
+              const interactive = [];
+              if (!root || currentDepth > maxDepth || seenRoots.has(root)) return interactive;
+              seenRoots.add(root);
+
+              const baseSelector = [
+                "a[href]",
+                "button",
+                "input",
+                "textarea",
+                "select",
+                '[role="button"]',
+                '[role="link"]',
+                '[role="checkbox"]',
+                '[role="tab"]',
+                '[role="menuitem"]',
+                "[onclick]",
+                '[tabindex]:not([tabindex="-1"])',
+              ].join(", ");
+
+              const selector = extraSelector ? `${baseSelector}, ${extraSelector}` : baseSelector;
+
+              try {
+                const nodes = Array.from(root.querySelectorAll(selector));
+                for (const el of nodes) {
+                  if (isElementVisible(el)) {
+                    interactive.push(el);
+                  }
+                }
+              } catch (_) {}
+
+              try {
+                const allElements = Array.from(root.querySelectorAll("*"));
+                for (const el of allElements) {
+                  if (el.shadowRoot && el.shadowRoot.mode === "open") {
+                    const shadowChildren = collectInteractiveElements(el.shadowRoot, maxDepth, currentDepth + 1, seenRoots, extraSelector);
+                    for (const child of shadowChildren) {
+                      interactive.push(child);
+                    }
+                  } else if (el.tagName === "IFRAME" || el.tagName === "FRAME") {
+                    try {
+                      const frameDoc = el.contentDocument || (el.contentWindow && el.contentWindow.document);
+                      if (frameDoc && (frameDoc.body || frameDoc.documentElement)) {
+                        const frameChildren = collectInteractiveElements(frameDoc, maxDepth, currentDepth + 1, seenRoots, extraSelector);
+                        for (const child of frameChildren) {
+                          interactive.push(child);
+                        }
+                      }
+                    } catch (e) {
+                      // Cross-origin SecurityError - ignore safely
+                    }
+                  }
+                }
+              } catch (_) {}
+
+              return interactive;
+            }
+
+            function findDeepElement(root, selector, maxDepth = 10, currentDepth = 0, seenRoots = new Set()) {
+              if (!root || currentDepth > maxDepth || seenRoots.has(root)) return null;
+              seenRoots.add(root);
+
+              try {
+                const el = root.querySelector(selector);
+                if (el) return el;
+              } catch (_) {}
+
+              try {
+                const all = Array.from(root.querySelectorAll("*"));
+                for (const node of all) {
+                  if (node.shadowRoot && node.shadowRoot.mode === "open") {
+                    const found = findDeepElement(node.shadowRoot, selector, maxDepth, currentDepth + 1, seenRoots);
+                    if (found) return found;
+                  } else if (node.tagName === "IFRAME" || node.tagName === "FRAME") {
+                    try {
+                      const frameDoc = node.contentDocument || (node.contentWindow && node.contentWindow.document);
+                      if (frameDoc) {
+                        const found = findDeepElement(frameDoc, selector, maxDepth, currentDepth + 1, seenRoots);
+                        if (found) return found;
+                      }
+                    } catch (_) {}
+                  }
+                }
+              } catch (_) {}
+
+              return null;
+            }
+
             function resolveElement(targetSel, targetElemId) {
               if (targetElemId == null) {
-                const el = document.querySelector(targetSel);
+                let el = null;
+                try {
+                  el = document.querySelector(targetSel);
+                } catch (_) {}
+                if (!el) {
+                  el = findDeepElement(document, targetSel);
+                }
                 if (!el) {
                   return {
                     element: null,
@@ -1364,7 +1818,14 @@ async function handleCommand(msg) {
               }
 
               // Fast-Path: Query [data-axiom-id="${targetElemId}"]
-              const fastNode = document.querySelector(`[data-axiom-id="${targetElemId}"]`);
+              const fastSelector = `[data-axiom-id="${targetElemId}"]`;
+              let fastNode = null;
+              try {
+                fastNode = document.querySelector(fastSelector);
+              } catch (_) {}
+              if (!fastNode) {
+                fastNode = findDeepElement(document, fastSelector);
+              }
               if (fastNode && fastNode.isConnected) {
                 return { element: fastNode, errorResult: null };
               }
@@ -1384,46 +1845,23 @@ async function handleCommand(msg) {
                 };
               }
 
-              const interactiveSelector = [
-                "a[href]",
-                "button",
-                "input",
-                "textarea",
-                "select",
-                '[role="button"]',
-                '[role="link"]',
-                "[onclick]",
-                '[tabindex]:not([tabindex="-1"])',
-              ].join(", ");
-
               const matchCandidate = (c) => {
                 if (!c || !c.isConnected) return false;
-                if (typeof c.getBoundingClientRect === "function" && typeof window.getComputedStyle === "function") {
-                  try {
-                    const rect = c.getBoundingClientRect();
-                    const style = window.getComputedStyle(c);
-                    if (
-                      style.display === "none" ||
-                      style.visibility === "hidden" ||
-                      parseFloat(style.opacity || "1") === 0
-                    ) {
-                      return false;
-                    }
-                    if (rect.width === 0 && rect.height === 0 && c.offsetParent === null) {
-                      return false;
-                    }
-                  } catch (_) {}
+                if (!isElementVisible(c)) {
+                  return false;
                 }
 
-                if (fp.tag && c.tagName.toLowerCase() !== fp.tag.toLowerCase()) return false;
-                const cRole = c.getAttribute("role") || "";
+                if (fp.tag && c.tagName && c.tagName.toLowerCase() !== fp.tag.toLowerCase()) return false;
+                const cRole = (typeof c.getAttribute === "function" ? c.getAttribute("role") : c.role) || "";
                 if (fp.role && cRole !== fp.role) return false;
-                const cType = c.getAttribute("type") || (c.type || "");
+                const cType = (typeof c.getAttribute === "function" ? c.getAttribute("type") : null) || c.type || "";
                 if (fp.type && cType !== fp.type) return false;
-                const cName = c.getAttribute("name") || (c.name || "");
+                const cName = (typeof c.getAttribute === "function" ? c.getAttribute("name") : null) || c.name || "";
                 if (fp.name && cName !== fp.name) return false;
 
-                const cAria = (c.getAttribute("aria-label") || c.getAttribute("aria-labelledby") || "").trim().slice(0, 40);
+                const cAria = (
+                  (typeof c.getAttribute === "function" ? (c.getAttribute("aria-label") || c.getAttribute("aria-labelledby")) : null) || ""
+                ).trim().slice(0, 40);
                 const cText = (c.innerText || c.textContent || "").trim().slice(0, 40);
 
                 if (fp.ariaLabel && fp.textSnippet) {
@@ -1438,8 +1876,8 @@ async function handleCommand(msg) {
               };
 
               const findMatches = () => {
-                const querySel = interactiveSelector + (fp.tag ? `, ${fp.tag}` : "");
-                const nodes = Array.from(document.querySelectorAll(querySel));
+                const extra = (fp && fp.tag) ? fp.tag : "";
+                const nodes = collectInteractiveElements(document, 10, 0, new Set(), extra);
                 return nodes.filter(matchCandidate);
               };
 
@@ -1463,16 +1901,16 @@ async function handleCommand(msg) {
 
               // 0 matches found: Trigger exactly one internal bounded retry
               try {
-                const freshCandidates = Array.from(document.querySelectorAll(interactiveSelector));
+                const freshCandidates = collectInteractiveElements(document);
                 let freshIdx = 1;
                 for (const fel of freshCandidates) {
                   if (freshIdx > 50) break;
                   fel.setAttribute("data-axiom-id", String(freshIdx));
-                  const fTag = fel.tagName.toLowerCase();
-                  const fRole = fel.getAttribute("role") || "";
-                  const fType = fel.getAttribute("type") || "";
-                  const fName = fel.getAttribute("name") || "";
-                  const fAria = fel.getAttribute("aria-label") || fel.getAttribute("aria-labelledby") || "";
+                  const fTag = (fel.tagName || "").toLowerCase();
+                  const fRole = (typeof fel.getAttribute === "function" ? fel.getAttribute("role") : fel.role) || "";
+                  const fType = (typeof fel.getAttribute === "function" ? fel.getAttribute("type") : null) || fel.type || "";
+                  const fName = (typeof fel.getAttribute === "function" ? fel.getAttribute("name") : null) || fel.name || "";
+                  const fAria = (typeof fel.getAttribute === "function" ? (fel.getAttribute("aria-label") || fel.getAttribute("aria-labelledby")) : null) || "";
                   const fText = (fel.innerText || fel.textContent || "").trim().slice(0, 40);
                   if (typeof window !== "undefined") {
                     window.__axiomFingerprints = window.__axiomFingerprints || {};
@@ -1665,46 +2103,129 @@ async function handleCommand(msg) {
             };
 
             if (doSnapshot) {
-              const oldLabeled = document.querySelectorAll("[data-axiom-id]");
-              for (const el of oldLabeled) {
-                el.removeAttribute("data-axiom-id");
+              function isElementVisible(el) {
+                if (!el) return false;
+                if (typeof el.getBoundingClientRect === "function" && typeof window !== "undefined" && typeof window.getComputedStyle === "function") {
+                  try {
+                    const style = window.getComputedStyle(el);
+                    if (style) {
+                      if (
+                        style.display === "none" ||
+                        style.visibility === "hidden" ||
+                        parseFloat(style.opacity || "1") === 0
+                      ) {
+                        return false;
+                      }
+                    }
+                    const rect = el.getBoundingClientRect();
+                    if (rect && rect.width === 0 && rect.height === 0 && el.offsetParent === null) {
+                      const root = typeof el.getRootNode === "function" ? el.getRootNode() : null;
+                      if (!root || root === document) {
+                        return false;
+                      }
+                    }
+                  } catch (_) {}
+                }
+                return true;
               }
-              window.__axiomFingerprints = {};
-              const selector = [
-                "a[href]",
-                "button",
-                "input",
-                "textarea",
-                "select",
-                '[role="button"]',
-                '[role="link"]',
-                "[onclick]",
-                '[tabindex]:not([tabindex="-1"])',
-              ].join(", ");
 
-              const candidates = Array.from(document.querySelectorAll(selector));
+              function clearOldLabels(root, maxDepth = 10, currentDepth = 0, seenRoots = new Set()) {
+                if (!root || currentDepth > maxDepth || seenRoots.has(root)) return;
+                seenRoots.add(root);
+                try {
+                  const old = Array.from(root.querySelectorAll("[data-axiom-id]"));
+                  for (const el of old) el.removeAttribute("data-axiom-id");
+                } catch (_) {}
+                try {
+                  const all = Array.from(root.querySelectorAll("*"));
+                  for (const el of all) {
+                    if (el.shadowRoot && el.shadowRoot.mode === "open") {
+                      clearOldLabels(el.shadowRoot, maxDepth, currentDepth + 1, seenRoots);
+                    } else if (el.tagName === "IFRAME" || el.tagName === "FRAME") {
+                      try {
+                        const doc = el.contentDocument || (el.contentWindow && el.contentWindow.document);
+                        if (doc) clearOldLabels(doc, maxDepth, currentDepth + 1, seenRoots);
+                      } catch (_) {}
+                    }
+                  }
+                } catch (_) {}
+              }
+
+              function collectInteractiveElements(root, maxDepth = 10, currentDepth = 0, seenRoots = new Set(), extraSelector = "") {
+                const interactive = [];
+                if (!root || currentDepth > maxDepth || seenRoots.has(root)) return interactive;
+                seenRoots.add(root);
+
+                const baseSelector = [
+                  "a[href]",
+                  "button",
+                  "input",
+                  "textarea",
+                  "select",
+                  '[role="button"]',
+                  '[role="link"]',
+                  '[role="checkbox"]',
+                  '[role="tab"]',
+                  '[role="menuitem"]',
+                  "[onclick]",
+                  '[tabindex]:not([tabindex="-1"])',
+                ].join(", ");
+
+                const selector = extraSelector ? `${baseSelector}, ${extraSelector}` : baseSelector;
+
+                try {
+                  const nodes = Array.from(root.querySelectorAll(selector));
+                  for (const el of nodes) {
+                    if (isElementVisible(el)) {
+                      interactive.push(el);
+                    }
+                  }
+                } catch (_) {}
+
+                try {
+                  const allElements = Array.from(root.querySelectorAll("*"));
+                  for (const el of allElements) {
+                    if (el.shadowRoot && el.shadowRoot.mode === "open") {
+                      const shadowChildren = collectInteractiveElements(el.shadowRoot, maxDepth, currentDepth + 1, seenRoots, extraSelector);
+                      for (const child of shadowChildren) {
+                        interactive.push(child);
+                      }
+                    } else if (el.tagName === "IFRAME" || el.tagName === "FRAME") {
+                      try {
+                        const frameDoc = el.contentDocument || (el.contentWindow && el.contentWindow.document);
+                        if (frameDoc && (frameDoc.body || frameDoc.documentElement)) {
+                          const frameChildren = collectInteractiveElements(frameDoc, maxDepth, currentDepth + 1, seenRoots, extraSelector);
+                          for (const child of frameChildren) {
+                            interactive.push(child);
+                          }
+                        }
+                      } catch (e) {
+                        // Cross-origin SecurityError - ignore safely
+                      }
+                    }
+                  }
+                } catch (_) {}
+
+                return interactive;
+              }
+
+              clearOldLabels(document);
+              window.__axiomFingerprints = {};
+
+              const candidates = collectInteractiveElements(document);
               const items = [];
               let index = 1;
 
               for (const el of candidates) {
                 if (index > 50) break;
-                const rect = el.getBoundingClientRect();
-                const style = window.getComputedStyle(el);
-                if (
-                  rect.width === 0 ||
-                  rect.height === 0 ||
-                  style.display === "none" ||
-                  style.visibility === "hidden" ||
-                  parseFloat(style.opacity || "1") === 0
-                ) {
-                  continue;
-                }
+                if (!isElementVisible(el)) continue;
+
                 el.setAttribute("data-axiom-id", String(index));
-                const tag = el.tagName.toLowerCase();
-                const role = el.getAttribute("role") || "";
-                const type = el.getAttribute("type") || (el.type || "");
-                const name = el.getAttribute("name") || (el.name || "");
-                const ariaLabel = el.getAttribute("aria-label") || el.getAttribute("aria-labelledby") || "";
+                const tag = (el.tagName || "").toLowerCase();
+                const role = (typeof el.getAttribute === "function" ? el.getAttribute("role") : el.role) || "";
+                const type = (typeof el.getAttribute === "function" ? el.getAttribute("type") : null) || el.type || "";
+                const name = (typeof el.getAttribute === "function" ? el.getAttribute("name") : null) || el.name || "";
+                const ariaLabel = (typeof el.getAttribute === "function" ? (el.getAttribute("aria-label") || el.getAttribute("aria-labelledby")) : null) || "";
                 const textSnippet = (el.innerText || el.textContent || "").trim().slice(0, 40);
 
                 window.__axiomFingerprints[index] = {
@@ -1718,16 +2239,16 @@ async function handleCommand(msg) {
 
                 const item = { id: index, tag };
                 if (tag === "input" || tag === "textarea") {
-                  if (el.type) item.type = el.type;
+                  if (type) item.type = type;
                   if (el.placeholder) item.placeholder = el.placeholder.slice(0, 100);
                   if (el.value) item.value = el.value.slice(0, 100);
-                  if (el.name) item.name = el.name;
+                  if (name) item.name = name;
                 }
                 if (ariaLabel) item.aria_label = ariaLabel.trim().slice(0, 100);
                 const text = (el.innerText || el.textContent || "").trim().replace(/\s+/g, " ");
                 if (text && tag !== "input") item.text = text.slice(0, 100);
                 if (tag === "a") {
-                  const href = el.getAttribute("href") || "";
+                  const href = (typeof el.getAttribute === "function" ? el.getAttribute("href") : el.href) || "";
                   if (href) item.href = href.slice(0, 120);
                 }
                 if (role) item.role = role;
@@ -1748,6 +2269,18 @@ async function handleCommand(msg) {
                 if (it.href) parts.push(`(href: ${it.href})`);
                 return parts.join(" ");
               });
+
+              try {
+                const allFrames = Array.from(document.querySelectorAll("iframe, frame"));
+                for (const f of allFrames) {
+                  try {
+                    const doc = f.contentDocument || (f.contentWindow && f.contentWindow.document);
+                    if (!doc) summaryLines.push("[iframe: cross-origin restricted]");
+                  } catch (_) {
+                    summaryLines.push("[iframe: cross-origin restricted]");
+                  }
+                }
+              } catch (_) {}
 
               scrollData.elements = items;
               scrollData.summary = summaryLines.join("\n");
@@ -2098,6 +2631,10 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     waitForSettled,
     resolveElement,
+    collectInteractiveElements,
+    findDeepElement,
+    clearOldLabels,
+    isElementVisible,
     handleCommand,
     connect,
   };
