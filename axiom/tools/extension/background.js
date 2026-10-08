@@ -40,6 +40,9 @@ function stopKeepAlivePing() {
 }
 
 function connect() {
+  if (typeof WebSocket === "undefined") {
+    return;
+  }
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
     return;
   }
@@ -139,6 +142,241 @@ async function getTargetTab(msg) {
 
   const allTabs = await chrome.tabs.query({});
   return allTabs.length > 0 ? allTabs[0] : null;
+}
+
+function waitForSettled(options = {}) {
+  const quietWindow = options.quietWindow || 75; // ms without mutations
+  const maxTimeout = options.maxTimeout || 800;   // ms hard cap
+  return new Promise((resolve) => {
+    let timer = null;
+    let maxTimer = null;
+    let observer = null;
+
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      if (maxTimer) clearTimeout(maxTimer);
+      if (observer) {
+        try { observer.disconnect(); } catch (e) {}
+        observer = null;
+      }
+    };
+
+    const done = () => {
+      cleanup();
+      // Double rAF tick to allow browser layout & paint flushing
+      const raf = (typeof requestAnimationFrame === "function") ? requestAnimationFrame : (cb) => setTimeout(cb, 16);
+      raf(() => {
+        raf(() => resolve());
+      });
+    };
+
+    try {
+      const target = (typeof document !== "undefined") ? (document.body || document.documentElement) : null;
+      if (!target || typeof MutationObserver === "undefined") {
+        done();
+        return;
+      }
+      observer = new MutationObserver(() => {
+        clearTimeout(timer);
+        timer = setTimeout(done, quietWindow);
+      });
+      observer.observe(target, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        characterData: true,
+      });
+    } catch (e) {
+      done();
+      return;
+    }
+
+    timer = setTimeout(done, quietWindow);
+    maxTimer = setTimeout(done, maxTimeout);
+  });
+}
+
+function resolveElement(sel, elemId) {
+  if (elemId == null) {
+    const el = document.querySelector(sel);
+    if (!el) {
+      return {
+        element: null,
+        errorResult: {
+          success: false,
+          error: `Element not found for selector: '${sel}'`,
+          remedy_hint: "Call get_page_snapshot to refresh element IDs, or scroll_page down if the element is below the viewport.",
+          allowed_actions: ["get_page_snapshot", "scroll_page"],
+        },
+      };
+    }
+    return { element: el, errorResult: null };
+  }
+
+  // Fast-Path: Query [data-axiom-id="${elemId}"]
+  const fastNode = document.querySelector(`[data-axiom-id="${elemId}"]`);
+  if (fastNode && fastNode.isConnected) {
+    return { element: fastNode, errorResult: null };
+  }
+
+  // Stale / Detached Fallback:
+  const fingerprints = (typeof window !== "undefined" && window.__axiomFingerprints) ? window.__axiomFingerprints : {};
+  const fp = fingerprints[elemId];
+  if (!fp) {
+    return {
+      element: null,
+      errorResult: {
+        success: false,
+        error: `Element ID ${elemId} not found on page.`,
+        remedy_hint: "Call get_page_snapshot to refresh element IDs, or scroll_page down if the element is below the viewport.",
+        allowed_actions: ["get_page_snapshot", "scroll_page"],
+      },
+    };
+  }
+
+  const interactiveSelector = [
+    "a[href]",
+    "button",
+    "input",
+    "textarea",
+    "select",
+    '[role="button"]',
+    '[role="link"]',
+    "[onclick]",
+    '[tabindex]:not([tabindex="-1"])',
+  ].join(", ");
+
+  const matchCandidate = (c) => {
+    if (!c || !c.isConnected) return false;
+
+    // Visibility check
+    if (typeof c.getBoundingClientRect === "function" && typeof window.getComputedStyle === "function") {
+      try {
+        const rect = c.getBoundingClientRect();
+        const style = window.getComputedStyle(c);
+        if (
+          style.display === "none" ||
+          style.visibility === "hidden" ||
+          parseFloat(style.opacity || "1") === 0
+        ) {
+          return false;
+        }
+        if (rect.width === 0 && rect.height === 0 && c.offsetParent === null) {
+          return false;
+        }
+      } catch (_) {}
+    }
+
+    // 1. Tag
+    if (fp.tag && c.tagName.toLowerCase() !== fp.tag.toLowerCase()) return false;
+    // 2. Role
+    const cRole = c.getAttribute("role") || "";
+    if (fp.role && cRole !== fp.role) return false;
+    // 3. Type
+    const cType = c.getAttribute("type") || (c.type || "");
+    if (fp.type && cType !== fp.type) return false;
+    // 4. Name
+    const cName = c.getAttribute("name") || (c.name || "");
+    if (fp.name && cName !== fp.name) return false;
+
+    // 5. Matching textSnippet or ariaLabel
+    const cAria = (c.getAttribute("aria-label") || c.getAttribute("aria-labelledby") || "").trim().slice(0, 40);
+    const cText = (c.innerText || c.textContent || "").trim().slice(0, 40);
+
+    if (fp.ariaLabel && fp.textSnippet) {
+      if (cAria !== fp.ariaLabel && cText !== fp.textSnippet) return false;
+    } else if (fp.ariaLabel) {
+      if (cAria !== fp.ariaLabel) return false;
+    } else if (fp.textSnippet) {
+      if (cText !== fp.textSnippet) return false;
+    }
+
+    return true;
+  };
+
+  const findMatches = () => {
+    const sel = interactiveSelector + (fp.tag ? `, ${fp.tag}` : "");
+    const nodes = Array.from(document.querySelectorAll(sel));
+    return nodes.filter(matchCandidate);
+  };
+
+  let matches = findMatches();
+
+  if (matches.length === 1) {
+    const matchedEl = matches[0];
+    matchedEl.setAttribute("data-axiom-id", String(elemId));
+    return { element: matchedEl, errorResult: null };
+  }
+
+  if (matches.length > 1) {
+    return {
+      element: null,
+      errorResult: {
+        success: false,
+        error: `Ambiguous element resolution: ${matches.length} elements match fingerprint for ID ${elemId}.`,
+        remedy_hint: "Call get_page_snapshot to re-index unique element IDs.",
+        allowed_actions: ["get_page_snapshot"],
+      },
+    };
+  }
+
+  // 0 matches found: Trigger exactly one internal bounded retry: take an inline snapshot refresh, re-attempt fingerprint match once.
+  try {
+    const freshCandidates = Array.from(document.querySelectorAll(interactiveSelector));
+    let freshIdx = 1;
+    for (const fel of freshCandidates) {
+      if (freshIdx > 50) break;
+      fel.setAttribute("data-axiom-id", String(freshIdx));
+      const fTag = fel.tagName.toLowerCase();
+      const fRole = fel.getAttribute("role") || "";
+      const fType = fel.getAttribute("type") || "";
+      const fName = fel.getAttribute("name") || "";
+      const fAria = fel.getAttribute("aria-label") || fel.getAttribute("aria-labelledby") || "";
+      const fText = (fel.innerText || fel.textContent || "").trim().slice(0, 40);
+      if (typeof window !== "undefined") {
+        window.__axiomFingerprints = window.__axiomFingerprints || {};
+        window.__axiomFingerprints[freshIdx] = {
+          tag: fTag,
+          role: fRole,
+          type: fType,
+          name: fName,
+          ariaLabel: fAria,
+          textSnippet: fText,
+        };
+      }
+      freshIdx++;
+    }
+  } catch (_) {}
+
+  matches = findMatches();
+
+  if (matches.length === 1) {
+    const matchedEl = matches[0];
+    matchedEl.setAttribute("data-axiom-id", String(elemId));
+    return { element: matchedEl, errorResult: null };
+  }
+
+  if (matches.length > 1) {
+    return {
+      element: null,
+      errorResult: {
+        success: false,
+        error: `Ambiguous element resolution: ${matches.length} elements match fingerprint for ID ${elemId}.`,
+        remedy_hint: "Call get_page_snapshot to re-index unique element IDs.",
+        allowed_actions: ["get_page_snapshot"],
+      },
+    };
+  }
+
+  return {
+    element: null,
+    errorResult: {
+      success: false,
+      error: `Element ID ${elemId} not found on page.`,
+      remedy_hint: "Call get_page_snapshot to refresh element IDs, or scroll_page down if the element is below the viewport.",
+      allowed_actions: ["get_page_snapshot", "scroll_page"],
+    },
+  };
 }
 
 async function handleCommand(msg) {
@@ -302,6 +540,62 @@ async function handleCommand(msg) {
               resolve();
             }
           });
+
+          // Followed by waitForSettled in the page
+          try {
+            await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              func: async () => {
+                function waitForSettled(options = {}) {
+                  const quietWindow = options.quietWindow || 75;
+                  const maxTimeout = options.maxTimeout || 800;
+                  return new Promise((resolve) => {
+                    let timer = null;
+                    let maxTimer = null;
+                    let observer = null;
+                    const cleanup = () => {
+                      if (timer) clearTimeout(timer);
+                      if (maxTimer) clearTimeout(maxTimer);
+                      if (observer) {
+                        try { observer.disconnect(); } catch (e) {}
+                        observer = null;
+                      }
+                    };
+                    const done = () => {
+                      cleanup();
+                      const raf = (typeof requestAnimationFrame === "function") ? requestAnimationFrame : (cb) => setTimeout(cb, 16);
+                      raf(() => {
+                        raf(() => resolve());
+                      });
+                    };
+                    try {
+                      const target = (typeof document !== "undefined") ? (document.body || document.documentElement) : null;
+                      if (!target || typeof MutationObserver === "undefined") {
+                        done();
+                        return;
+                      }
+                      observer = new MutationObserver(() => {
+                        clearTimeout(timer);
+                        timer = setTimeout(done, quietWindow);
+                      });
+                      observer.observe(target, {
+                        childList: true,
+                        subtree: true,
+                        attributes: true,
+                        characterData: true,
+                      });
+                    } catch (e) {
+                      done();
+                      return;
+                    }
+                    timer = setTimeout(done, quietWindow);
+                    maxTimer = setTimeout(done, maxTimeout);
+                  });
+                }
+                await waitForSettled();
+              },
+            });
+          } catch (_) {}
 
           let updatedTab = null;
           try {
@@ -593,6 +887,8 @@ async function handleCommand(msg) {
               el.removeAttribute("data-axiom-id");
             }
 
+            window.__axiomFingerprints = {};
+
             const selector = [
               "a[href]",
               "button",
@@ -628,6 +924,21 @@ async function handleCommand(msg) {
               el.setAttribute("data-axiom-id", String(index));
 
               const tag = el.tagName.toLowerCase();
+              const role = el.getAttribute("role") || "";
+              const type = el.getAttribute("type") || (el.type || "");
+              const name = el.getAttribute("name") || (el.name || "");
+              const ariaLabel = el.getAttribute("aria-label") || el.getAttribute("aria-labelledby") || "";
+              const textSnippet = (el.innerText || el.textContent || "").trim().slice(0, 40);
+
+              window.__axiomFingerprints[index] = {
+                tag: tag,
+                role: role,
+                type: type,
+                name: name,
+                ariaLabel: ariaLabel,
+                textSnippet: textSnippet,
+              };
+
               const item = {
                 id: index,
                 tag: tag,
@@ -640,7 +951,6 @@ async function handleCommand(msg) {
                 if (el.name) item.name = el.name;
               }
 
-              const ariaLabel = el.getAttribute("aria-label") || el.getAttribute("aria-labelledby") || "";
               if (ariaLabel) item.aria_label = ariaLabel.trim().slice(0, 100);
 
               const text = (el.innerText || el.textContent || "").trim().replace(/\s+/g, " ");
@@ -652,8 +962,6 @@ async function handleCommand(msg) {
                 const href = el.getAttribute("href") || "";
                 if (href) item.href = href.slice(0, 120);
               }
-
-              const role = el.getAttribute("role");
               if (role) item.role = role;
 
               items.push(item);
@@ -705,16 +1013,231 @@ async function handleCommand(msg) {
 
         const results = await chrome.scripting.executeScript({
           target: { tabId: tab.id },
-          func: (sel, elemId) => {
-            const el = document.querySelector(sel);
-            if (!el) {
+          func: async (sel, elemId) => {
+            function waitForSettled(options = {}) {
+              const quietWindow = options.quietWindow || 75;
+              const maxTimeout = options.maxTimeout || 800;
+              return new Promise((resolve) => {
+                let timer = null;
+                let maxTimer = null;
+                let observer = null;
+                const cleanup = () => {
+                  if (timer) clearTimeout(timer);
+                  if (maxTimer) clearTimeout(maxTimer);
+                  if (observer) {
+                    try { observer.disconnect(); } catch (e) {}
+                    observer = null;
+                  }
+                };
+                const done = () => {
+                  cleanup();
+                  const raf = (typeof requestAnimationFrame === "function") ? requestAnimationFrame : (cb) => setTimeout(cb, 16);
+                  raf(() => {
+                    raf(() => resolve());
+                  });
+                };
+                try {
+                  const target = (typeof document !== "undefined") ? (document.body || document.documentElement) : null;
+                  if (!target || typeof MutationObserver === "undefined") {
+                    done();
+                    return;
+                  }
+                  observer = new MutationObserver(() => {
+                    clearTimeout(timer);
+                    timer = setTimeout(done, quietWindow);
+                  });
+                  observer.observe(target, {
+                    childList: true,
+                    subtree: true,
+                    attributes: true,
+                    characterData: true,
+                  });
+                } catch (e) {
+                  done();
+                  return;
+                }
+                timer = setTimeout(done, quietWindow);
+                maxTimer = setTimeout(done, maxTimeout);
+              });
+            }
+
+            function resolveElement(targetSel, targetElemId) {
+              if (targetElemId == null) {
+                const el = document.querySelector(targetSel);
+                if (!el) {
+                  return {
+                    element: null,
+                    errorResult: {
+                      success: false,
+                      error: `Element not found for selector: '${targetSel}'`,
+                      remedy_hint: "Call get_page_snapshot to refresh element IDs, or scroll_page down if the element is below the viewport.",
+                      allowed_actions: ["get_page_snapshot", "scroll_page"],
+                    },
+                  };
+                }
+                return { element: el, errorResult: null };
+              }
+
+              // Fast-Path: Query [data-axiom-id="${targetElemId}"]
+              const fastNode = document.querySelector(`[data-axiom-id="${targetElemId}"]`);
+              if (fastNode && fastNode.isConnected) {
+                return { element: fastNode, errorResult: null };
+              }
+
+              // Stale / Detached Fallback:
+              const fingerprints = (typeof window !== "undefined" && window.__axiomFingerprints) ? window.__axiomFingerprints : {};
+              const fp = fingerprints[targetElemId];
+              if (!fp) {
+                return {
+                  element: null,
+                  errorResult: {
+                    success: false,
+                    error: `Element ID ${targetElemId} not found on page.`,
+                    remedy_hint: "Call get_page_snapshot to refresh element IDs, or scroll_page down if the element is below the viewport.",
+                    allowed_actions: ["get_page_snapshot", "scroll_page"],
+                  },
+                };
+              }
+
+              const interactiveSelector = [
+                "a[href]",
+                "button",
+                "input",
+                "textarea",
+                "select",
+                '[role="button"]',
+                '[role="link"]',
+                "[onclick]",
+                '[tabindex]:not([tabindex="-1"])',
+              ].join(", ");
+
+              const matchCandidate = (c) => {
+                if (!c || !c.isConnected) return false;
+                if (typeof c.getBoundingClientRect === "function" && typeof window.getComputedStyle === "function") {
+                  try {
+                    const rect = c.getBoundingClientRect();
+                    const style = window.getComputedStyle(c);
+                    if (
+                      style.display === "none" ||
+                      style.visibility === "hidden" ||
+                      parseFloat(style.opacity || "1") === 0
+                    ) {
+                      return false;
+                    }
+                    if (rect.width === 0 && rect.height === 0 && c.offsetParent === null) {
+                      return false;
+                    }
+                  } catch (_) {}
+                }
+
+                if (fp.tag && c.tagName.toLowerCase() !== fp.tag.toLowerCase()) return false;
+                const cRole = c.getAttribute("role") || "";
+                if (fp.role && cRole !== fp.role) return false;
+                const cType = c.getAttribute("type") || (c.type || "");
+                if (fp.type && cType !== fp.type) return false;
+                const cName = c.getAttribute("name") || (c.name || "");
+                if (fp.name && cName !== fp.name) return false;
+
+                const cAria = (c.getAttribute("aria-label") || c.getAttribute("aria-labelledby") || "").trim().slice(0, 40);
+                const cText = (c.innerText || c.textContent || "").trim().slice(0, 40);
+
+                if (fp.ariaLabel && fp.textSnippet) {
+                  if (cAria !== fp.ariaLabel && cText !== fp.textSnippet) return false;
+                } else if (fp.ariaLabel) {
+                  if (cAria !== fp.ariaLabel) return false;
+                } else if (fp.textSnippet) {
+                  if (cText !== fp.textSnippet) return false;
+                }
+
+                return true;
+              };
+
+              const findMatches = () => {
+                const querySel = interactiveSelector + (fp.tag ? `, ${fp.tag}` : "");
+                const nodes = Array.from(document.querySelectorAll(querySel));
+                return nodes.filter(matchCandidate);
+              };
+
+              let matches = findMatches();
+              if (matches.length === 1) {
+                matches[0].setAttribute("data-axiom-id", String(targetElemId));
+                return { element: matches[0], errorResult: null };
+              }
+
+              if (matches.length > 1) {
+                return {
+                  element: null,
+                  errorResult: {
+                    success: false,
+                    error: `Ambiguous element resolution: ${matches.length} elements match fingerprint for ID ${targetElemId}.`,
+                    remedy_hint: "Call get_page_snapshot to re-index unique element IDs.",
+                    allowed_actions: ["get_page_snapshot"],
+                  },
+                };
+              }
+
+              // 0 matches found: Trigger exactly one internal bounded retry
+              try {
+                const freshCandidates = Array.from(document.querySelectorAll(interactiveSelector));
+                let freshIdx = 1;
+                for (const fel of freshCandidates) {
+                  if (freshIdx > 50) break;
+                  fel.setAttribute("data-axiom-id", String(freshIdx));
+                  const fTag = fel.tagName.toLowerCase();
+                  const fRole = fel.getAttribute("role") || "";
+                  const fType = fel.getAttribute("type") || "";
+                  const fName = fel.getAttribute("name") || "";
+                  const fAria = fel.getAttribute("aria-label") || fel.getAttribute("aria-labelledby") || "";
+                  const fText = (fel.innerText || fel.textContent || "").trim().slice(0, 40);
+                  if (typeof window !== "undefined") {
+                    window.__axiomFingerprints = window.__axiomFingerprints || {};
+                    window.__axiomFingerprints[freshIdx] = {
+                      tag: fTag,
+                      role: fRole,
+                      type: fType,
+                      name: fName,
+                      ariaLabel: fAria,
+                      textSnippet: fText,
+                    };
+                  }
+                  freshIdx++;
+                }
+              } catch (_) {}
+
+              matches = findMatches();
+              if (matches.length === 1) {
+                matches[0].setAttribute("data-axiom-id", String(targetElemId));
+                return { element: matches[0], errorResult: null };
+              }
+
+              if (matches.length > 1) {
+                return {
+                  element: null,
+                  errorResult: {
+                    success: false,
+                    error: `Ambiguous element resolution: ${matches.length} elements match fingerprint for ID ${targetElemId}.`,
+                    remedy_hint: "Call get_page_snapshot to re-index unique element IDs.",
+                    allowed_actions: ["get_page_snapshot"],
+                  },
+                };
+              }
+
               return {
-                success: false,
-                error: `Element ID ${elemId != null ? elemId : sel} not found on page.`,
-                remedy_hint: "Call get_page_snapshot to refresh element IDs, or scroll_page down if the element is below the viewport.",
-                allowed_actions: ["get_page_snapshot", "scroll_page"],
+                element: null,
+                errorResult: {
+                  success: false,
+                  error: `Element ID ${targetElemId} not found on page.`,
+                  remedy_hint: "Call get_page_snapshot to refresh element IDs, or scroll_page down if the element is below the viewport.",
+                  allowed_actions: ["get_page_snapshot", "scroll_page"],
+                },
               };
             }
+
+            const { element: el, errorResult } = resolveElement(sel, elemId);
+            if (!el) {
+              return errorResult;
+            }
+
             try {
               el.scrollIntoView({ behavior: "instant", block: "center" });
             } catch (_) {}
@@ -737,6 +1260,10 @@ async function handleCommand(msg) {
             } catch (_) {}
 
             el.click();
+
+            // Await DOM settlement before completing
+            await waitForSettled();
+
             return {
               success: true,
               clicked_id: elemId != null ? elemId : (el.getAttribute("data-axiom-id") ? Number(el.getAttribute("data-axiom-id")) : null),
@@ -771,16 +1298,231 @@ async function handleCommand(msg) {
 
         const results = await chrome.scripting.executeScript({
           target: { tabId: tab.id },
-          func: (sel, val, doSubmit, elemId) => {
-            const el = document.querySelector(sel);
-            if (!el) {
+          func: async (sel, val, doSubmit, elemId) => {
+            function waitForSettled(options = {}) {
+              const quietWindow = options.quietWindow || 75;
+              const maxTimeout = options.maxTimeout || 800;
+              return new Promise((resolve) => {
+                let timer = null;
+                let maxTimer = null;
+                let observer = null;
+                const cleanup = () => {
+                  if (timer) clearTimeout(timer);
+                  if (maxTimer) clearTimeout(maxTimer);
+                  if (observer) {
+                    try { observer.disconnect(); } catch (e) {}
+                    observer = null;
+                  }
+                };
+                const done = () => {
+                  cleanup();
+                  const raf = (typeof requestAnimationFrame === "function") ? requestAnimationFrame : (cb) => setTimeout(cb, 16);
+                  raf(() => {
+                    raf(() => resolve());
+                  });
+                };
+                try {
+                  const target = (typeof document !== "undefined") ? (document.body || document.documentElement) : null;
+                  if (!target || typeof MutationObserver === "undefined") {
+                    done();
+                    return;
+                  }
+                  observer = new MutationObserver(() => {
+                    clearTimeout(timer);
+                    timer = setTimeout(done, quietWindow);
+                  });
+                  observer.observe(target, {
+                    childList: true,
+                    subtree: true,
+                    attributes: true,
+                    characterData: true,
+                  });
+                } catch (e) {
+                  done();
+                  return;
+                }
+                timer = setTimeout(done, quietWindow);
+                maxTimer = setTimeout(done, maxTimeout);
+              });
+            }
+
+            function resolveElement(targetSel, targetElemId) {
+              if (targetElemId == null) {
+                const el = document.querySelector(targetSel);
+                if (!el) {
+                  return {
+                    element: null,
+                    errorResult: {
+                      success: false,
+                      error: `Element not found for selector: '${targetSel}'`,
+                      remedy_hint: "Call get_page_snapshot to refresh element IDs, or scroll_page down if the element is below the viewport.",
+                      allowed_actions: ["get_page_snapshot", "scroll_page"],
+                    },
+                  };
+                }
+                return { element: el, errorResult: null };
+              }
+
+              // Fast-Path: Query [data-axiom-id="${targetElemId}"]
+              const fastNode = document.querySelector(`[data-axiom-id="${targetElemId}"]`);
+              if (fastNode && fastNode.isConnected) {
+                return { element: fastNode, errorResult: null };
+              }
+
+              // Stale / Detached Fallback:
+              const fingerprints = (typeof window !== "undefined" && window.__axiomFingerprints) ? window.__axiomFingerprints : {};
+              const fp = fingerprints[targetElemId];
+              if (!fp) {
+                return {
+                  element: null,
+                  errorResult: {
+                    success: false,
+                    error: `Element ID ${targetElemId} not found on page.`,
+                    remedy_hint: "Call get_page_snapshot to refresh element IDs, or scroll_page down if the element is below the viewport.",
+                    allowed_actions: ["get_page_snapshot", "scroll_page"],
+                  },
+                };
+              }
+
+              const interactiveSelector = [
+                "a[href]",
+                "button",
+                "input",
+                "textarea",
+                "select",
+                '[role="button"]',
+                '[role="link"]',
+                "[onclick]",
+                '[tabindex]:not([tabindex="-1"])',
+              ].join(", ");
+
+              const matchCandidate = (c) => {
+                if (!c || !c.isConnected) return false;
+                if (typeof c.getBoundingClientRect === "function" && typeof window.getComputedStyle === "function") {
+                  try {
+                    const rect = c.getBoundingClientRect();
+                    const style = window.getComputedStyle(c);
+                    if (
+                      style.display === "none" ||
+                      style.visibility === "hidden" ||
+                      parseFloat(style.opacity || "1") === 0
+                    ) {
+                      return false;
+                    }
+                    if (rect.width === 0 && rect.height === 0 && c.offsetParent === null) {
+                      return false;
+                    }
+                  } catch (_) {}
+                }
+
+                if (fp.tag && c.tagName.toLowerCase() !== fp.tag.toLowerCase()) return false;
+                const cRole = c.getAttribute("role") || "";
+                if (fp.role && cRole !== fp.role) return false;
+                const cType = c.getAttribute("type") || (c.type || "");
+                if (fp.type && cType !== fp.type) return false;
+                const cName = c.getAttribute("name") || (c.name || "");
+                if (fp.name && cName !== fp.name) return false;
+
+                const cAria = (c.getAttribute("aria-label") || c.getAttribute("aria-labelledby") || "").trim().slice(0, 40);
+                const cText = (c.innerText || c.textContent || "").trim().slice(0, 40);
+
+                if (fp.ariaLabel && fp.textSnippet) {
+                  if (cAria !== fp.ariaLabel && cText !== fp.textSnippet) return false;
+                } else if (fp.ariaLabel) {
+                  if (cAria !== fp.ariaLabel) return false;
+                } else if (fp.textSnippet) {
+                  if (cText !== fp.textSnippet) return false;
+                }
+
+                return true;
+              };
+
+              const findMatches = () => {
+                const querySel = interactiveSelector + (fp.tag ? `, ${fp.tag}` : "");
+                const nodes = Array.from(document.querySelectorAll(querySel));
+                return nodes.filter(matchCandidate);
+              };
+
+              let matches = findMatches();
+              if (matches.length === 1) {
+                matches[0].setAttribute("data-axiom-id", String(targetElemId));
+                return { element: matches[0], errorResult: null };
+              }
+
+              if (matches.length > 1) {
+                return {
+                  element: null,
+                  errorResult: {
+                    success: false,
+                    error: `Ambiguous element resolution: ${matches.length} elements match fingerprint for ID ${targetElemId}.`,
+                    remedy_hint: "Call get_page_snapshot to re-index unique element IDs.",
+                    allowed_actions: ["get_page_snapshot"],
+                  },
+                };
+              }
+
+              // 0 matches found: Trigger exactly one internal bounded retry
+              try {
+                const freshCandidates = Array.from(document.querySelectorAll(interactiveSelector));
+                let freshIdx = 1;
+                for (const fel of freshCandidates) {
+                  if (freshIdx > 50) break;
+                  fel.setAttribute("data-axiom-id", String(freshIdx));
+                  const fTag = fel.tagName.toLowerCase();
+                  const fRole = fel.getAttribute("role") || "";
+                  const fType = fel.getAttribute("type") || "";
+                  const fName = fel.getAttribute("name") || "";
+                  const fAria = fel.getAttribute("aria-label") || fel.getAttribute("aria-labelledby") || "";
+                  const fText = (fel.innerText || fel.textContent || "").trim().slice(0, 40);
+                  if (typeof window !== "undefined") {
+                    window.__axiomFingerprints = window.__axiomFingerprints || {};
+                    window.__axiomFingerprints[freshIdx] = {
+                      tag: fTag,
+                      role: fRole,
+                      type: fType,
+                      name: fName,
+                      ariaLabel: fAria,
+                      textSnippet: fText,
+                    };
+                  }
+                  freshIdx++;
+                }
+              } catch (_) {}
+
+              matches = findMatches();
+              if (matches.length === 1) {
+                matches[0].setAttribute("data-axiom-id", String(targetElemId));
+                return { element: matches[0], errorResult: null };
+              }
+
+              if (matches.length > 1) {
+                return {
+                  element: null,
+                  errorResult: {
+                    success: false,
+                    error: `Ambiguous element resolution: ${matches.length} elements match fingerprint for ID ${targetElemId}.`,
+                    remedy_hint: "Call get_page_snapshot to re-index unique element IDs.",
+                    allowed_actions: ["get_page_snapshot"],
+                  },
+                };
+              }
+
               return {
-                success: false,
-                error: `Element ID ${elemId != null ? elemId : sel} not found on page.`,
-                remedy_hint: "Call get_page_snapshot to refresh element IDs, or scroll_page down if the element is below the viewport.",
-                allowed_actions: ["get_page_snapshot", "scroll_page"],
+                element: null,
+                errorResult: {
+                  success: false,
+                  error: `Element ID ${targetElemId} not found on page.`,
+                  remedy_hint: "Call get_page_snapshot to refresh element IDs, or scroll_page down if the element is below the viewport.",
+                  allowed_actions: ["get_page_snapshot", "scroll_page"],
+                },
               };
             }
+
+            const { element: el, errorResult } = resolveElement(sel, elemId);
+            if (!el) {
+              return errorResult;
+            }
+
             try {
               el.scrollIntoView({ behavior: "instant", block: "center" });
             } catch (_) {}
@@ -861,6 +1603,9 @@ async function handleCommand(msg) {
               }
             }
 
+            // Await DOM settlement before completing
+            await waitForSettled();
+
             const id = elemId != null ? elemId : (el.getAttribute("data-axiom-id") ? Number(el.getAttribute("data-axiom-id")) : null);
             return {
               success: true,
@@ -924,6 +1669,7 @@ async function handleCommand(msg) {
               for (const el of oldLabeled) {
                 el.removeAttribute("data-axiom-id");
               }
+              window.__axiomFingerprints = {};
               const selector = [
                 "a[href]",
                 "button",
@@ -955,6 +1701,21 @@ async function handleCommand(msg) {
                 }
                 el.setAttribute("data-axiom-id", String(index));
                 const tag = el.tagName.toLowerCase();
+                const role = el.getAttribute("role") || "";
+                const type = el.getAttribute("type") || (el.type || "");
+                const name = el.getAttribute("name") || (el.name || "");
+                const ariaLabel = el.getAttribute("aria-label") || el.getAttribute("aria-labelledby") || "";
+                const textSnippet = (el.innerText || el.textContent || "").trim().slice(0, 40);
+
+                window.__axiomFingerprints[index] = {
+                  tag,
+                  role,
+                  type,
+                  name,
+                  ariaLabel,
+                  textSnippet,
+                };
+
                 const item = { id: index, tag };
                 if (tag === "input" || tag === "textarea") {
                   if (el.type) item.type = el.type;
@@ -962,7 +1723,6 @@ async function handleCommand(msg) {
                   if (el.value) item.value = el.value.slice(0, 100);
                   if (el.name) item.name = el.name;
                 }
-                const ariaLabel = el.getAttribute("aria-label") || el.getAttribute("aria-labelledby") || "";
                 if (ariaLabel) item.aria_label = ariaLabel.trim().slice(0, 100);
                 const text = (el.innerText || el.textContent || "").trim().replace(/\s+/g, " ");
                 if (text && tag !== "input") item.text = text.slice(0, 100);
@@ -970,7 +1730,6 @@ async function handleCommand(msg) {
                   const href = el.getAttribute("href") || "";
                   if (href) item.href = href.slice(0, 120);
                 }
-                const role = el.getAttribute("role");
                 if (role) item.role = role;
                 items.push(item);
                 index++;
@@ -1308,9 +2067,8 @@ async function handleCommand(msg) {
 }
 
 // Start connection immediately on extension load
-connect();
-
 if (typeof chrome !== "undefined" && chrome.runtime) {
+  connect();
   if (chrome.runtime.onStartup) {
     chrome.runtime.onStartup.addListener(() => connect());
   }
@@ -1336,3 +2094,11 @@ if (typeof chrome !== "undefined" && chrome.alarms) {
   }
 }
 
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    waitForSettled,
+    resolveElement,
+    handleCommand,
+    connect,
+  };
+}

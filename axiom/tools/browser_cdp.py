@@ -248,12 +248,18 @@ class InteractWithBrowserTool(BaseTool):
 
                     if action in ("click_element", "fill_element"):
                         elem_id = params.get("element_id")
-                        if elem_id is not None and ("not found" in error_msg.lower() or not ext_res.error or "Element not found" in error_msg):
-                            error_msg = f"Element ID {elem_id} not found on page."
-                        if not remedy_hint:
-                            remedy_hint = "Call get_page_snapshot to refresh element IDs, or scroll_page down if the element is below the viewport."
-                        if not allowed_actions:
-                            allowed_actions = ["get_page_snapshot", "scroll_page"]
+                        if "ambiguous" in error_msg.lower():
+                            if not remedy_hint:
+                                remedy_hint = "Call get_page_snapshot to re-index unique element IDs."
+                            if not allowed_actions:
+                                allowed_actions = ["get_page_snapshot"]
+                        else:
+                            if elem_id is not None and ("not found" in error_msg.lower() or not ext_res.error or "Element not found" in error_msg):
+                                error_msg = f"Element ID {elem_id} not found on page."
+                            if not remedy_hint:
+                                remedy_hint = "Call get_page_snapshot to refresh element IDs, or scroll_page down if the element is below the viewport."
+                            if not allowed_actions:
+                                allowed_actions = ["get_page_snapshot", "scroll_page"]
                     elif action == "switch_tab":
                         target_url = params.get("query") or params.get("url") or "<url>"
                         if "open_tabs" in ext_res:

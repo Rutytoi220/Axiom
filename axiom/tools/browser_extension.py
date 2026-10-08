@@ -196,7 +196,7 @@ class BrowserExtensionBridge:
         if self.server is None:
             await self.start_server()
 
-    async def send_command(self, action: str, timeout: float = 5.0, **kwargs: Any) -> BrowserResult:
+    async def send_command(self, action: str, timeout: float = 8.5, **kwargs: Any) -> BrowserResult:
         """Dispatches an action to the connected extension and waits for response."""
         await self.ensure_server()
 
@@ -261,6 +261,7 @@ async def interact_with_browser(
     tab_id: Any = None,
     element_id: Optional[int] = None,
     submit: bool = False,
+    timeout: float = 8.5,
     **kwargs: Any,
 ) -> BrowserResult:
     """Interacts with browser via local WebExtension WebSocket bridge.
@@ -297,7 +298,7 @@ async def interact_with_browser(
     if submit:
         cmd_args["submit"] = submit
 
-    return await bridge.send_command(action, timeout=5.0, **cmd_args)
+    return await bridge.send_command(action, timeout=timeout, **cmd_args)
 
 
 def __getattr__(name: str) -> Any:
