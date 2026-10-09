@@ -8,19 +8,24 @@ from axiom.eval.report import BenchmarkReport
 from axiom.eval.suite_l1 import get_level_1_suite
 from axiom.eval.task import EvalContext, EvalTask, EvaluationContext, EvaluationTask
 from axiom.eval.tasks.deterministic_p1 import get_deterministic_p1_tasks
+from axiom.eval.tasks.synthetic_workflows_p2 import get_synthetic_workflows_p2_tasks
 from axiom.eval.types import EvaluationResult, ResultStatus, ValidationResult
 from axiom.eval.validators import (
     assert_file_content,
     assert_file_exists,
+    assert_json_field,
     assert_memory_record,
     assert_tool_called,
     assert_tool_sequence,
+    assert_tool_updated,
     combine_validators,
     validate_file_content,
     validate_file_exists,
+    validate_json_field,
     validate_memory_record,
     validate_tool_called,
     validate_tool_sequence,
+    validate_tool_updated,
 )
 
 __all__ = [
@@ -32,6 +37,7 @@ __all__ = [
     "format_summary_table",
     "export_json_report",
     "get_deterministic_p1_tasks",
+    "get_synthetic_workflows_p2_tasks",
     "assert_file_exists",
     "assert_file_content",
     "assert_memory_record",
@@ -52,5 +58,9 @@ __all__ = [
     "validate_tool_called",
     "validate_tool_sequence",
     "validate_memory_record",
+    "validate_json_field",
+    "validate_tool_updated",
+    "assert_json_field",
+    "assert_tool_updated",
     "combine_validators",
 ]

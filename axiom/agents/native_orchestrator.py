@@ -483,32 +483,33 @@ class NativeOrchestrator:
                 elif m.get("role") == "assistant" and m.get("tool_calls"):
                     break
 
-        if depth == 0 and eff_stream_provider is None:
-            # Eagerly ensure WebExtension bridge server is running on 127.0.0.1:41144
-            try:
-                from axiom.tools.browser_extension import get_bridge
-                bridge = get_bridge()
-                if bridge.server is None:
-                    asyncio.create_task(bridge.start_server())
-            except Exception:
-                pass
+        if depth == 0:
+            if eff_stream_provider is None:
+                # Eagerly ensure WebExtension bridge server is running on 127.0.0.1:41144
+                try:
+                    from axiom.tools.browser_extension import get_bridge
+                    bridge = get_bridge()
+                    if bridge.server is None:
+                        asyncio.create_task(bridge.start_server())
+                except Exception:
+                    pass
 
-            active_win_header = await self.get_active_window_context()
-            if active_win_header:
-                for msg in reversed(payload.get("messages", [])):
-                    if msg.get("role") == "user":
-                        content = msg.get("content", "")
-                        if isinstance(content, str):
-                            if "[Active Window:" not in content:
-                                msg["content"] = f"{active_win_header}\n{content}"
-                        elif isinstance(content, list):
-                            for part in content:
-                                if isinstance(part, dict) and part.get("type") == "text":
-                                    t = part.get("text", "")
-                                    if "[Active Window:" not in t:
-                                        part["text"] = f"{active_win_header}\n{t}"
-                                    break
-                        break
+                active_win_header = await self.get_active_window_context()
+                if active_win_header:
+                    for msg in reversed(payload.get("messages", [])):
+                        if msg.get("role") == "user":
+                            content = msg.get("content", "")
+                            if isinstance(content, str):
+                                if "[Active Window:" not in content:
+                                    msg["content"] = f"{active_win_header}\n{content}"
+                            elif isinstance(content, list):
+                                for part in content:
+                                    if isinstance(part, dict) and part.get("type") == "text":
+                                        t = part.get("text", "")
+                                        if "[Active Window:" not in t:
+                                            part["text"] = f"{active_win_header}\n{t}"
+                                        break
+                            break
 
             system_prompt_content = self._build_system_prompt()
 

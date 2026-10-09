@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from pathlib import Path
@@ -109,6 +110,66 @@ def assert_tool_sequence(
     return False, f"Tool sequence {sequence} did not contain expected subsequence {expected_sequence}."
 
 
+def assert_json_field(
+    workspace: Path,
+    rel_path: str,
+    key_path: str,
+    expected_val: Any,
+) -> Tuple[bool, str]:
+    """Parse JSON file on disk, traverse dot-separated key_path, and assert value equality."""
+    exists, reason = assert_file_exists(workspace, rel_path)
+    if not exists:
+        return False, reason
+
+    target = (workspace / rel_path).resolve()
+    try:
+        data = json.loads(target.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return False, f"Failed parsing JSON in '{rel_path}': {exc}"
+
+    current = data
+    keys = key_path.split(".")
+    for part in keys:
+        if isinstance(current, dict):
+            if part not in current:
+                return False, f"Key '{part}' in path '{key_path}' not found in '{rel_path}'."
+            current = current[part]
+        elif isinstance(current, list):
+            try:
+                idx = int(part)
+                current = current[idx]
+            except (ValueError, IndexError):
+                return False, f"Invalid list index '{part}' in path '{key_path}' for '{rel_path}'."
+        else:
+            return False, f"Cannot traverse key '{part}' in path '{key_path}' on non-collection in '{rel_path}'."
+
+    if current == expected_val:
+        return True, f"JSON field '{key_path}' in '{rel_path}' matches expected value {expected_val!r}."
+    return False, f"JSON field '{key_path}' in '{rel_path}' is {current!r}, expected {expected_val!r}."
+
+
+def assert_tool_updated(
+    tools_dir: Path,
+    tool_name: str,
+    min_version_marker: str,
+) -> Tuple[bool, str]:
+    """Verify tool file exists on disk in tools_dir and contains expected updated code/markers."""
+    tool_file = (tools_dir / f"{tool_name}.py").resolve()
+    if not str(tool_file).startswith(str(tools_dir.resolve())):
+        return False, f"Path traversal error for tool '{tool_name}' in '{tools_dir}'."
+    if not tool_file.is_file():
+        return False, f"Tool file '{tool_file.name}' does not exist in '{tools_dir}'."
+
+    try:
+        content = tool_file.read_text(encoding="utf-8")
+    except Exception as exc:
+        return False, f"Failed reading tool file '{tool_file.name}': {exc}"
+
+    if min_version_marker in content:
+        return True, f"Tool '{tool_name}' contains expected version marker '{min_version_marker}'."
+    return False, f"Tool '{tool_name}' does not contain expected version marker '{min_version_marker}'."
+
+
 # --- Higher-order validator adapters for backward compatibility ---
 
 ValidatorFn = Callable[[Any], ValidationResult]
@@ -180,3 +241,21 @@ def combine_validators(*validators: ValidatorFn) -> ValidatorFn:
                 passed_messages.append(res.message)
         return ValidationResult(True, "; ".join(passed_messages) if passed_messages else "All validators passed.")
     return _combined
+
+
+def validate_json_field(relative_path: Union[str, Path], key_path: str, expected_val: Any) -> ValidatorFn:
+    rel = str(relative_path)
+    def _val(context: Any) -> ValidationResult:
+        workspace = getattr(context, "workspace_dir", Path("."))
+        ok, reason = assert_json_field(workspace, rel, key_path, expected_val)
+        return ValidationResult(ok, reason)
+    return _val
+
+
+def validate_tool_updated(tool_name: str, min_version_marker: str) -> ValidatorFn:
+    def _val(context: Any) -> ValidationResult:
+        tools_dir = getattr(context, "tools_directory", getattr(context, "tools_dir", Path(".")))
+        ok, reason = assert_tool_updated(tools_dir, tool_name, min_version_marker)
+        return ValidationResult(ok, reason)
+    return _val
+

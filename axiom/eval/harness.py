@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import inspect
 import json
+import os
 import shutil
 import tempfile
 import time
@@ -35,6 +37,11 @@ class EvalHarness:
 
         temp_dir = Path(tempfile.mkdtemp(prefix=f"axiom_eval_{task.task_id}_")).resolve()
         db_path = temp_dir / "test_eval.db"
+        tools_dir = temp_dir / "tools.d"
+        tools_dir.mkdir(parents=True, exist_ok=True)
+
+        prev_env_db = os.environ.get("AXIOM_MEMORY_DB")
+        os.environ["AXIOM_MEMORY_DB"] = str(db_path)
 
         memory_store = MemoryStore(db_path=str(db_path))
 
@@ -43,6 +50,7 @@ class EvalHarness:
             workspace_dir=temp_dir,
             db_path=db_path,
             memory_store=memory_store,
+            tools_dir=tools_dir,
         )
 
         status: EvalStatus = EvalStatus.UNVERIFIED
@@ -72,6 +80,26 @@ class EvalHarness:
 
             handler = tools_map.get(name)
             if handler is None:
+                # Check for dynamic tool installed in tools_dir
+                dynamic_tool_file = tools_dir / f"{name}.py"
+                if dynamic_tool_file.is_file():
+                    mod_name = f"axiom.eval_dyn_{task.task_id}_{name}"
+                    spec = importlib.util.spec_from_file_location(mod_name, dynamic_tool_file)
+                    if spec and spec.loader:
+                        mod = importlib.util.module_from_spec(spec)
+                        try:
+                            spec.loader.exec_module(mod)
+                            if hasattr(mod, "execute"):
+                                handler = getattr(mod, "execute")
+                        except Exception as load_err:
+                            err_env = ToolResult(
+                                success=False,
+                                error=f"Dynamic tool '{name}' failed to load: {load_err}",
+                            ).to_dict(tool=name, arguments=args if isinstance(args, dict) else {})
+                            context.record_tool_invocation(name, args if isinstance(args, dict) else {}, err_env)
+                            return err_env
+
+            if handler is None:
                 err_env = ToolResult(
                     success=False,
                     error=f"Tool '{name}' has no registered implementation.",
@@ -87,6 +115,8 @@ class EvalHarness:
                 call_kwargs["workspace"] = temp_dir
             if "db_path" in sig.parameters and "db_path" not in call_kwargs:
                 call_kwargs["db_path"] = db_path
+            if "tools_dir" in sig.parameters and "tools_dir" not in call_kwargs:
+                call_kwargs["tools_dir"] = tools_dir
             if "memory_store" in sig.parameters and "memory_store" not in call_kwargs:
                 call_kwargs["memory_store"] = memory_store
 
@@ -292,6 +322,11 @@ class EvalHarness:
             status_message = str(exc)
 
         finally:
+            if prev_env_db is not None:
+                os.environ["AXIOM_MEMORY_DB"] = prev_env_db
+            else:
+                os.environ.pop("AXIOM_MEMORY_DB", None)
+
             context.duration_seconds = time.perf_counter() - start_time
             context.step_count = step_counter
 
@@ -323,7 +358,11 @@ class EvalHarness:
             measured_tokens=None,
             estimated_tokens=estimated_token_count,
             failure_category=failure_category,
-            artifacts={"final_response": context.final_response},
+            artifacts={
+                "final_response": context.final_response,
+                "workspace_dir": str(temp_dir),
+                "db_path": str(db_path),
+            },
         )
 
     # Backward compatibility with EvaluationHarness.execute_task

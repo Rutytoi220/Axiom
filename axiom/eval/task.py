@@ -70,6 +70,15 @@ class EvalContext:
     memory_store: Optional[MemoryStore] = None
     step_limit_hit: bool = False
     duration_seconds: float = 0.0
+    tools_dir: Optional[Path] = None
+
+    @property
+    def tools_directory(self) -> Path:
+        if self.tools_dir is not None:
+            return self.tools_dir
+        td = self.workspace_dir / "tools.d"
+        td.mkdir(parents=True, exist_ok=True)
+        return td
 
     @property
     def task_id(self) -> str:
