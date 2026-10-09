@@ -8,9 +8,9 @@ const WS_URL = "ws://127.0.0.1:41144";
 let socket = null;
 let reconnectTimer = null;
 let pingTimer = null;
-const INITIAL_RECONNECT_DELAY = 2000;
-const MAX_RECONNECT_DELAY = 5000;
-const RECONNECT_MULTIPLIER = 1.3;
+const INITIAL_RECONNECT_DELAY = 1000; // 1000ms initial reconnect delay (legacy 2000)
+const MAX_RECONNECT_DELAY = 10000;    // 10000ms max reconnect delay (legacy 5000)
+const RECONNECT_MULTIPLIER = 1.5;
 const PING_INTERVAL_MS = 10000; // 10 seconds
 let reconnectDelay = INITIAL_RECONNECT_DELAY;
 
@@ -516,6 +516,11 @@ async function handleCommand(msg) {
 
   try {
     switch (action) {
+      case "ping": {
+        sendReply({ id: msg.id, action: "pong", success: true });
+        return;
+      }
+
       case "list_tabs":
       case "tabs": {
         const tabs = await chrome.tabs.query({});
@@ -2613,7 +2618,7 @@ if (typeof chrome !== "undefined" && chrome.runtime) {
 // Periodic alarm keep-alive to protect against Manifest V3 worker idle termination
 if (typeof chrome !== "undefined" && chrome.alarms) {
   try {
-    chrome.alarms.create("axiom_keep_alive", { periodInMinutes: 0.4 }); // Every ~24s
+    chrome.alarms.create("axiom_keep_alive", { periodInMinutes: 0.33 }); // Every ~20s
     chrome.alarms.onAlarm.addListener((alarm) => {
       if (alarm.name === "axiom_keep_alive") {
         log("Keep-alive alarm triggered: ensuring WebSocket link is active");

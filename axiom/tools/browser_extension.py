@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import uuid
 from typing import Any, Dict, List, Optional, Set
 
@@ -62,6 +63,17 @@ class BrowserResult(dict):
         )
 
 
+def _is_client_open(client: Any) -> bool:
+    """Returns True if client WebSocket connection is open."""
+    if client is None:
+        return False
+    state = getattr(client, "state", None)
+    if state is not None:
+        name = getattr(state, "name", str(state))
+        return name == "OPEN"
+    return bool(getattr(client, "open", True) and not getattr(client, "closed", False))
+
+
 class BrowserExtensionBridge:
     """Manages WebSocket connections from browser extensions and routes commands."""
 
@@ -70,10 +82,21 @@ class BrowserExtensionBridge:
     def __init__(self, host: str = DEFAULT_BRIDGE_HOST, port: int = DEFAULT_BRIDGE_PORT):
         self.host = host
         self.port = port
+        self._client: Optional[Any] = None
         self.active_clients: Set[Any] = set()
-        self.pending_requests: Dict[str, asyncio.Future] = {}
+        self._pending_requests: Dict[str, asyncio.Future] = {}
         self.server: Optional[WebSocketServer] = None
         self._lock: Optional[asyncio.Lock] = None
+        self._heartbeat_task: Optional[asyncio.Task] = None
+        self._last_activity: float = time.monotonic()
+
+    @property
+    def pending_requests(self) -> Dict[str, asyncio.Future]:
+        return self._pending_requests
+
+    @pending_requests.setter
+    def pending_requests(self, val: Dict[str, asyncio.Future]) -> None:
+        self._pending_requests = val
 
     def _get_lock(self) -> asyncio.Lock:
         try:
@@ -98,24 +121,40 @@ class BrowserExtensionBridge:
 
     def is_connected(self) -> bool:
         """Returns True if at least one browser extension is actively connected."""
+        if self._client is not None:
+            if _is_client_open(self._client):
+                return True
+            self._client = None
+
         self.active_clients = {
             c for c in self.active_clients
-            if getattr(c, "open", True) and not getattr(c, "closed", False)
+            if _is_client_open(c)
         }
+        if self.active_clients and self._client is None:
+            self._client = next(iter(self.active_clients))
         return len(self.active_clients) > 0
 
     @property
     def client_count(self) -> int:
         return len(self.active_clients)
 
-    async def _handle_client(self, websocket: Any, *args: Any) -> None:
+    async def _listen(self, websocket: Any, *args: Any) -> None:
         """Handles incoming WebSocket connection from a browser extension."""
+        # When a new client connects: if self._client is already set and open, close it cleanly first.
+        if self._client is not None and self._client != websocket:
+            try:
+                if _is_client_open(self._client):
+                    await self._client.close()
+            except Exception:
+                pass
+        self._client = websocket
         self.active_clients.add(websocket)
         remote = getattr(websocket, "remote_address", "client")
         logger.info("[AXIOM Extension Bridge] Browser extension connected: %s", remote)
 
         try:
             async for raw_message in websocket:
+                self._last_activity = time.monotonic()
                 try:
                     data = json.loads(raw_message)
 
@@ -124,22 +163,66 @@ class BrowserExtensionBridge:
                     msg_action = data.get("action")
                     if msg_type == "ping" or msg_action == "ping":
                         logger.debug("Heartbeat ping received from extension.")
-                        pong_payload = {"type": "pong", "id": data.get("id")}
+                        pong_payload = {"type": "pong", "id": data.get("id"), "action": "pong", "success": True}
                         await websocket.send(json.dumps(pong_payload))
                         continue
 
+                    # Silently consume or ignore pong replies from extension
+                    if msg_type == "pong" or msg_action == "pong":
+                        logger.debug("Heartbeat pong received from extension.")
+                        continue
+
                     msg_id = data.get("id")
-                    if msg_id and msg_id in self.pending_requests:
-                        future = self.pending_requests.pop(msg_id)
+                    if msg_id and msg_id in self._pending_requests:
+                        future = self._pending_requests.pop(msg_id)
                         if not future.done():
                             future.set_result(data)
                 except json.JSONDecodeError:
                     logger.warning("[AXIOM Extension Bridge] Received invalid JSON payload: %s", raw_message[:150])
-        except websockets.exceptions.ConnectionClosed:
+        except (websockets.ConnectionClosed, ConnectionResetError, asyncio.CancelledError):
             pass
         finally:
+            is_active = (self._client == websocket)
+            if is_active:
+                self._client = None
             self.active_clients.discard(websocket)
+            if is_active or len(self.active_clients) == 0:
+                for req_id, fut in list(self._pending_requests.items()):
+                    if not fut.done():
+                        fut.set_exception(ConnectionResetError("Browser extension disconnected mid-command."))
+                self._pending_requests.clear()
             logger.info("[AXIOM Extension Bridge] Browser extension disconnected: %s", remote)
+
+    _handle_client = _listen
+
+    async def _heartbeat_loop(self) -> None:
+        """Periodically sends ping frames to keep connection alive if idle for > 15s."""
+        try:
+            while True:
+                await asyncio.sleep(5.0)
+                if self.is_connected() and self._client is not None:
+                    idle_time = time.monotonic() - self._last_activity
+                    if idle_time >= 15.0:
+                        try:
+                            ping_payload = {"id": "heartbeat", "action": "ping"}
+                            await self._client.send(json.dumps(ping_payload))
+                            self._last_activity = time.monotonic()
+                        except Exception as exc:
+                            logger.debug("[AXIOM Extension Bridge] Heartbeat ping failed: %s", exc)
+        except asyncio.CancelledError:
+            pass
+
+    async def ping(self) -> bool:
+        """Sends an immediate heartbeat ping to the connected browser extension."""
+        if not self.is_connected() or self._client is None:
+            return False
+        try:
+            ping_payload = {"id": "heartbeat", "action": "ping"}
+            await self._client.send(json.dumps(ping_payload))
+            self._last_activity = time.monotonic()
+            return True
+        except Exception:
+            return False
 
     async def start_server(self) -> None:
         """Starts the WebSocket server on 127.0.0.1:41144 with socket reuse."""
@@ -147,32 +230,41 @@ class BrowserExtensionBridge:
             if self.server is not None:
                 return
             try:
-                try:
-                    self.server = await websockets.serve(
-                        self._handle_client,
-                        self.host,
-                        self.port,
-                        reuse_address=True,
-                        reuse_port=True,
-                    )
-                except (TypeError, OSError):
-                    self.server = await websockets.serve(
-                        self._handle_client,
-                        self.host,
-                        self.port,
-                        reuse_address=True,
-                    )
+                self.server = await websockets.serve(
+                    self._listen,
+                    self.host,
+                    self.port,
+                    reuse_address=True,
+                )
                 logger.info("[AXIOM Extension Bridge] Daemon listening on ws://%s:%d", self.host, self.port)
+                self._last_activity = time.monotonic()
+                if self._heartbeat_task is None or self._heartbeat_task.done():
+                    self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
             except OSError as exc:
                 logger.warning("[AXIOM Extension Bridge] Failed to bind ws://%s:%d: %s", self.host, self.port, exc)
 
     async def stop_server(self) -> None:
         """Closes all client connections and shuts down the server."""
         async with self._get_lock():
-            for fut in self.pending_requests.values():
+            if self._heartbeat_task is not None and not self._heartbeat_task.done():
+                self._heartbeat_task.cancel()
+                try:
+                    await self._heartbeat_task
+                except asyncio.CancelledError:
+                    pass
+                self._heartbeat_task = None
+
+            for fut in list(self._pending_requests.values()):
                 if not fut.done():
-                    fut.cancel()
-            self.pending_requests.clear()
+                    fut.set_exception(ConnectionResetError("Browser extension disconnected mid-command."))
+            self._pending_requests.clear()
+
+            if self._client is not None:
+                try:
+                    await self._client.close()
+                except Exception:
+                    pass
+                self._client = None
 
             for client in list(self.active_clients):
                 try:
@@ -189,7 +281,7 @@ class BrowserExtensionBridge:
                     logger.debug("[AXIOM Extension Bridge] Error closing server: %s", exc)
                 finally:
                     self.server = None
-                logger.info("[AXIOM Extension Bridge] Daemon shut down.")
+            logger.info("[AXIOM Extension Bridge] Daemon shut down.")
 
     async def ensure_server(self) -> None:
         """Ensures the daemon is listening."""
@@ -222,13 +314,17 @@ class BrowserExtensionBridge:
 
         loop = asyncio.get_running_loop()
         future: asyncio.Future = loop.create_future()
-        self.pending_requests[msg_id] = future
+        self._pending_requests[msg_id] = future
 
-        client = next(iter(self.active_clients))
+        client = self._client or next(iter(self.active_clients))
         try:
             await client.send(json.dumps(payload))
+            self._last_activity = time.monotonic()
+        except (websockets.ConnectionClosed, ConnectionResetError, BrokenPipeError) as exc:
+            self._pending_requests.pop(msg_id, None)
+            raise ConnectionResetError("Browser extension disconnected mid-command.") from exc
         except Exception as exc:
-            self.pending_requests.pop(msg_id, None)
+            self._pending_requests.pop(msg_id, None)
             return BrowserResult({
                 "success": False,
                 "error": f"Failed to send '{action}' to browser extension: {exc}",
@@ -239,7 +335,7 @@ class BrowserExtensionBridge:
             response = await asyncio.wait_for(future, timeout=timeout)
             return BrowserResult(response)
         except asyncio.TimeoutError:
-            self.pending_requests.pop(msg_id, None)
+            self._pending_requests.pop(msg_id, None)
             return BrowserResult({
                 "success": False,
                 "error": f"Command '{action}' timed out after {timeout}s awaiting extension response",

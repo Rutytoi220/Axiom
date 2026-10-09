@@ -193,7 +193,11 @@ class InteractWithBrowserTool(BaseTool):
                 if resp.get("id") == req_id:
                     return resp
 
-    async def execute(self, params: Dict[str, Any]) -> ToolResult:
+    async def execute(self, params: Optional[Dict[str, Any]] = None, **kwargs: Any) -> ToolResult:
+        if params is None:
+            params = {}
+        if kwargs:
+            params = {**params, **kwargs}
         action = params.get("action", "").strip().lower()
         selector = str(params.get("selector", "") or "").strip()
         text = str(params.get("text", "") or "")
@@ -305,6 +309,13 @@ class InteractWithBrowserTool(BaseTool):
                         remedy_hint="Ensure the browser extension is running or use Tier 1 execute_command or manage_desktop_window.",
                         allowed_actions=["execute_command", "manage_desktop_window"],
                     )
+            except ConnectionResetError:
+                return ToolResult(
+                    False,
+                    error="Browser bridge connection lost mid-command. The browser or tab may have closed or crashed.",
+                    remedy_hint="Verify browser window is running and focused, then retry get_page_snapshot.",
+                    allowed_actions=["get_page_snapshot"],
+                )
             except Exception as exc:
                 elem_id = params.get("element_id")
                 target_url = params.get("query") or params.get("url") or "<url>"
