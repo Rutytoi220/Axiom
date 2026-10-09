@@ -1,9 +1,10 @@
 import asyncio
+import inspect
 import json
 import re
 import shutil
 import httpx
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, List, Optional
 from axiom.core.plugins import get_tool_schemas, execute_tool, get_tier_timeout
 
 REFUSAL_PHRASES = [
@@ -15,9 +16,27 @@ REFUSAL_PHRASES = [
 ]
 
 class NativeOrchestrator:
-    def __init__(self, max_context_tokens: int = 32768):
+    def __init__(
+        self,
+        max_context_tokens: int = 32768,
+        max_steps: int = 5,
+        model_provider: Optional[Any] = None,
+        tool_schemas: Optional[list] = None,
+        execute_tool: Optional[Any] = None,
+        stream_provider: Optional[Callable[[dict], AsyncGenerator[dict, None]]] = None,
+        tool_executor: Optional[Callable[[str, dict], Awaitable[Any]]] = None,
+        db_path: Optional[str] = None,
+        max_depth: Optional[int] = None,
+    ):
         self.max_context_tokens = max_context_tokens
-        self._execute_tool = None
+        self.max_steps = max_depth if max_depth is not None else max_steps
+        self.max_depth = self.max_steps
+        self.stream_provider = stream_provider or model_provider
+        self.model_provider = self.stream_provider
+        self.tool_schemas = tool_schemas
+        self.tool_executor = tool_executor
+        self._execute_tool = execute_tool or tool_executor
+        self.db_path = db_path
 
     @property
     def execute_tool(self):
@@ -350,9 +369,92 @@ class NativeOrchestrator:
 
         return None
 
-    async def generate_stream(self, payload: dict, depth: int = 0, is_retry: bool = False) -> AsyncGenerator[dict, None]:
-        if depth >= 5:
-            yield {"choices": [{"delta": {"content": "\n[Notice: Reached maximum autonomous ReAct steps (5).]\n"}}]}
+    async def _stream_model_events(self, payload: dict, base_url: str, stream_provider: Optional[Any] = None) -> AsyncGenerator[dict, None]:
+        active_provider = stream_provider or getattr(self, "stream_provider", None) or getattr(self, "model_provider", None)
+        if active_provider is not None:
+            # Deterministic test provider injection: skip external Ollama calls
+            stream_fn = getattr(active_provider, "stream_chat", None) or getattr(active_provider, "generate_stream", None)
+            if callable(stream_fn):
+                stream_iter = stream_fn(payload)
+            elif callable(active_provider):
+                stream_iter = active_provider(payload)
+            else:
+                raise TypeError(f"Invalid stream_provider {type(active_provider)}. Expected callable or object with stream_chat().")
+
+            async for item in stream_iter:
+                if isinstance(item, str):
+                    line = item.strip()
+                    if not line:
+                        continue
+                    if line.startswith("data: "):
+                        line = line[6:].strip()
+                    if line == "[DONE]":
+                        break
+                    try:
+                        yield json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                elif isinstance(item, dict):
+                    yield item
+            return
+
+        # Default production path: Ollama over HTTP
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                await client.post(
+                    f"{base_url}/api/generate",
+                    json={
+                        "model": payload["model"],
+                        "options": {"num_ctx": 32768, "num_gpu": 99},
+                        "keep_alive": "5m",
+                    },
+                )
+        except Exception:
+            pass
+
+        timeout_config = httpx.Timeout(connect=10.0, read=300.0, write=20.0, pool=20.0)
+        async with httpx.AsyncClient(timeout=timeout_config) as client:
+            async with client.stream(
+                "POST",
+                f"{base_url}/v1/chat/completions",
+                json=payload
+            ) as resp:
+                if resp.status_code != 200:
+                    await resp.aread()
+                    yield {"_api_error": f"HTTP {resp.status_code}: {resp.text}"}
+                    return
+
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    if line.startswith("data: "):
+                        data_str = line[6:]
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            yield json.loads(data_str)
+                        except json.JSONDecodeError:
+                            pass
+
+    async def generate_stream(
+        self,
+        payload: dict,
+        depth: int = 0,
+        is_retry: bool = False,
+        stream_provider: Optional[Callable[[dict], AsyncGenerator[dict, None]]] = None,
+        tool_schemas: Optional[List[Dict[str, Any]]] = None,
+        tool_executor: Optional[Callable[[str, dict], Awaitable[Any]]] = None,
+        db_path: Optional[str] = None,
+        max_depth: Optional[int] = None,
+    ) -> AsyncGenerator[dict, None]:
+        eff_max_depth = max_depth if max_depth is not None else getattr(self, "max_depth", self.max_steps)
+        eff_stream_provider = stream_provider or getattr(self, "stream_provider", None) or getattr(self, "model_provider", None)
+        eff_tool_schemas = tool_schemas if tool_schemas is not None else getattr(self, "tool_schemas", None)
+        eff_tool_executor = tool_executor or getattr(self, "tool_executor", None)
+        eff_db_path = db_path or getattr(self, "db_path", None)
+
+        if depth >= eff_max_depth:
+            yield {"choices": [{"delta": {"content": f"\n[Notice: Reached maximum autonomous ReAct steps ({eff_max_depth}).]\n"}}]}
             return
 
         from axiom.config import get_config
@@ -381,7 +483,7 @@ class NativeOrchestrator:
                 elif m.get("role") == "assistant" and m.get("tool_calls"):
                     break
 
-        if depth == 0:
+        if depth == 0 and eff_stream_provider is None:
             # Eagerly ensure WebExtension bridge server is running on 127.0.0.1:41144
             try:
                 from axiom.tools.browser_extension import get_bridge
@@ -425,10 +527,10 @@ class NativeOrchestrator:
                 try:
                     from axiom.memory.hydration import hydrate_context_memory
                     clean_search = re.sub(r"\[Active Window:.*?\]\n?", "", user_prompt).strip()
-                    mem_block = hydrate_context_memory(clean_search, max_tokens=350)
+                    mem_block = hydrate_context_memory(clean_search, db_path=eff_db_path, max_tokens=350)
                     if mem_block:
                         system_prompt_content += f"\n\n{mem_block}"
-                    else:
+                    elif eff_stream_provider is None:
                         from axiom.memory.semantic import search_memories
                         recalled = search_memories(clean_search, top_k=3)
                         if recalled:
@@ -493,15 +595,18 @@ class NativeOrchestrator:
         from axiom.agents.actuator_arbiter import is_browser_window
         browser_active = is_browser_window(active_window)
 
-        active_tools = payload.get("tools") or get_tool_schemas(0)
-        payload["tools"] = filter_tool_schemas_by_tier(active_tools, tier, is_browser=browser_active)
+        if eff_tool_schemas is not None:
+            payload["tools"] = list(eff_tool_schemas)
+        else:
+            active_tools = payload.get("tools") or get_tool_schemas(0)
+            payload["tools"] = filter_tool_schemas_by_tier(active_tools, tier, is_browser=browser_active)
 
-        # Strict negative gating: purge Tier 3 interact_with_ui whenever a browser window is active
-        if browser_active:
-            payload["tools"] = [
-                t for t in payload["tools"]
-                if (t.get("function", {}).get("name") or t.get("name")) != "interact_with_ui"
-            ]
+            # Strict negative gating: purge Tier 3 interact_with_ui whenever a browser window is active
+            if browser_active:
+                payload["tools"] = [
+                    t for t in payload["tools"]
+                    if (t.get("function", {}).get("name") or t.get("name")) != "interact_with_ui"
+                ]
 
         payload["model"] = config.ollama_model
 
@@ -531,116 +636,85 @@ class NativeOrchestrator:
             options["num_ctx"] = 32768
         options.setdefault("num_gpu", 99)
 
-        try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                await client.post(
-                    f"{base_url}/api/generate",
-                    json={
-                        "model": payload["model"],
-                        "options": {"num_ctx": 32768, "num_gpu": 99},
-                        "keep_alive": "5m",
-                    },
-                )
-        except Exception:
-            pass
+        pending_tool_calls = []
+        is_reasoning = False
+        collected_assistant_text = []
+        buffered_chunks = []
+        buffering = (depth == 0 and not is_retry and is_interface_action) or (depth > 0) or is_recovery_turn
+        refusal_detected = False
 
-        timeout_config = httpx.Timeout(connect=10.0, read=300.0, write=20.0, pool=20.0)
         try:
-            async with httpx.AsyncClient(timeout=timeout_config) as client:
-                async with client.stream(
-                    "POST",
-                    f"{base_url}/v1/chat/completions",
-                    json=payload
-                ) as resp:
-                    if resp.status_code != 200:
-                        await resp.aread()
-                        yield {"choices": [{"delta": {"content": f"\n⚠️ [API Error] HTTP {resp.status_code}: {resp.text}\n"}}]}
-                        return
+            async for data in self._stream_model_events(payload, base_url, stream_provider=eff_stream_provider):
+                if "_api_error" in data:
+                    yield {"choices": [{"delta": {"content": f"\n⚠️ [API Error] {data['_api_error']}\n"}}]}
+                    return
 
-                    pending_tool_calls = []
+                delta = data.get("choices", [{}])[0].get("delta", {})
+
+                if "reasoning_content" in delta:
+                    r_content = delta.pop("reasoning_content")
+                    if not is_reasoning:
+                        delta["content"] = "<think>" + r_content
+                        is_reasoning = True
+                    else:
+                        delta["content"] = r_content
+
+                if "content" in delta and is_reasoning and not "reasoning_content" in data.get("choices", [{}])[0].get("delta", {}):
+                    delta["content"] = "</think>" + delta["content"]
                     is_reasoning = False
-                    collected_assistant_text = []
-                    buffered_chunks = []
-                    buffering = (depth == 0 and not is_retry and is_interface_action) or (depth > 0) or is_recovery_turn
-                    refusal_detected = False
 
-                    async for line in resp.aiter_lines():
-                        if not line:
-                            continue
-                        if line.startswith("data: "):
-                            data_str = line[6:]
-                            if data_str == "[DONE]":
-                                break
-                            try:
-                                data = json.loads(data_str)
-                                delta = data.get("choices", [{}])[0].get("delta", {})
-                                
-                                if "reasoning_content" in delta:
-                                    r_content = delta.pop("reasoning_content")
-                                    if not is_reasoning:
-                                        delta["content"] = "<think>" + r_content
-                                        is_reasoning = True
-                                    else:
-                                        delta["content"] = r_content
-                                        
-                                if "content" in delta and is_reasoning and not "reasoning_content" in data.get("choices", [{}])[0].get("delta", {}):
-                                    delta["content"] = "</think>" + delta["content"]
-                                    is_reasoning = False
+                if "content" in delta and delta["content"]:
+                    collected_assistant_text.append(delta["content"])
 
-                                if "content" in delta and delta["content"]:
-                                    collected_assistant_text.append(delta["content"])
+                if "tool_calls" in delta:
+                    for tc in delta["tool_calls"]:
+                        idx = tc.get("index", 0)
+                        if idx > 0:
+                            continue  # Enforce strictly ONE tool call per response
+                        while len(pending_tool_calls) <= idx:
+                            pending_tool_calls.append({"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+                        if "id" in tc and tc["id"]:
+                            pending_tool_calls[idx]["id"] = tc["id"]
+                        if "function" in tc and isinstance(tc["function"], dict):
+                            if "name" in tc["function"] and tc["function"]["name"]:
+                                pending_tool_calls[idx]["function"]["name"] = tc["function"]["name"]
+                            if "arguments" in tc["function"] and tc["function"]["arguments"]:
+                                pending_tool_calls[idx]["function"]["arguments"] += str(tc["function"]["arguments"])
+                        elif "name" in tc and tc["name"]:
+                            pending_tool_calls[idx]["function"]["name"] = tc["name"]
+                            if "arguments" in tc and tc["arguments"]:
+                                pending_tool_calls[idx]["function"]["arguments"] += str(tc["arguments"])
 
-                                if "tool_calls" in delta:
-                                    for tc in delta["tool_calls"]:
-                                        idx = tc.get("index", 0)
-                                        if idx > 0:
-                                            continue  # Enforce strictly ONE tool call per response
-                                        while len(pending_tool_calls) <= idx:
-                                            pending_tool_calls.append({"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
-                                        if "id" in tc and tc["id"]:
-                                            pending_tool_calls[idx]["id"] = tc["id"]
-                                        if "function" in tc and isinstance(tc["function"], dict):
-                                            if "name" in tc["function"] and tc["function"]["name"]:
-                                                pending_tool_calls[idx]["function"]["name"] = tc["function"]["name"]
-                                            if "arguments" in tc["function"] and tc["function"]["arguments"]:
-                                                pending_tool_calls[idx]["function"]["arguments"] += str(tc["function"]["arguments"])
-                                        elif "name" in tc and tc["name"]:
-                                            pending_tool_calls[idx]["function"]["name"] = tc["name"]
-                                            if "arguments" in tc and tc["arguments"]:
-                                                pending_tool_calls[idx]["function"]["arguments"] += str(tc["arguments"])
-
-                                if buffering:
-                                    if "tool_calls" in delta or pending_tool_calls:
-                                        buffering = False
-                                        clean_so_far = "".join(collected_assistant_text)
-                                        if not is_recovery_turn and not clean_so_far.lstrip().startswith(("{", "[", "```", "<")):
-                                            for b in buffered_chunks:
-                                                yield b
-                                        buffered_chunks.clear()
-                                        yield data
-                                    else:
-                                        buffered_chunks.append(data)
-                                        text_so_far = "".join(collected_assistant_text)
-                                        clean_text = re.sub(r"<think>.*?</think>", "", text_so_far, flags=re.DOTALL)
-                                        stripped = clean_text.lstrip()
-                                        if self.is_refusal(clean_text):
-                                            refusal_detected = True
-                                            break
-                                        elif stripped and not stripped.startswith(("{", "[", "```", "<")):
-                                            if not is_recovery_turn and (depth > 0 or len(clean_text) > 250):
-                                                buffering = False
-                                                for b in buffered_chunks:
-                                                    yield b
-                                                buffered_chunks.clear()
-                                        elif not is_recovery_turn and len(clean_text) > 4000:
-                                            buffering = False
-                                            for b in buffered_chunks:
-                                                yield b
-                                            buffered_chunks.clear()
-                                else:
-                                    yield data
-                            except json.JSONDecodeError:
-                                pass
+                if buffering:
+                    if "tool_calls" in delta or pending_tool_calls:
+                        buffering = False
+                        clean_so_far = "".join(collected_assistant_text)
+                        if not is_recovery_turn and not clean_so_far.lstrip().startswith(("{", "[", "```", "<")):
+                            for b in buffered_chunks:
+                                yield b
+                        buffered_chunks.clear()
+                        yield data
+                    else:
+                        buffered_chunks.append(data)
+                        text_so_far = "".join(collected_assistant_text)
+                        clean_text = re.sub(r"<think>.*?</think>", "", text_so_far, flags=re.DOTALL)
+                        stripped = clean_text.lstrip()
+                        if self.is_refusal(clean_text):
+                            refusal_detected = True
+                            break
+                        elif stripped and not stripped.startswith(("{", "[", "```", "<")):
+                            if not is_recovery_turn and (depth > 0 or len(clean_text) > 250):
+                                buffering = False
+                                for b in buffered_chunks:
+                                    yield b
+                                buffered_chunks.clear()
+                        elif not is_recovery_turn and len(clean_text) > 4000:
+                            buffering = False
+                            for b in buffered_chunks:
+                                yield b
+                            buffered_chunks.clear()
+                else:
+                    yield data
         except httpx.ConnectError as exc:
             yield {"choices": [{"delta": {"content": f"\n⚠️ [Connection Error] Could not connect to local AI engine at {base_url}: {exc}. Ensure Ollama is running.\n"}}]}
             return
@@ -732,7 +806,7 @@ class NativeOrchestrator:
         # an actuator tool call, and depth < 4, do not terminate the loop.
         # Reject conversational prose, clear buffers, and trigger a fast retry directing
         # the model to invoke the recovery tool immediately.
-        if is_recovery_turn and not pending_tool_calls and depth < 4:
+        if is_recovery_turn and not pending_tool_calls and depth < (eff_max_depth - 1):
             buffered_chunks.clear()
             collected_assistant_text.clear()
 
@@ -750,7 +824,16 @@ class NativeOrchestrator:
             payload.setdefault("options", {})["temperature"] = 0.1
             payload["temperature"] = 0.1
 
-            async for retry_chunk in self.generate_stream(payload, depth=depth + 1, is_retry=True):
+            async for retry_chunk in self.generate_stream(
+                payload,
+                depth=depth + 1,
+                is_retry=True,
+                stream_provider=eff_stream_provider,
+                tool_schemas=eff_tool_schemas,
+                tool_executor=eff_tool_executor,
+                db_path=eff_db_path,
+                max_depth=eff_max_depth,
+            ):
                 yield retry_chunk
             return
 
@@ -789,10 +872,24 @@ class NativeOrchestrator:
                 timeout = get_tier_timeout(func_name)
                 timeout_int = int(timeout)
                 try:
-                    tool_result = await asyncio.wait_for(
-                        self.execute_tool(func_name, **func_args),
-                        timeout=timeout,
-                    )
+                    if eff_tool_executor is not None:
+                        try:
+                            exec_call = eff_tool_executor(func_name, func_args)
+                            if inspect.isawaitable(exec_call):
+                                tool_result = await asyncio.wait_for(exec_call, timeout=timeout)
+                            else:
+                                tool_result = exec_call
+                        except TypeError:
+                            exec_call = eff_tool_executor(func_name, **func_args)
+                            if inspect.isawaitable(exec_call):
+                                tool_result = await asyncio.wait_for(exec_call, timeout=timeout)
+                            else:
+                                tool_result = exec_call
+                    else:
+                        tool_result = await asyncio.wait_for(
+                            self.execute_tool(func_name, **func_args),
+                            timeout=timeout,
+                        )
                     
                     if hasattr(tool_result, "to_dict"):
                         tool_dict = tool_result.to_dict(tool=func_name, arguments=func_args)
@@ -877,12 +974,20 @@ class NativeOrchestrator:
                 if session_id:
                     try:
                         from axiom.db.memory import add_message
-                        add_message(session_id, "tool", f"[{func_name}] {res_str}")
+                        add_message(session_id, "tool", f"[{func_name}] {res_str}", db_path=eff_db_path)
                     except Exception:
                         pass
 
-            if depth < 5:
-                async for chunk in self.generate_stream(payload, depth=depth + 1):
+            if depth < eff_max_depth:
+                async for chunk in self.generate_stream(
+                    payload,
+                    depth=depth + 1,
+                    stream_provider=eff_stream_provider,
+                    tool_schemas=eff_tool_schemas,
+                    tool_executor=eff_tool_executor,
+                    db_path=eff_db_path,
+                    max_depth=eff_max_depth,
+                ):
                     yield chunk
 
     @classmethod
