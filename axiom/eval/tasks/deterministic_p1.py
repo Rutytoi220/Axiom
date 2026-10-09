@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 from axiom.db.memory import MemoryStore
+from axiom.eval.metrics import EvalStatus
 from axiom.eval.task import EvalContext, EvalTask
 from axiom.eval.validators import (
     assert_file_content,
@@ -187,6 +188,7 @@ def build_task_step_limit_enforcement() -> EvalTask:
         tool_schemas=[{"type": "function", "function": {"name": "endless_poll"}}],
         mock_responses=mock_responses,
         validator_fn=validator,
+        expected_status=EvalStatus.STEP_LIMIT_EXCEEDED,
     )
 
 
@@ -213,6 +215,7 @@ def build_task_false_success_rejection() -> EvalTask:
         tool_schemas=[{"type": "function", "function": {"name": "create_diagnostic"}}],
         mock_responses=mock_responses,
         validator_fn=validator,
+        expected_status=EvalStatus.FALSE_SUCCESS,
     )
 
 
@@ -295,6 +298,7 @@ def build_task_timeout_containment() -> EvalTask:
         tool_schemas=[{"type": "function", "function": {"name": "blocking_tool"}}],
         mock_responses=mock_responses,
         validator_fn=validator,
+        expected_status=EvalStatus.TIMEOUT,
     )
 
 

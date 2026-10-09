@@ -609,7 +609,7 @@ class NativeOrchestrator:
                     if (t.get("function", {}).get("name") or t.get("name")) != "interact_with_ui"
                 ]
 
-        payload["model"] = config.ollama_model
+        payload["model"] = payload.get("model") or config.ollama_model
 
         # Scrub images from payload to prevent context-window collapse
         for msg in payload.get("messages", []):

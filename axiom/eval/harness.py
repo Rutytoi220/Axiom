@@ -13,6 +13,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+import httpx
+
 from axiom.agents.native_orchestrator import NativeOrchestrator
 from axiom.db.memory import MemoryStore
 from axiom.eval.metrics import EvalStatus, TaskResult
@@ -20,6 +22,96 @@ from axiom.eval.provider import MockTurn
 from axiom.eval.task import EvalContext, EvalTask
 from axiom.eval.types import EvaluationResult, ResultStatus, ValidationResult
 from axiom.tools.core import ToolResult
+
+
+async def check_ollama_status_async(
+    url: str = "http://127.0.0.1:11434",
+    model_name: Optional[str] = None,
+    timeout: float = 1.0,
+) -> Tuple[bool, str]:
+    """Check whether local Ollama daemon is reachable and whether model is pulled."""
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.get(f"{url.rstrip('/')}/api/tags")
+            if resp.status_code != 200:
+                return False, f"Ollama HTTP {resp.status_code}"
+            if model_name:
+                models = [m.get("name", "") for m in resp.json().get("models", [])]
+                clean_target = model_name.split(":")[0]
+                if not any(m == model_name or m.startswith(clean_target) for m in models):
+                    return False, f"Model '{model_name}' not found in Ollama models: {models}"
+            return True, "Ollama ready"
+    except Exception as exc:
+        return False, f"Could not connect to Ollama at {url}: {exc}"
+
+
+class LiveOllamaStreamAdapter:
+    """Live streaming adapter connecting to local Ollama with token and latency telemetry."""
+
+    def __init__(self, base_url: str = "http://127.0.0.1:11434", model: str = "qwen3:8b"):
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+        self.measured_tokens: int = 0
+        self.model_latencies: List[float] = []
+
+    async def stream_chat(self, payload: dict):
+        payload["model"] = self.model
+        t0 = time.perf_counter()
+
+        timeout_config = httpx.Timeout(connect=5.0, read=120.0, write=10.0, pool=10.0)
+        async with httpx.AsyncClient(timeout=timeout_config) as client:
+            async with client.stream(
+                "POST",
+                f"{self.base_url}/api/chat",
+                json={
+                    "model": self.model,
+                    "messages": payload.get("messages", []),
+                    "tools": payload.get("tools", []),
+                    "stream": True,
+                    "options": payload.get("options", {"num_ctx": 32768, "temperature": 0.1}),
+                },
+            ) as resp:
+                if resp.status_code != 200:
+                    err_b = await resp.aread()
+                    yield {"_api_error": f"HTTP {resp.status_code}: {err_b.decode('utf-8', errors='replace')}"}
+                    return
+
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    try:
+                        chunk = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+
+                    # Terminal metadata chunk from Ollama
+                    if chunk.get("done"):
+                        pec = chunk.get("prompt_eval_count") or 0
+                        ec = chunk.get("eval_count") or 0
+                        self.measured_tokens += (pec + ec)
+
+                    # Also support OpenAI-style usage dict if present
+                    if "usage" in chunk:
+                        u = chunk["usage"]
+                        pt = u.get("prompt_tokens") or 0
+                        ct = u.get("completion_tokens") or 0
+                        self.measured_tokens += (pt + ct)
+
+                    msg = chunk.get("message", {})
+                    content = msg.get("content", "")
+                    tool_calls = msg.get("tool_calls", [])
+
+                    delta = {}
+                    if content:
+                        delta["content"] = content
+                    if tool_calls:
+                        delta["tool_calls"] = tool_calls
+
+                    if delta:
+                        yield {"choices": [{"delta": delta}]}
+
+        latency = time.perf_counter() - t0
+        self.model_latencies.append(latency)
 
 
 class EvalHarness:
@@ -31,9 +123,32 @@ class EvalHarness:
         mock_responses: Optional[List[Dict[str, Any]]] = None,
         mock_stream_fn: Optional[Callable[[dict], Any]] = None,
         custom_tools: Optional[Dict[str, Callable[..., Any]]] = None,
+        use_live_model: bool = False,
+        model: Optional[str] = None,
+        base_url: Optional[str] = None,
     ) -> TaskResult:
         """Execute an EvalTask inside an isolated workspace and validate observable state."""
         start_time = time.perf_counter()
+
+        eff_use_live_model = bool(use_live_model or (task.metadata and task.metadata.get("use_live_model", False)))
+        eff_model = model or (task.metadata.get("model") if task.metadata else None) or "qwen3:8b"
+        eff_base_url = base_url or (task.metadata.get("base_url") if task.metadata else None) or "http://127.0.0.1:11434"
+
+        if eff_use_live_model:
+            is_ready, ready_reason = await check_ollama_status_async(eff_base_url, eff_model)
+            if not is_ready:
+                return TaskResult(
+                    task_id=task.task_id,
+                    status=EvalStatus.UNVERIFIED,
+                    message=f"Ollama unavailable: {ready_reason}",
+                    step_count=0,
+                    tool_calls=[],
+                    duration_seconds=0.0,
+                    measured_tokens=None,
+                    estimated_tokens=0,
+                    failure_category="UNVERIFIED",
+                    artifacts={"reason": ready_reason, "use_live_model": True},
+                )
 
         temp_dir = Path(tempfile.mkdtemp(prefix=f"axiom_eval_{task.task_id}_")).resolve()
         db_path = temp_dir / "test_eval.db"
@@ -59,6 +174,9 @@ class EvalHarness:
         tool_names_called: List[str] = []
         estimated_token_count: int = 0
         step_counter: int = 0
+        model_step_latencies: List[float] = []
+        tool_step_latencies: List[float] = []
+        live_adapter: Optional[LiveOllamaStreamAdapter] = None
 
         # Merge tool handlers
         tools_map = dict(task.custom_tools or task.fake_tools or {})
@@ -120,6 +238,7 @@ class EvalHarness:
             if "memory_store" in sig.parameters and "memory_store" not in call_kwargs:
                 call_kwargs["memory_store"] = memory_store
 
+            t_tool_0 = time.perf_counter()
             try:
                 # Call handler with kwargs or positional args if signature doesn't take kwargs
                 if inspect.iscoroutinefunction(handler):
@@ -140,6 +259,7 @@ class EvalHarness:
                     success=False,
                     error=f"Tool execution failed: {exc}",
                 )
+            tool_step_latencies.append(time.perf_counter() - t_tool_0)
 
             context.record_tool_invocation(name, call_kwargs, res)
             return res
@@ -156,6 +276,7 @@ class EvalHarness:
             async def stream_chat(self, payload: dict):
                 nonlocal step_counter, estimated_token_count
                 step_counter += 1
+                t_model_0 = time.perf_counter()
 
                 # Token accounting via NativeOrchestrator.count_tokens
                 for m in payload.get("messages", []):
@@ -163,76 +284,91 @@ class EvalHarness:
                     if isinstance(c, str):
                         estimated_token_count += NativeOrchestrator.count_tokens(c)
 
-                if self.custom_fn:
-                    res = self.custom_fn(payload)
-                    if inspect.isasyncgen(res):
-                        async for chunk in res:
-                            yield chunk
-                        return
-                    elif inspect.isgenerator(res):
-                        for chunk in res:
-                            yield chunk
-                        return
-                    elif inspect.isawaitable(res):
-                        res = await res
+                try:
+                    if self.custom_fn:
+                        res = self.custom_fn(payload)
+                        if inspect.isasyncgen(res):
+                            async for chunk in res:
+                                yield chunk
+                            return
+                        elif inspect.isgenerator(res):
+                            for chunk in res:
+                                yield chunk
+                            return
+                        elif inspect.isawaitable(res):
+                            res = await res
 
-                if self.req_idx < len(self.turns):
-                    turn = self.turns[self.req_idx]
-                    self.req_idx += 1
+                    if self.req_idx < len(self.turns):
+                        turn = self.turns[self.req_idx]
+                        self.req_idx += 1
 
-                    if isinstance(turn, MockTurn):
-                        if turn.exception is not None:
-                            raise turn.exception
-                        for chunk in turn.chunks:
-                            delta = chunk.get("choices", [{}])[0].get("delta", {})
-                            c = delta.get("content", "")
-                            if c:
-                                estimated_token_count += NativeOrchestrator.count_tokens(c)
-                            yield chunk
-                    elif isinstance(turn, dict):
-                        # Could be assistant message format or raw chunk
-                        if "choices" in turn:
-                            yield turn
-                        elif turn.get("role") == "assistant":
-                            # Convert assistant message format to SSE delta chunks
-                            if "tool_calls" in turn:
-                                yield {
-                                    "choices": [
-                                        {
-                                            "delta": {
-                                                "tool_calls": [
-                                                    {
-                                                        "index": 0,
-                                                        "id": tc.get("id", "mock_call_1"),
-                                                        "type": "function",
-                                                        "function": {
-                                                            "name": tc.get("function", {}).get("name") or tc.get("name"),
-                                                            "arguments": (
-                                                                tc.get("function", {}).get("arguments")
-                                                                if isinstance(tc.get("function", {}).get("arguments"), str)
-                                                                else json.dumps(tc.get("function", {}).get("arguments") or tc.get("arguments", {}))
-                                                            ),
-                                                        },
-                                                    }
-                                                    for tc in turn.get("tool_calls", [])
-                                                ]
+                        if isinstance(turn, MockTurn):
+                            if turn.exception is not None:
+                                raise turn.exception
+                            for chunk in turn.chunks:
+                                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                                c = delta.get("content", "")
+                                if c:
+                                    estimated_token_count += NativeOrchestrator.count_tokens(c)
+                                yield chunk
+                        elif isinstance(turn, dict):
+                            # Could be assistant message format or raw chunk
+                            if "choices" in turn:
+                                yield turn
+                            elif turn.get("role") == "assistant":
+                                # Convert assistant message format to SSE delta chunks
+                                if "tool_calls" in turn:
+                                    yield {
+                                        "choices": [
+                                            {
+                                                "delta": {
+                                                    "tool_calls": [
+                                                        {
+                                                            "index": 0,
+                                                            "id": tc.get("id", "mock_call_1"),
+                                                            "type": "function",
+                                                            "function": {
+                                                                "name": tc.get("function", {}).get("name") or tc.get("name"),
+                                                                "arguments": (
+                                                                    tc.get("function", {}).get("arguments")
+                                                                    if isinstance(tc.get("function", {}).get("arguments"), str)
+                                                                    else json.dumps(tc.get("function", {}).get("arguments") or tc.get("arguments", {}))
+                                                                ),
+                                                            },
+                                                        }
+                                                        for tc in turn.get("tool_calls", [])
+                                                    ]
+                                                }
                                             }
-                                        }
-                                    ]
-                                }
-                            elif "content" in turn:
-                                content = turn.get("content", "")
-                                estimated_token_count += NativeOrchestrator.count_tokens(content)
-                                yield {"choices": [{"delta": {"content": content}}]}
-                        else:
-                            yield turn
-                    elif isinstance(turn, str):
-                        estimated_token_count += NativeOrchestrator.count_tokens(turn)
-                        yield {"choices": [{"delta": {"content": turn}}]}
-                else:
-                    yield {"choices": [{"delta": {"content": "[Mock turns exhausted]"}}]}
+                                        ]
+                                    }
+                                elif "content" in turn:
+                                    content = turn.get("content", "")
+                                    estimated_token_count += NativeOrchestrator.count_tokens(content)
+                                    yield {"choices": [{"delta": {"content": content}}]}
+                            else:
+                                yield turn
+                        elif isinstance(turn, str):
+                            estimated_token_count += NativeOrchestrator.count_tokens(turn)
+                            yield {"choices": [{"delta": {"content": turn}}]}
+                    else:
+                        yield {"choices": [{"delta": {"content": "[Mock turns exhausted]"}}]}
+                finally:
+                    model_step_latencies.append(time.perf_counter() - t_model_0)
 
-        stream_mgr = MockStreamManager(turns_source, custom_fn=mock_stream_fn or task.mock_stream_fn)
+        if eff_use_live_model:
+            live_adapter = LiveOllamaStreamAdapter(base_url=eff_base_url, model=eff_model)
+
+            async def _live_stream_wrapper(p: dict):
+                nonlocal step_counter
+                step_counter += 1
+                async for chunk in live_adapter.stream_chat(p):
+                    yield chunk
+
+            stream_chat_fn = _live_stream_wrapper
+        else:
+            stream_mgr = MockStreamManager(turns_source, custom_fn=mock_stream_fn or task.mock_stream_fn)
+            stream_chat_fn = stream_mgr.stream_chat
 
         try:
             # Setup hook
@@ -247,13 +383,14 @@ class EvalHarness:
 
             orchestrator = NativeOrchestrator(
                 max_depth=task.max_steps,
-                stream_provider=stream_mgr.stream_chat,
+                stream_provider=stream_chat_fn,
                 tool_schemas=task.tool_schemas,
                 tool_executor=scoped_tool_executor,
                 db_path=str(db_path),
             )
 
             payload = {
+                "model": eff_model,
                 "messages": [{"role": "user", "content": task.user_prompt or task.description}],
                 "tools": list(task.tool_schemas or []),
             }
@@ -348,6 +485,17 @@ class EvalHarness:
             # Always clean up temporary workspace
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+        measured_tokens_val = (
+            live_adapter.measured_tokens
+            if (eff_use_live_model and live_adapter is not None)
+            else None
+        )
+        latencies_model = (
+            live_adapter.model_latencies
+            if (eff_use_live_model and live_adapter is not None)
+            else list(model_step_latencies)
+        )
+
         return TaskResult(
             task_id=task.task_id,
             status=status,
@@ -355,13 +503,19 @@ class EvalHarness:
             step_count=context.step_count,
             tool_calls=tool_names_called,
             duration_seconds=context.duration_seconds,
-            measured_tokens=None,
+            measured_tokens=measured_tokens_val,
             estimated_tokens=estimated_token_count,
             failure_category=failure_category,
             artifacts={
                 "final_response": context.final_response,
                 "workspace_dir": str(temp_dir),
                 "db_path": str(db_path),
+                "latency_breakdown": {
+                    "model_latencies": latencies_model,
+                    "tool_latencies": list(tool_step_latencies),
+                    "total_model_latency": round(sum(latencies_model), 4),
+                    "total_tool_latency": round(sum(tool_step_latencies), 4),
+                },
             },
         )
 
@@ -395,7 +549,7 @@ class EvalHarness:
             failure_category=failure_cat,
             validator_message=res.message,
             error_message=res.message if res.status == EvalStatus.TOOL_ERROR else None,
-            measured_tokens=None,
+            measured_tokens=res.measured_tokens,
             estimated_tokens={"total_tokens": res.estimated_tokens},
             cleanup_success=True,
         )

@@ -76,8 +76,9 @@ def format_summary_table(results: List[TaskResult]) -> str:
 
     for r in results:
         status_str = r.status.value if isinstance(r.status, EvalStatus) else str(r.status)
+        tok_disp = f"{r.measured_tokens} (m)" if r.measured_tokens is not None else str(r.estimated_tokens)
         lines.append(
-            f"{r.task_id:<30} {status_str:<20} {r.step_count:<6} {r.estimated_tokens:<14} {r.duration_seconds:<9.3f}s"
+            f"{r.task_id:<30} {status_str:<20} {r.step_count:<6} {tok_disp:<14} {r.duration_seconds:<9.3f}s"
         )
 
     lines.append("=" * 90)
