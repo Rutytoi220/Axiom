@@ -109,7 +109,7 @@ class InstallToolThread(QThread):
                 self.finished.emit(self.item['id'], "Error: No code or download URL provided")
                 return
                 
-            plugins_dir = Path.home() / ".config" / "ChienGPT" / "plugins"
+            plugins_dir = Path.home() / ".config" / "axiom" / "plugins"
             plugins_dir.mkdir(parents=True, exist_ok=True)
             
             file_path = plugins_dir / f"{self.item['id']}.py"
@@ -441,7 +441,7 @@ class AxiomHubDialog(QDialog):
         return card
 
     def _update_btn_state(self, btn: QPushButton, tool_id: str):
-        plugins_dir = Path.home() / ".config" / "ChienGPT" / "plugins"
+        plugins_dir = Path.home() / ".config" / "axiom" / "plugins"
         file_path = plugins_dir / f"{tool_id}.py"
         
         if file_path.exists():

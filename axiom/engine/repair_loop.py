@@ -11,7 +11,7 @@ async def trigger_repair(traceback_str: str, registry, event_bus):
     logger.info("[RepairLoop] Repair sequence initiated.")
     
     # Extract the failing file from the traceback
-    # Tracebacks usually look like: File "/home/rutytoi/.config/axiom/plugins/foo.py", line X
+    # Tracebacks usually look like: File "/home/<user>/.config/axiom/plugins/foo.py", line X
     match = re.search(r'File "([^"]+axiom/plugins/[^"]+\.py)"', traceback_str)
     if not match:
         logger.error("[RepairLoop] Could not isolate a specific plugin file from the traceback.")

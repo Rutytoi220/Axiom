@@ -10,7 +10,7 @@ from axiom.config import get_config
 
 logger = logging.getLogger(__name__)
 
-PLUGIN_DIR = Path.home() / ".config" / "ChienGPT" / "plugins"
+PLUGIN_DIR = Path.home() / ".config" / "axiom" / "plugins"
 
 class PluginManager:
     def __init__(self):

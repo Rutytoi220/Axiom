@@ -341,6 +341,9 @@ def _build_parser() -> argparse.ArgumentParser:
 # ===========================================================================
 
 def main() -> None:
+    from axiom.config import initialize_directories
+    initialize_directories()
+
     parser = _build_parser()
     args = parser.parse_args()
 

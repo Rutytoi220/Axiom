@@ -8,7 +8,32 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-CONFIG_DIR = Path.home() / ".config" / "ChienGPT"
+def get_config_dir() -> Path:
+    """Return the base configuration directory for AXIOM (~/.config/axiom or environment override)."""
+    env_dir = os.environ.get("AXIOM_CONFIG_DIR")
+    if env_dir:
+        return Path(env_dir).expanduser()
+    return Path.home() / ".config" / "axiom"
+
+CONFIG_DIR = get_config_dir()
+
+def initialize_directories(config_dir: Optional[Path] = None) -> None:
+    """Ensure all required first-run AXIOM directories exist cleanly with parents=True, exist_ok=True."""
+    base = config_dir or get_config_dir()
+    tools_dir = base / "tools.d"
+    plugins_dir = base / "plugins"
+    sessions_dir = base / "sessions"
+    logs_dir = base / "logs"
+    models_dir = base / "models"
+
+    for d in (base, tools_dir, plugins_dir, sessions_dir, logs_dir, models_dir):
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            logger.warning(f"Could not create directory {d}: {e}")
+
+# Automatically initialize directories on module load
+initialize_directories()
 
 def validate_and_clamp_num_ctx(val: Any) -> int:
     """Validate and clamp context length.
@@ -205,13 +230,13 @@ Returns:
         return 8192
 
     def save(self) -> None:
-        """Save configuration to ~/.config/axiom/config.json and ~/.config/ChienGPT/config.json."""
+        """Save configuration to ~/.config/axiom/config.json."""
         import json
         from pathlib import Path
         data = self.to_dict()
+        base_dir = get_config_dir()
         paths = [
-            Path.home() / ".config" / "axiom" / "config.json",
-            CONFIG_DIR / "config.json",
+            base_dir / "config.json",
         ]
         for p in paths:
             try:
@@ -223,12 +248,14 @@ Returns:
 
     @classmethod
     def load(cls) -> 'AxiomConfig':
-        """Load configuration from ~/.config/axiom/config.json or ~/.config/ChienGPT/config.json."""
+        """Load configuration from ~/.config/axiom/config.json or fallback paths."""
         import json
         from pathlib import Path
+        base_dir = get_config_dir()
         paths = [
+            base_dir / "config.json",
             Path.home() / ".config" / "axiom" / "config.json",
-            CONFIG_DIR / "config.json",
+            Path.home() / ".config" / "ChienGPT" / "config.json",
         ]
         for config_path in paths:
             if config_path.exists():
@@ -236,9 +263,6 @@ Returns:
                     with open(config_path, 'r', encoding='utf-8') as f:
                         data = json.load(f)
                     if 'oobe_completed' not in data:
-                        # Migrating a pre-v11 install: if the legacy UI config already
-                        # exists, this user was already onboarded once and should not
-                        # be forced through the new wizard again.
                         legacy_ui_config = config_path.parent / "ui_config.json"
                         data['oobe_completed'] = legacy_ui_config.exists()
                     return cls.from_dict(data)

@@ -1,7 +1,9 @@
+import os
 import time
 import json
 import torch
-from typing import Dict, Any
+from pathlib import Path
+from typing import Dict, Any, Optional
 from PIL import Image
 from transformers import AutoModel, AutoProcessor, BitsAndBytesConfig, PreTrainedModel
 from axiom.core.vision_engine.models.spotless_vlm import SpotlessLatentAdapter, SpotlessMiniCPMV
@@ -27,7 +29,9 @@ transformers.modeling_utils.caching_allocator_warmup = lambda *args, **kwargs: N
 class AxiomGroundingEngine:
     _instance: Any = None
 
-    def __init__(self, model_id: str = "openbmb/MiniCPM-V-2_6", adapter_path: str = "/home/rutytoi/qwen_experiments/checkpoints/best_vlm_adapter.pt", device: str = "cuda"):
+    def __init__(self, model_id: str = "openbmb/MiniCPM-V-2_6", adapter_path: Optional[str] = None, device: str = "cuda"):
+        if adapter_path is None:
+            adapter_path = os.environ.get("AXIOM_VLM_ADAPTER_PATH") or str(Path.home() / ".config" / "axiom" / "models" / "best_vlm_adapter.pt")
         self.device = device
         
         bnb = BitsAndBytesConfig(
