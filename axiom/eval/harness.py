@@ -58,6 +58,12 @@ class LiveOllamaStreamAdapter:
         payload["model"] = self.model
         t0 = time.perf_counter()
 
+        from axiom.config import get_config
+        options = dict(payload.get("options") or {})
+        eff_ctx = get_config().get_effective_num_ctx(options.get("num_ctx"))
+        options["num_ctx"] = eff_ctx
+        options.setdefault("temperature", 0.1)
+
         timeout_config = httpx.Timeout(connect=5.0, read=120.0, write=10.0, pool=10.0)
         async with httpx.AsyncClient(timeout=timeout_config) as client:
             async with client.stream(
@@ -68,7 +74,7 @@ class LiveOllamaStreamAdapter:
                     "messages": payload.get("messages", []),
                     "tools": payload.get("tools", []),
                     "stream": True,
-                    "options": payload.get("options", {"num_ctx": 32768, "temperature": 0.1}),
+                    "options": options,
                 },
             ) as resp:
                 if resp.status_code != 200:

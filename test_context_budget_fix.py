@@ -17,9 +17,9 @@ class TestContextBudgetFix(unittest.IsolatedAsyncioTestCase):
         self.orchestrator = NativeOrchestrator()
         self.all_schemas = get_tool_schemas(0)
 
-    def test_max_context_tokens_is_32768(self):
-        """NativeOrchestrator max_context_tokens should default to 32768."""
-        self.assertEqual(self.orchestrator.max_context_tokens, 32768)
+    def test_max_context_tokens_is_8192(self):
+        """NativeOrchestrator max_context_tokens should default to 8192."""
+        self.assertEqual(self.orchestrator.max_context_tokens, 8192)
 
     def test_tier1_tool_filtering(self):
         """Tier 1 queries should only include core tools and Tier 1 OS/desktop tools."""
@@ -78,7 +78,7 @@ class TestContextBudgetFix(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(filtered), len(self.all_schemas))
 
     async def test_simulated_dispatch_num_ctx_and_options_preservation(self):
-        """Verify outgoing payload includes num_ctx: 32768, preserves options, and filters tools."""
+        """Verify outgoing payload includes num_ctx: 8192, preserves options, and filters tools."""
         captured_requests = []
 
         class MockStreamResponse:
@@ -156,8 +156,8 @@ class TestContextBudgetFix(unittest.IsolatedAsyncioTestCase):
             comp_req = next(r for r in captured_requests if "/v1/chat/completions" in r[1])
             req_body = comp_req[2]["json"]
 
-            # 1. num_ctx must be 32768
-            self.assertEqual(req_body["options"]["num_ctx"], 32768)
+            # 1. num_ctx must be 8192
+            self.assertEqual(req_body["options"]["num_ctx"], 8192)
 
             # 2. Existing temperature and top_p must be preserved
             self.assertEqual(req_body["options"]["temperature"], 0.3)

@@ -1,11 +1,37 @@
 """AXIOM Configuration module."""
 from dataclasses import dataclass, field
-from typing import Optional
-from pathlib import Path
-
+import logging
+import os
 from enum import Enum
+from pathlib import Path
+from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 CONFIG_DIR = Path.home() / ".config" / "ChienGPT"
+
+def validate_and_clamp_num_ctx(val: Any) -> int:
+    """Validate and clamp context length.
+
+    Valid range: 1024 to 65536.
+    Invalid values (non-integers, strings, negatives, out-of-range) log a warning and fall back to 8192.
+    """
+    if val is None:
+        return 8192
+    try:
+        if isinstance(val, bool):
+            logger.warning(f"Invalid context length boolean: {val}. Falling back to 8192.")
+            return 8192
+        int_val = int(val)
+    except (ValueError, TypeError):
+        logger.warning(f"Invalid context length value: {val}. Falling back to 8192.")
+        return 8192
+
+    if int_val < 1024 or int_val > 65536:
+        logger.warning(f"Context length {int_val} out of valid range [1024, 65536]. Falling back to 8192.")
+        return 8192
+
+    return int_val
 
 class AuthMode(Enum):
     STRICT = 'strict'
@@ -43,6 +69,7 @@ Returns:
             self.behavior = BehaviorConfig()
     ollama_base_url: str = 'http://127.0.0.1:11434'
     ollama_model: str = 'qwen3:8b'
+    ollama_num_ctx: int = 8192
     power_saving_model: str = 'qwen2.5:1.5b'
     embedding_model: str = 'nomic-embed-text'
     ollama_temperature: float = 0.7
@@ -100,6 +127,9 @@ Returns:
         if 'ollama_base_url' in filtered and isinstance(filtered['ollama_base_url'], str):
             filtered['ollama_base_url'] = filtered['ollama_base_url'].replace("localhost", "127.0.0.1")
 
+        if 'ollama_num_ctx' in filtered:
+            filtered['ollama_num_ctx'] = validate_and_clamp_num_ctx(filtered['ollama_num_ctx'])
+
         if 'auth_mode' in filtered and isinstance(filtered['auth_mode'], str):
             try:
                 filtered['auth_mode'] = AuthMode(filtered['auth_mode'])
@@ -116,6 +146,7 @@ Returns:
             'proactive_kernel': self.proactive_kernel, 
             'ollama_base_url': self.ollama_base_url, 
             'ollama_model': self.ollama_model, 
+            'ollama_num_ctx': self.ollama_num_ctx,
             'embedding_model': self.embedding_model, 
             'ollama_temperature': self.ollama_temperature, 
             'db_path': self.db_path, 
@@ -153,6 +184,25 @@ Returns:
             'model_usage_counts': self.model_usage_counts,
             'show_thinking': self.show_thinking,
         }
+
+    def get_effective_num_ctx(self, caller_override: Optional[Any] = None) -> int:
+        """Resolve effective Ollama context length with strict precedence:
+        1. Caller/Task override (explicitly passed options in payload)
+        2. Environment variable AXIOM_NUM_CTX (parsed as int, clamped)
+        3. Config file setting 'ollama_num_ctx' in ~/.config/axiom/config.json
+        4. System default: 8192
+        """
+        if caller_override is not None:
+            return validate_and_clamp_num_ctx(caller_override)
+
+        env_val = os.environ.get("AXIOM_NUM_CTX")
+        if env_val is not None:
+            return validate_and_clamp_num_ctx(env_val)
+
+        if hasattr(self, "ollama_num_ctx") and self.ollama_num_ctx is not None:
+            return validate_and_clamp_num_ctx(self.ollama_num_ctx)
+
+        return 8192
 
     def save(self) -> None:
         """Save configuration to ~/.config/axiom/config.json and ~/.config/ChienGPT/config.json."""
@@ -206,7 +256,12 @@ def set_config(config: AxiomConfig) -> None:
     """Set global AXIOM configuration."""
     global _config
     _config = config
+
+def get_effective_num_ctx(caller_override: Optional[Any] = None) -> int:
+    """Resolve effective Ollama context length using global config."""
+    return get_config().get_effective_num_ctx(caller_override)
 try:
     from core.settings_registry import SettingCategory, SettingMetadata, SettingsRegistry, get_settings_registry
 except ImportError:
     pass
+

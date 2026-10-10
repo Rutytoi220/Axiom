@@ -18,7 +18,7 @@ REFUSAL_PHRASES = [
 class NativeOrchestrator:
     def __init__(
         self,
-        max_context_tokens: int = 32768,
+        max_context_tokens: Optional[int] = None,
         max_steps: int = 5,
         model_provider: Optional[Any] = None,
         tool_schemas: Optional[list] = None,
@@ -28,7 +28,7 @@ class NativeOrchestrator:
         db_path: Optional[str] = None,
         max_depth: Optional[int] = None,
     ):
-        self.max_context_tokens = max_context_tokens
+        self._explicit_max_context_tokens = max_context_tokens
         self.max_steps = max_depth if max_depth is not None else max_steps
         self.max_depth = self.max_steps
         self.stream_provider = stream_provider or model_provider
@@ -37,6 +37,15 @@ class NativeOrchestrator:
         self.tool_executor = tool_executor
         self._execute_tool = execute_tool or tool_executor
         self.db_path = db_path
+
+    @property
+    def max_context_tokens(self) -> int:
+        from axiom.config import get_config
+        return get_config().get_effective_num_ctx(self._explicit_max_context_tokens)
+
+    @max_context_tokens.setter
+    def max_context_tokens(self, val: Optional[int]):
+        self._explicit_max_context_tokens = val
 
     @property
     def execute_tool(self):
@@ -399,13 +408,18 @@ class NativeOrchestrator:
             return
 
         # Default production path: Ollama over HTTP
+        options = payload.get("options", {})
+        from axiom.config import get_config
+        prewarm_ctx = get_config().get_effective_num_ctx(
+            options.get("num_ctx") or self._explicit_max_context_tokens
+        )
         try:
             async with httpx.AsyncClient(timeout=2.0) as client:
                 await client.post(
                     f"{base_url}/api/generate",
                     json={
                         "model": payload["model"],
-                        "options": {"num_ctx": 32768, "num_gpu": 99},
+                        "options": {"num_ctx": prewarm_ctx, "num_gpu": 99},
                         "keep_alive": "5m",
                     },
                 )
@@ -631,10 +645,13 @@ class NativeOrchestrator:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        # Enforce 100% GPU layer offload and adequate context size in Ollama (32K)
+        # Enforce 100% GPU layer offload and adequate context size in Ollama
         options = payload.setdefault("options", {})
-        if "num_ctx" not in options or options["num_ctx"] < 32768:
-            options["num_ctx"] = 32768
+        from axiom.config import get_config
+        eff_ctx = get_config().get_effective_num_ctx(
+            options.get("num_ctx") or self._explicit_max_context_tokens
+        )
+        options["num_ctx"] = eff_ctx
         options.setdefault("num_gpu", 99)
 
         pending_tool_calls = []
@@ -679,12 +696,20 @@ class NativeOrchestrator:
                         if "function" in tc and isinstance(tc["function"], dict):
                             if "name" in tc["function"] and tc["function"]["name"]:
                                 pending_tool_calls[idx]["function"]["name"] = tc["function"]["name"]
-                            if "arguments" in tc["function"] and tc["function"]["arguments"]:
-                                pending_tool_calls[idx]["function"]["arguments"] += str(tc["function"]["arguments"])
+                            if "arguments" in tc["function"] and tc["function"]["arguments"] is not None:
+                                incoming_args = tc["function"]["arguments"]
+                                if isinstance(incoming_args, dict):
+                                    pending_tool_calls[idx]["function"]["arguments"] = json.dumps(incoming_args)
+                                else:
+                                    pending_tool_calls[idx]["function"]["arguments"] += str(incoming_args)
                         elif "name" in tc and tc["name"]:
                             pending_tool_calls[idx]["function"]["name"] = tc["name"]
-                            if "arguments" in tc and tc["arguments"]:
-                                pending_tool_calls[idx]["function"]["arguments"] += str(tc["arguments"])
+                            if "arguments" in tc and tc["arguments"] is not None:
+                                incoming_args = tc["arguments"]
+                                if isinstance(incoming_args, dict):
+                                    pending_tool_calls[idx]["function"]["arguments"] = json.dumps(incoming_args)
+                                else:
+                                    pending_tool_calls[idx]["function"]["arguments"] += str(incoming_args)
 
                 if buffering:
                     if "tool_calls" in delta or pending_tool_calls:
@@ -844,31 +869,59 @@ class NativeOrchestrator:
             buffered_chunks.clear()
 
         if pending_tool_calls:
+            # Normalize tool calls: Ollama /api/chat requires function.arguments to be a native JSON dict
+            normalized_tool_calls = []
+            for tc in pending_tool_calls:
+                fn_name = tc.get("function", {}).get("name") or tc.get("name") or ""
+                fn_args_raw = tc.get("function", {}).get("arguments") or tc.get("arguments", {})
+                tc_id = tc.get("id") or "call_native_0"
+
+                if isinstance(fn_args_raw, dict):
+                    fn_args = fn_args_raw
+                elif isinstance(fn_args_raw, str):
+                    raw_str = fn_args_raw.strip()
+                    if not raw_str:
+                        fn_args = {}
+                    else:
+                        try:
+                            fn_args = json.loads(raw_str)
+                        except Exception:
+                            try:
+                                import ast
+                                val = ast.literal_eval(raw_str)
+                                fn_args = val if isinstance(val, dict) else {}
+                            except Exception:
+                                fn_args = {}
+                else:
+                    fn_args = {}
+
+                if not isinstance(fn_args, dict):
+                    fn_args = {}
+
+                # Guard against model confusing interact_with_ui with interact_with_browser on web elements
+                if fn_name == "interact_with_ui" and ("element_id" in fn_args or fn_args.get("action") in ("click_element", "fill_element")):
+                    fn_name = "interact_with_browser"
+
+                normalized_tool_calls.append({
+                    "id": tc_id,
+                    "type": "function",
+                    "function": {
+                        "name": fn_name,
+                        "arguments": fn_args,
+                    }
+                })
+
             assistant_msg = {
                 "role": "assistant",
-                "content": "".join(collected_assistant_text) if collected_assistant_text else None,
-                "tool_calls": pending_tool_calls
+                "content": "".join(collected_assistant_text) if collected_assistant_text else "",
+                "tool_calls": normalized_tool_calls,
             }
             payload["messages"].append(assistant_msg)
 
-            for tc in pending_tool_calls:
-                func_name = tc.get("function", {}).get("name") or tc.get("name")
-                func_args_raw = tc.get("function", {}).get("arguments") or tc.get("arguments", {})
-                tool_call_id = tc.get("id", "call_native_0")
-
-                if isinstance(func_args_raw, str):
-                    try:
-                        func_args = json.loads(func_args_raw) if func_args_raw else {}
-                    except Exception:
-                        func_args = {}
-                elif isinstance(func_args_raw, dict):
-                    func_args = func_args_raw
-                else:
-                    func_args = {}
-
-                # Guard against model confusing interact_with_ui with interact_with_browser on web elements
-                if func_name == "interact_with_ui" and ("element_id" in func_args or func_args.get("action") in ("click_element", "fill_element")):
-                    func_name = "interact_with_browser"
+            for tc in normalized_tool_calls:
+                func_name = tc["function"]["name"]
+                func_args = tc["function"]["arguments"]
+                tool_call_id = tc["id"]
 
                 timeout = get_tier_timeout(func_name)
                 timeout_int = int(timeout)
