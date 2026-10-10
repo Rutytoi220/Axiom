@@ -149,3 +149,22 @@ tests/
 *.dmg
 trace.txt
 appimagetool*
+
+# Evaluation benchmarks & temporary run artifacts
+benchmark_*.json
+
+# Scratch scripts & one-off debug tooling
+debug_*.py
+patch_*.py
+!patch_daemon.py
+fix_*.py
+verify_*.py
+summary*.md
+restart_server.sh
+refactor*.py
+rewrite_*.py
+
+# Temporary databases & server scratch files
+*.sqlite
+*.sqlite3
+server.log
