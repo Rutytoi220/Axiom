@@ -132,6 +132,7 @@ class EvalHarness:
         use_live_model: bool = False,
         model: Optional[str] = None,
         base_url: Optional[str] = None,
+        live_timeout: Optional[float] = None,
     ) -> TaskResult:
         """Execute an EvalTask inside an isolated workspace and validate observable state."""
         start_time = time.perf_counter()
@@ -139,6 +140,11 @@ class EvalHarness:
         eff_use_live_model = bool(use_live_model or (task.metadata and task.metadata.get("use_live_model", False)))
         eff_model = model or (task.metadata.get("model") if task.metadata else None) or "qwen3:8b"
         eff_base_url = base_url or (task.metadata.get("base_url") if task.metadata else None) or "http://127.0.0.1:11434"
+
+        if eff_use_live_model:
+            effective_timeout = live_timeout if live_timeout is not None else 60.0
+        else:
+            effective_timeout = task.timeout_seconds
 
         if eff_use_live_model:
             is_ready, ready_reason = await check_ollama_status_async(eff_base_url, eff_model)
@@ -408,7 +414,7 @@ class EvalHarness:
                     if c:
                         context.final_response += c
 
-            await asyncio.wait_for(_execute_stream(), timeout=task.timeout_seconds)
+            await asyncio.wait_for(_execute_stream(), timeout=effective_timeout)
 
             # Step limit enforcement
             if f"Reached maximum autonomous ReAct steps ({task.max_steps})" in context.final_response:
@@ -457,7 +463,7 @@ class EvalHarness:
         except asyncio.TimeoutError:
             status = EvalStatus.TIMEOUT
             failure_category = "TIMEOUT"
-            status_message = f"Task execution timed out after {task.timeout_seconds}s"
+            status_message = f"Task execution timed out after {effective_timeout}s"
         except Exception as exc:
             context.execution_error = exc
             status = EvalStatus.TOOL_ERROR

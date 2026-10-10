@@ -343,6 +343,98 @@ class TestBenchmarkCLI(unittest.TestCase):
         # UNVERIFIED must exit with 0 to prevent breaking CI
         self.assertEqual(code, 0)
 
+    def test_live_timeout_cli_argument(self) -> None:
+        """Verify --live-timeout parses float and defaults to 60.0."""
+        from axiom.eval.cli import build_arg_parser
+        parser = build_arg_parser()
+        args_default = parser.parse_args([])
+        self.assertEqual(args_default.live_timeout, 60.0)
+
+        args_custom = parser.parse_args(["--live-timeout", "120.5"])
+        self.assertEqual(args_custom.live_timeout, 120.5)
+
+
+class TestConfigurableLiveTimeouts(unittest.IsolatedAsyncioTestCase):
+    """Test configurable live timeouts vs fast offline deterministic timeouts."""
+
+    async def test_offline_task_retains_timeout_seconds_when_live_timeout_provided(self) -> None:
+        """Verify that offline tasks retain task.timeout_seconds even if live_timeout is provided."""
+        harness = EvalHarness()
+        captured_timeout = None
+
+        async def mock_wait_for(coro, timeout):
+            nonlocal captured_timeout
+            captured_timeout = timeout
+            try:
+                coro.close()
+            except Exception:
+                pass
+            raise asyncio.TimeoutError()
+
+        task = EvalTask(
+            task_id="test_offline_timeout_fast",
+            description="Offline fast timeout test",
+            level=1,
+            timeout_seconds=0.2,
+        )
+
+        with patch("asyncio.wait_for", side_effect=mock_wait_for):
+            res = await harness.run_task(task, use_live_model=False, live_timeout=60.0)
+            self.assertEqual(res.status, EvalStatus.TIMEOUT)
+            self.assertEqual(captured_timeout, 0.2)
+            self.assertIn("timed out after 0.2s", res.message)
+
+    async def test_live_task_applies_live_timeout_override(self) -> None:
+        """Verify that live tasks apply live_timeout (overriding task base timeout)."""
+        harness = EvalHarness()
+
+        async def moderately_slow_stream(self, payload: dict):
+            await asyncio.sleep(0.05)
+            yield {"choices": [{"delta": {"content": "completed successfully"}}]}
+
+        task = EvalTask(
+            task_id="test_live_timeout_override",
+            description="Live timeout override test",
+            level=2,
+            timeout_seconds=0.01,  # Short base timeout that would fail if not overridden
+            validator_fn=lambda ctx: (True, "Live task succeeded"),
+        )
+
+        with patch("axiom.eval.harness.check_ollama_status_async", return_value=(True, "Ready")):
+            with patch.object(LiveOllamaStreamAdapter, "stream_chat", moderately_slow_stream):
+                # When live_timeout is 0.5s, 0.05s execution completes within timeout
+                res = await harness.run_task(task, use_live_model=True, live_timeout=0.5)
+                self.assertEqual(res.status, EvalStatus.PASS)
+                self.assertIn("Live task succeeded", res.message)
+
+    async def test_live_task_default_timeout_is_60s(self) -> None:
+        """Verify that live task defaults to 60.0s when live_timeout is None."""
+        harness = EvalHarness()
+        captured_timeout = None
+
+        async def mock_wait_for(coro, timeout):
+            nonlocal captured_timeout
+            captured_timeout = timeout
+            try:
+                coro.close()
+            except Exception:
+                pass
+            raise asyncio.TimeoutError()
+
+        task = EvalTask(
+            task_id="test_live_timeout_default",
+            description="Live timeout default test",
+            level=2,
+            timeout_seconds=10.0,
+        )
+
+        with patch("axiom.eval.harness.check_ollama_status_async", return_value=(True, "Ready")):
+            with patch("asyncio.wait_for", side_effect=mock_wait_for):
+                res = await harness.run_task(task, use_live_model=True, live_timeout=None)
+                self.assertEqual(res.status, EvalStatus.TIMEOUT)
+                self.assertEqual(captured_timeout, 60.0)
+                self.assertIn("timed out after 60.0s", res.message)
+
 
 if __name__ == "__main__":
     unittest.main()

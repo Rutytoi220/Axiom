@@ -75,6 +75,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="List all registered benchmark tasks and exit.",
     )
     parser.add_argument(
+        "--live-timeout",
+        type=float,
+        default=60.0,
+        help="Per-task timeout in seconds for live model evaluation (defaults to 60.0s).",
+    )
+    parser.add_argument(
         "-q", "--quiet",
         action="store_true",
         default=False,
@@ -89,6 +95,7 @@ async def run_benchmark_async(
     model: Optional[str] = None,
     base_url: Optional[str] = None,
     quiet: bool = False,
+    live_timeout: Optional[float] = None,
 ) -> List[TaskResult]:
     harness = EvalHarness()
     results: List[TaskResult] = []
@@ -104,6 +111,7 @@ async def run_benchmark_async(
             use_live_model=task_is_live,
             model=model,
             base_url=base_url,
+            live_timeout=live_timeout,
         )
         results.append(res)
 
@@ -181,6 +189,7 @@ def run_benchmark_cli(args_list: Optional[List[str]] = None) -> int:
             model=model,
             base_url=base_url,
             quiet=args.quiet,
+            live_timeout=args.live_timeout,
         )
     )
 
