@@ -90,8 +90,9 @@ class EvalContext:
 
     def resolve_path(self, rel_path: str | Path) -> Path:
         """Resolve a relative path safely inside the workspace."""
+        ws_resolved = self.workspace_dir.resolve()
         path = (self.workspace_dir / rel_path).resolve()
-        if not str(path).startswith(str(self.workspace_dir.resolve())):
+        if not path.is_relative_to(ws_resolved):
             raise ValueError(f"Path traversal detected: {rel_path} escapes workspace {self.workspace_dir}")
         return path
 

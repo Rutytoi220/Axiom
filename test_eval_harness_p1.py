@@ -9,6 +9,7 @@ from pathlib import Path
 
 from axiom.eval.harness import EvalHarness
 from axiom.eval.metrics import EvalStatus, export_json_report, format_summary_table
+from axiom.eval.task import EvalContext
 from axiom.eval.tasks.deterministic_p1 import (
     build_task_false_success_rejection,
     build_task_memory_persistence_roundtrip,
@@ -134,6 +135,28 @@ class TestEvalHarnessP1(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results["task_false_success_rejection"].status, EvalStatus.FALSE_SUCCESS)
         self.assertEqual(results["task_memory_persistence_roundtrip"].status, EvalStatus.PASS)
         self.assertEqual(results["task_timeout_containment"].status, EvalStatus.TIMEOUT)
+
+    def test_workspace_path_traversal_prevention(self) -> None:
+        """Verify that attempting to escape workspace_dir via relative path traversal raises ValueError."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace = Path(tmp_dir) / "workspace"
+            workspace.mkdir()
+            db_path = Path(tmp_dir) / "test.db"
+            task = build_task_tool_dispatch()
+            ctx = EvalContext(task=task, workspace_dir=workspace, db_path=db_path)
+
+            # Valid paths within workspace should resolve successfully
+            valid_path = ctx.resolve_path("subdir/file.txt")
+            self.assertEqual(valid_path, (workspace / "subdir/file.txt").resolve())
+
+            # Traversal attempts escaping workspace must raise ValueError
+            with self.assertRaises(ValueError) as cm:
+                ctx.resolve_path("../../etc/shadow")
+            self.assertIn("Path traversal detected", str(cm.exception))
+
+            with self.assertRaises(ValueError) as cm2:
+                ctx.resolve_path("../other_folder")
+            self.assertIn("Path traversal detected", str(cm2.exception))
 
 
 if __name__ == "__main__":
