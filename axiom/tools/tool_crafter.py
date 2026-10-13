@@ -137,7 +137,8 @@ async def craft_tool(
         )
 
     # 4. Atomic Installation & Hot-Reload
-    target_dir = tools_dir or Path.home() / ".config" / "axiom" / "tools.d"
+    from axiom.config import get_config_dir
+    target_dir = tools_dir or (get_config_dir() / "tools.d")
     target_dir.mkdir(parents=True, exist_ok=True)
     target_file = target_dir / f"{clean_name}.py"
 

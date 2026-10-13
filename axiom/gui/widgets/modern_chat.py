@@ -7,6 +7,7 @@ from axiom.gui.styles.theme_manager import ThemeManager
 import markdown
 from typing import Optional
 import re
+from axiom.gui.jit_gui_compiler import JITSecurityException
 
 class AutoExpandTextEdit(QTextEdit):
     return_pressed = Signal()

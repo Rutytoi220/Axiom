@@ -10,6 +10,10 @@ from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout
 
 logger = logging.getLogger(__name__)
 
+class JITSecurityException(Exception):
+    """Raised when JIT code violates security constraints."""
+    pass
+
 class GenerativeUIEngine:
     """Compiles AI-generated PySide6 code at runtime."""
     

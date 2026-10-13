@@ -66,10 +66,13 @@ experimental = [
 
 [project.scripts]
 axiom = "axiom.cli.main:main"
-axiomd = "main:daemon_entry_point"
+axiomd = "axiom.server.daemon:main"
 
 [tool.setuptools.packages.find]
 include = ["axiom*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.sql", "*.qss", "*.json", "*.tcss", "*.png", "*.svg", "*.ttf", "*.js", "*.template", "*.txt"]
 
 [dependency-groups]
 dev = [
@@ -85,8 +88,8 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-norecursedirs = ["tests/fixtures", "dist", "build", "node_modules", ".venv"]
-addopts = "--ignore=tests/fixtures -m 'not e2e and not requires_wayland and not hardware'"
+norecursedirs = ["tests/fixtures", "tests/unit", "tests/gui", "tests/e2e", "tests/integration", "tests/optional", "tests/simulation", "axiom/tests", "dist", "build", "node_modules", ".venv"]
+addopts = "--ignore=tests/fixtures --ignore=tests/unit --ignore=tests/gui --ignore=tests/e2e --ignore=tests/integration --ignore=tests/optional --ignore=tests/simulation --ignore=axiom/tests -m 'not e2e and not requires_wayland and not hardware'"
 markers = [
     "unit: purely isolated unit tests",
     "integration: tests combining multiple systems",
@@ -96,4 +99,33 @@ markers = [
     "requires_ollama: tests hitting local ollama inferencing",
     "requires_wayland: tests requiring a live Wayland compositor",
     "hardware: Tests requiring physical audio or peripheral devices",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+exclude = [
+    ".venv",
+    "build",
+    "dist",
+    "tests/fixtures",
+    "tests/unit",
+    "tests/gui",
+    "tests/e2e",
+    "tests/integration",
+    "tests/optional",
+    "tests/simulation",
+    "axiom/tests",
+]
+
+[tool.ruff.lint]
+select = [
+    "E9",      # Syntax and structural runtime errors
+    "F",       # Pyflakes (undefined variables, invalid logic, syntax checks)
+]
+ignore = [
+    "F401",    # Unused imports (public package re-exports)
+    "F841",    # Unused local variables
+    "F541",    # F-string without placeholders
+    "F811",    # Redefined function or variable
 ]

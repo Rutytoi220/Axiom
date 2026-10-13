@@ -122,13 +122,17 @@ class UpdateDialog(QDialog):
 
         self.changelog_view = QTextEdit()
         self.changelog_view.setReadOnly(True)
-        self.changelog_view.setObjectName("update_header")
+        self.changelog_view.setObjectName("update_changelog")
+        self.layout.addWidget(self.changelog_view)
+
+        btn_row = QHBoxLayout()
+        self.install_btn = QPushButton("🚀 Install Update")
         self.install_btn.setEnabled(False)
         self.install_btn.clicked.connect(self._on_install)
         btn_row.addWidget(self.install_btn)
 
         self.later_btn = QPushButton("⏰ Remind Me Later")
-        self.later_btn.setObjectName("update_changelog")
+        self.later_btn.setObjectName("update_later")
         self.later_btn.clicked.connect(self.reject)
         btn_row.addWidget(self.later_btn)
 

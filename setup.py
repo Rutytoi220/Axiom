@@ -20,9 +20,9 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "axiom=axiom.gui.app:main",
-            "axiomd=main:daemon_entry_point",
+            "axiom=axiom.cli.main:main",
+            "axiomd=axiom.server.daemon:main",
         ],
     },
-    python_requires=">=3.9",
+    python_requires=">=3.10, <3.12",
 )

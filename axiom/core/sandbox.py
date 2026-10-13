@@ -97,7 +97,8 @@ class SandboxRunner:
         except asyncio.TimeoutError:
             try:
                 proc.kill()
-            except OSError:
+                await proc.wait()
+            except (OSError, ProcessLookupError):
                 pass
             return -1, "", f"Execution timed out after {self.policy.timeout_seconds} seconds."
 

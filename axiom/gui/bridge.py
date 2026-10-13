@@ -7,6 +7,7 @@ to Qt's main thread via thread-safe Signal emissions.
 
 
 import asyncio
+import json
 import logging
 import threading
 import subprocess

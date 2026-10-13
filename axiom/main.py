@@ -10,7 +10,6 @@ __author__ = "AXIOM Team"
 
 __all__ = [
     "Engine",
-    "MemoryManager",
     "OllamaClient",
     "CLI",
     "run_cli",

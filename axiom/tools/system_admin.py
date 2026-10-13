@@ -42,7 +42,7 @@ class SystemAdminTool(BaseTool):
                     output_msg += f"\n\nStandard Error output:\n{err_str}"
                 return ToolResult(success=True, output=output_msg)
             else:
-                err_msg = f"Command failed with exit code {process.returncode}."
+                err_msg = f"Command failed with exit code {returncode}."
                 if out_str:
                     err_msg += f"\n\nStandard Output:\n{out_str}"
                 if err_str:
@@ -51,15 +51,9 @@ class SystemAdminTool(BaseTool):
                 
         except asyncio.TimeoutError:
             logger.warning(f"SystemAdminTool execution timed out after 60s: {bash_command}")
-            # Safely attempt to kill the process if it's hanging
-            try:
-                process.kill()
-                await process.communicate()
-            except Exception:
-                pass
             return ToolResult(
                 success=False, 
-                error="Execution timed out after 60 seconds. The command likely hung waiting for interactive input or took too long to complete. The process has been safely terminated."
+                error="Execution timed out after 60 seconds. The command likely hung waiting for interactive input or took too long to complete."
             )
         except Exception as e:
             logger.error(f"SystemAdminTool execution error: {e}")

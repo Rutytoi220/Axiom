@@ -13,6 +13,11 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from PySide6.QtWidgets import QApplication, QSystemTrayIcon
+    from axiom.gui.main_window import MainWindow
 
 logger = logging.getLogger(__name__)
 

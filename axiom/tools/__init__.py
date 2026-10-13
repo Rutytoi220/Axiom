@@ -4,8 +4,26 @@ import logging
 import subprocess
 import os
 import shlex
-import platform
 import shutil
+import sys
+import platform
+
+def _request_shell_authorization(tool_id: str, command: str) -> bool:
+    """Prompt the user for explicit authorization to execute a shell command.
+
+    Fails closed (returns False) in non-interactive sessions without explicit
+    autopilot or test configuration.
+    """
+    if os.environ.get("AXIOM_AUTOPILOT") == "1" or os.environ.get("AXIOM_TESTING") == "1":
+        return True
+    if not sys.stdin.isatty():
+        return False
+    try:
+        from rich.prompt import Confirm
+        return Confirm.ask("[bold white]Allow execution?[/bold white]", default=False)
+    except (EOFError, KeyboardInterrupt):
+        return False
+
 __all__ = [
     'ToolResult',
     'ToolParameter',
@@ -222,7 +240,7 @@ Returns:
             console.print(Panel(warning_msg, title="[bold yellow]Shell Action Required[/bold yellow]", border_style="red"))
             
             try:
-                confirmed = await _request_gui_authorization(self.tool_id, command)
+                confirmed = _request_shell_authorization(self.tool_id, command)
                 if not confirmed:
                     return ToolResult(success=False, error='Command execution aborted by user')
             except (EOFError, KeyboardInterrupt):
@@ -380,7 +398,7 @@ Returns:
         if not op or not path:
             return ToolResult(success=False, error='Missing operation or path')
         try:
-            full_path = resolve_safe_path(path, self._base_dir)
+            full_path = (self._base_dir / path).resolve()
             full_path.relative_to(self._base_dir)
         except ValueError:
             return ToolResult(success=False, error='Path resolves outside sandbox')
@@ -865,7 +883,7 @@ Returns:
             console.print(Panel(warning_msg, title="[bold yellow]Shell Action Required[/bold yellow]", border_style="red"))
             
             try:
-                confirmed = _request_gui_authorization_sync(self.tool_id, command)
+                confirmed = _request_shell_authorization(self.tool_id, command)
                 if not confirmed:
                     return ToolResult(success=False, error='Command execution aborted by user')
             except (EOFError, KeyboardInterrupt):

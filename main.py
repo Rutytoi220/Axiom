@@ -27,11 +27,16 @@ _patch_tiktoken_for_pyinstaller()
 
 def _ensure_directories():
     """Sanity check startup paths."""
-    config_dir = Path.home() / ".config" / "axiom"
+    from axiom.config import initialize_directories
+    initialize_directories()
     data_dir = Path.home() / ".local" / "share" / "axiom"
-    
-    config_dir.mkdir(parents=True, exist_ok=True)
     data_dir.mkdir(parents=True, exist_ok=True)
+
+
+def daemon_entry_point():
+    """Console script entry point for the AXIOM background daemon."""
+    from axiom.server.daemon import main as daemon_main
+    daemon_main()
 
 
 def main():
@@ -77,7 +82,9 @@ if __name__ == "__main__":
     multiprocessing.freeze_support()
     try:
         main()
-    except BaseException as e:
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as e:
         crash_log = Path.home() / ".local" / "share" / "axiom" / "axiom_crash.log"
         # Make sure directory exists even if it failed before _ensure_directories
         crash_log.parent.mkdir(parents=True, exist_ok=True)

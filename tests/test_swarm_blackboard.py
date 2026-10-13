@@ -1,5 +1,5 @@
 import pytest
-pytest.importorskip("axiom.agents.swarm.base_subagent")
+pytest.importorskip("axiom.agents.swarm")
 """Tests for Swarm Blackboard Distributed Memory Namespace."""
 
 import threading
@@ -9,7 +9,7 @@ from pathlib import Path
 import tempfile
 
 from axiom.memory.blackboard import BlackboardStore, BlackboardNamespace
-from axiom.agents.swarm.base_subagent import BaseSubagent
+from axiom.agents.swarm import BaseSubagent
 from axiom.agents.swarm.consensus import ConsensusEngine, ProposalState
 from axiom.core.events import EventBus, Event
 from axiom.core.transaction import WorkspaceTransactionManager

@@ -60,9 +60,15 @@ class TestInstallBootstrap(unittest.TestCase):
                 else:
                     os.environ.pop("AXIOM_CONFIG_DIR", None)
 
+    def _get_repo_root(self) -> Path:
+        current = Path(__file__).resolve().parent
+        if (current / "pyproject.toml").is_file():
+            return current
+        return current.parent
+
     def test_zero_hardcoded_user_paths_in_axiom(self) -> None:
         """Audit the entire axiom/ source tree to ensure zero hardcoded personal user home paths exist."""
-        repo_root = Path(__file__).resolve().parent
+        repo_root = self._get_repo_root()
         axiom_pkg = repo_root / "axiom"
 
         violations = []
@@ -78,7 +84,7 @@ class TestInstallBootstrap(unittest.TestCase):
 
     def test_pyproject_entrypoints_and_callables(self) -> None:
         """Verify pyproject.toml scripts point to valid, callable entry points."""
-        repo_root = Path(__file__).resolve().parent
+        repo_root = self._get_repo_root()
         pyproject_path = repo_root / "pyproject.toml"
         self.assertTrue(pyproject_path.is_file(), "pyproject.toml must exist")
 
@@ -88,19 +94,19 @@ class TestInstallBootstrap(unittest.TestCase):
         project = data.get("project", {})
         scripts = project.get("scripts", {})
         self.assertIn("axiom", scripts, "pyproject.toml must define an 'axiom' console script entry point")
+        self.assertIn("axiomd", scripts, "pyproject.toml must define an 'axiomd' console script entry point")
 
-        entry_point = scripts["axiom"]
-        self.assertIn(":", entry_point, "Entry point format must be 'module:callable'")
-        mod_name, func_name = entry_point.split(":", 1)
-
-        mod = importlib.import_module(mod_name)
-        self.assertTrue(hasattr(mod, func_name), f"Module '{mod_name}' must export '{func_name}'")
-        func = getattr(mod, func_name)
-        self.assertTrue(callable(func), f"'{entry_point}' must be callable")
+        for script_name, entry_point in scripts.items():
+            self.assertIn(":", entry_point, f"Entry point for '{script_name}' must be 'module:callable'")
+            mod_name, func_name = entry_point.split(":", 1)
+            mod = importlib.import_module(mod_name)
+            self.assertTrue(hasattr(mod, func_name), f"Module '{mod_name}' must export '{func_name}' for '{script_name}'")
+            func = getattr(mod, func_name)
+            self.assertTrue(callable(func), f"'{entry_point}' for '{script_name}' must be callable")
 
     def test_pyproject_dependencies_coverage(self) -> None:
         """Verify essential runtime dependencies are declared in pyproject.toml."""
-        repo_root = Path(__file__).resolve().parent
+        repo_root = self._get_repo_root()
         pyproject_path = repo_root / "pyproject.toml"
 
         with open(pyproject_path, "rb") as f:

@@ -1007,7 +1007,7 @@ Returns:
         # still blow the aggregate budget.  Guard that here.
         try:
             from axiom.memory.compression import ObservationCompressor
-            observations = ObservationCompressor.compress_observations_buffer(observations, iterations=rounds)
+            observations = ObservationCompressor.compress_observations_buffer(observations, iterations=len(observations))
         except Exception as _buf_err:
             logger.warning("Failed to compress observation buffer: %s", _buf_err)
         messages = self._context_manager.build_context_window(system_messages=system_messages, chat_history=self._chat_history, current_task=task, retrieved_memories=memories, observations=observations)

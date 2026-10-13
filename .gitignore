@@ -140,8 +140,14 @@ INFINITE POWER/
 .project
 .pydevproject
 
-# Tests
-tests/
+# Legacy unmigrated V1 test suites (untracked since V2 rewrite at tag v8.0.0)
+tests/unit/
+tests/gui/
+tests/e2e/
+tests/integration/
+tests/optional/
+tests/simulation/
+axiom/tests/
 *.AppImage
 *.rpm
 *.deb

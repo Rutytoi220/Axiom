@@ -19,6 +19,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from axiom.config import get_config_dir
 from axiom.core.plugins import reload_plugin, unregister_plugin
 from axiom.db.memory import MemoryStore
 from axiom.tools.core import ToolResult
@@ -94,13 +95,13 @@ class ToolManager:
         tools_dir: Optional[Path] = None,
         db_path: Optional[str] = None,
     ) -> None:
-        self.tools_dir = tools_dir or Path.home() / ".config" / "axiom" / "tools.d"
+        self.tools_dir = tools_dir or (get_config_dir() / "tools.d")
         self.db_path = db_path
 
     @classmethod
     def list_tools(cls, tools_dir: Optional[Path] = None) -> List[Dict[str, Any]]:
         """List all dynamic tools in tools.d with their metadata."""
-        target_dir = tools_dir or Path.home() / ".config" / "axiom" / "tools.d"
+        target_dir = tools_dir or (get_config_dir() / "tools.d")
         if not target_dir.exists():
             return []
 
@@ -187,7 +188,7 @@ class ToolManager:
                 error=f"Permission denied: Protected tool '{clean_name}' cannot be modified or updated.",
             )
 
-        target_dir = tools_dir or Path.home() / ".config" / "axiom" / "tools.d"
+        target_dir = tools_dir or (get_config_dir() / "tools.d")
         target_file = target_dir / f"{clean_name}.py"
 
         if not target_file.exists():
@@ -326,7 +327,7 @@ class ToolManager:
                 error=f"Permission denied: Protected tool '{clean_name}' cannot be deleted.",
             )
 
-        target_dir = tools_dir or Path.home() / ".config" / "axiom" / "tools.d"
+        target_dir = tools_dir or (get_config_dir() / "tools.d")
         target_file = target_dir / f"{clean_name}.py"
 
         file_exists = target_file.exists()

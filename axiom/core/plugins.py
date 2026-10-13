@@ -1,10 +1,16 @@
 import os
 import sys
+import json
 import importlib.util
 from pathlib import Path
 from typing import Any, Dict, List, Callable, Awaitable, Optional
 
-TOOLS_DIR = Path.home() / ".config" / "axiom" / "tools.d"
+def get_tools_dir() -> Path:
+    """Return the active tools.d directory respecting AXIOM_CONFIG_DIR."""
+    from axiom.config import get_config_dir
+    return get_config_dir() / "tools.d"
+
+TOOLS_DIR = get_tools_dir()
 
 _schemas: List[Dict[str, Any]] = []
 _rings: Dict[str, int] = {}
@@ -18,7 +24,8 @@ def get_plugin_file_paths() -> Dict[str, Path]:
     return dict(_plugin_file_paths)
 
 def load_plugins() -> None:
-    global _schemas, _executors, _tui_hints, _capabilities, _plugin_file_paths
+    global _schemas, _executors, _tui_hints, _capabilities, _plugin_file_paths, TOOLS_DIR
+    TOOLS_DIR = get_tools_dir()
     _schemas.clear()
     _rings.clear()
     _executors.clear()
@@ -235,6 +242,50 @@ def load_plugins() -> None:
                 '        return f"Exit code {proc.returncode}\\n{body}".strip() if body else f"Exit code {proc.returncode}"\n'
                 "    except Exception as e:\n"
                 '        return f"Error executing command: {e}"\n'
+            ),
+        ),
+        (
+            TOOLS_DIR / "manage_desktop_window.py",
+            (
+                "import json\n"
+                "from axiom.tools.hyprland_ipc import ManageDesktopWindowTool\n\n"
+                "_tool = ManageDesktopWindowTool()\n\n"
+                "TOOL_SCHEMA = {\n"
+                '    "type": "function",\n'
+                '    "function": {\n'
+                '        "name": _tool.name,\n'
+                '        "description": _tool.description,\n'
+                '        "parameters": _tool.schema,\n'
+                '    }\n'
+                "}\n"
+                'TUI_HINT = "🪟 Managing Hyprland window/workspace..."\n'
+                "REQUIRED_RING = 0\n\n"
+                "async def execute(action: str, target: str = '', **kwargs) -> str:\n"
+                '    params = {"action": action, "target": target, **kwargs}\n'
+                "    res = await _tool.execute(params)\n"
+                "    return json.dumps(res.to_dict(tool=_tool.name, arguments=params))\n"
+            ),
+        ),
+        (
+            TOOLS_DIR / "interact_with_browser.py",
+            (
+                "import json\n"
+                "from axiom.tools.browser_cdp import InteractWithBrowserTool\n\n"
+                "_tool = InteractWithBrowserTool()\n\n"
+                "TOOL_SCHEMA = {\n"
+                '    "type": "function",\n'
+                '    "function": {\n'
+                '        "name": _tool.name,\n'
+                '        "description": _tool.description,\n'
+                '        "parameters": _tool.schema,\n'
+                '    }\n'
+                "}\n"
+                'TUI_HINT = "🌐 Interacting with browser (CDP)..."\n'
+                "REQUIRED_RING = 0\n\n"
+                "async def execute(action: str, selector: str = '', text: str = '', expression: str = '', port: int = 9222, **kwargs) -> str:\n"
+                '    params = {"action": action, "selector": selector, "text": text, "expression": expression, "port": port, **kwargs}\n'
+                "    res = await _tool.execute(params)\n"
+                "    return json.dumps(res.to_dict(tool=_tool.name, arguments=params))\n"
             ),
         ),
     ]
@@ -611,12 +662,13 @@ async def execute_tool(name: str, **kwargs) -> str:
 
 
 def reload_plugin(path: Any) -> None:
+    tools_dir = get_tools_dir()
     if isinstance(path, str):
         path_str = path
         if not path_str.endswith(".py"):
-            path = TOOLS_DIR / f"{path_str}.py"
+            path = tools_dir / f"{path_str}.py"
         elif not os.path.isabs(path_str):
-            path = TOOLS_DIR / path_str
+            path = tools_dir / path_str
         else:
             path = Path(path_str)
     elif not isinstance(path, Path):

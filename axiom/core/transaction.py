@@ -24,7 +24,8 @@ import logging
 import shutil
 import uuid
 from pathlib import Path
-from typing import Dict, Optional, Set
+from types import TracebackType
+from typing import Dict, Literal, Optional, Set
 from axiom.core.events import EventBus, Event
 logger = logging.getLogger(__name__)
 STAGING_CAP_BYTES: int = 50 * 1024 * 1024
@@ -253,7 +254,7 @@ Returns:
         self.begin()
         return self
 
-    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None) -> typing.Literal[False]:
+    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None) -> Literal[False] | None:
         """Auto-generated docstring.
 
 Args:

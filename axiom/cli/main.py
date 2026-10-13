@@ -262,10 +262,20 @@ def cmd_test(_args: argparse.Namespace) -> None:
     _print("[bold]Running headless test suite…[/bold]")
     env = os.environ.copy()
     env["QT_QPA_PLATFORM"] = "offscreen"
-    subprocess.run(
-        ["pytest", "tests/test_plugins.py", "tests/test_gui_hub.py", "tests/test_daemon_ipc.py"],
+    res = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "tests/test_swarm_blackboard.py",
+            "test_install_bootstrap.py",
+            "test_context_budget_fix.py",
+            "test_multi_turn_payload.py",
+        ],
         env=env,
     )
+    if res.returncode != 0:
+        sys.exit(res.returncode)
 
 
 def cmd_daemon(_args: argparse.Namespace) -> None:
@@ -273,8 +283,9 @@ def cmd_daemon(_args: argparse.Namespace) -> None:
     import runpy
     try:
         runpy.run_module("axiom.server.daemon", run_name="__main__")
-    except ImportError:
-        runpy.run_module("axiom.core.daemon", run_name="__main__")
+    except ImportError as exc:
+        _print(f"[red]Error launching daemon:[/red] {exc}")
+        sys.exit(1)
 
 
 def cmd_serve(args: argparse.Namespace) -> None:
