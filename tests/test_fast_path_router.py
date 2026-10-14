@@ -1,14 +1,32 @@
 """Unit & Integration tests for Hybrid Fastest Path Tool Router."""
 
-import pytest
+from __future__ import annotations
+
 import shutil
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-from axiom.core.fast_path_router import FastestPathRouter, FastPathPlan
-from instruction_parser import parse as parse_instruction, execute_instruction_fast_path
+import pytest
+
+from axiom.core.fast_path_router import FastPathPlan, FastestPathRouter
+from instruction_parser import execute_instruction_fast_path, parse as parse_instruction
 
 
-def test_url_routing():
+@pytest.fixture(autouse=True)
+def guard_desktop_processes(monkeypatch):
+    """Guard against unmocked browser spawns or desktop commands during router tests."""
+    mock_popen = MagicMock()
+    mock_run = MagicMock(return_value=MagicMock(returncode=0, stdout="", stderr=""))
+    mock_open = MagicMock(return_value=True)
+
+    monkeypatch.setattr("subprocess.Popen", mock_popen)
+    monkeypatch.setattr("subprocess.run", mock_run)
+    monkeypatch.setattr("webbrowser.open", mock_open, raising=False)
+    monkeypatch.setattr("webbrowser.open_new_tab", mock_open, raising=False)
+    yield
+
+
+@patch("webbrowser.open", return_value=True)
+def test_url_routing(mock_browser):
     """Verify web URLs are intercepted and routed to xdg-open."""
     urls = [
         "https://github.com/ChienGPT/Axiom",
@@ -85,8 +103,14 @@ async def test_desktop_automation_tool_fast_path_interception():
     from axiom.tools.desktop_control import DesktopAutomationTool
 
     tool = DesktopAutomationTool()
-    # Intercepted action:
-    res = await tool.execute("open_url", url="https://example.com")
-    assert res.success is True
-    assert res.metadata.get("fast_path") is True
-    assert res.metadata.get("command") == ["xdg-open", "https://example.com"]
+    with patch("subprocess.Popen") as mock_popen, patch("webbrowser.open", return_value=True, create=True):
+        mock_proc = MagicMock()
+        mock_popen.return_value = mock_proc
+        # Intercepted action:
+        res = await tool.execute("open_url", url="https://example.com")
+        assert res.success is True
+        assert res.metadata.get("fast_path") is True
+        assert res.metadata.get("command") == ["xdg-open", "https://example.com"]
+        mock_popen.assert_called_once()
+        assert mock_popen.call_args[0][0] == ["xdg-open", "https://example.com"]
+        assert mock_popen.call_args[1].get("start_new_session") is True
