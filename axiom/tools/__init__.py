@@ -58,6 +58,10 @@ __all__ = [
     'list_dynamic_tools',
     'update_dynamic_tool',
     'delete_dynamic_tool',
+    'WebSearchTool',
+    'FetchWebPageTool',
+    'web_search',
+    'fetch_web_page',
 ]
 
 from .core import BaseTool, ToolParameter, ToolResult
@@ -72,6 +76,12 @@ from .tool_manager import (
 )
 from .file_teleport import FileTeleportTool
 from .task_scheduler import TaskSchedulerTool
+from .web_search import (
+    FetchWebPageTool,
+    WebSearchTool,
+    fetch_web_page,
+    web_search,
+)
 
 
 from abc import ABC

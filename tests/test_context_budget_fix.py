@@ -58,15 +58,18 @@ class TestContextBudgetFix(unittest.IsolatedAsyncioTestCase):
         filtered = filter_tool_schemas_by_tier(self.all_schemas, tier)
         filtered_names = {s["function"]["name"] for s in filtered}
 
-        self.assertEqual(len(filtered), 3)
+        self.assertEqual(len(filtered), 5)
         expected_tier2 = {
             "execute_command",
             "manage_desktop_window",
             "interact_with_browser",
+            "web_search",
+            "fetch_web_page",
         }
         self.assertEqual(filtered_names, expected_tier2)
         self.assertNotIn("send_desktop_notification", filtered_names)
         self.assertNotIn("manage_media_playback", filtered_names)
+        self.assertNotIn("manage_system_process", filtered_names)
 
     def test_tier3_full_registry_fallback(self):
         """Tier 3 or general canvas queries should preserve the full registry."""

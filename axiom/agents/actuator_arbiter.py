@@ -77,6 +77,7 @@ TIER_2_PATTERNS = [
     r"\b(inspect|evaluate|javascript|js)\b",
     r"\b(scroll|scroll_page|extract_page_content|extract\s+page|page\s+content|markdown|read\s+article|pin\s+tab|duplicate\s+tab|reload\s+tab)\b",
     r"\b(open_tab|switch_tab|navigate_url|click_element|fill_element|get_page_snapshot)\b",
+    r"\b(web_search|fetch_web_page|web search|search the web|search web)\b",
 ]
 
 # Generic UI interaction indicators (click, type, fill, submit...)
@@ -123,6 +124,12 @@ class ActuatorArbiter:
     """Deterministic runtime arbitrator between Tier 1 (IPC/OS), Tier 2 (Browser DOM),
     and Tier 3 (Vision Grounding).
     """
+
+    TIER_TOOLS = {
+        "tier1_ipc": ["manage_desktop_window", "manage_system_process", "execute_command"],
+        "tier2_browser": ["interact_with_browser", "web_search", "fetch_web_page"],
+        "tier3_vision": ["interact_with_ui"],
+    }
 
     @classmethod
     def arbitrate(

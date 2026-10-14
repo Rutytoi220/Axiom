@@ -288,6 +288,50 @@ def load_plugins() -> None:
                 "    return json.dumps(res.to_dict(tool=_tool.name, arguments=params))\n"
             ),
         ),
+        (
+            TOOLS_DIR / "web_search.py",
+            (
+                "import json\n"
+                "from axiom.tools.web_search import WebSearchTool\n\n"
+                "_tool = WebSearchTool()\n\n"
+                "TOOL_SCHEMA = {\n"
+                '    "type": "function",\n'
+                '    "function": {\n'
+                '        "name": _tool.name,\n'
+                '        "description": _tool.description,\n'
+                '        "parameters": _tool.schema,\n'
+                "    }\n"
+                "}\n"
+                'TUI_HINT = "🔍 Searching the web..."\n'
+                "REQUIRED_RING = 1\n\n"
+                "async def execute(query: str = '', num_results: int = 5, **kwargs) -> str:\n"
+                '    params = {"query": query, "num_results": num_results, **kwargs}\n'
+                "    res = await _tool.execute(params)\n"
+                "    return json.dumps(res.to_dict(tool=_tool.name, arguments=params))\n"
+            ),
+        ),
+        (
+            TOOLS_DIR / "fetch_web_page.py",
+            (
+                "import json\n"
+                "from axiom.tools.web_search import FetchWebPageTool\n\n"
+                "_tool = FetchWebPageTool()\n\n"
+                "TOOL_SCHEMA = {\n"
+                '    "type": "function",\n'
+                '    "function": {\n'
+                '        "name": _tool.name,\n'
+                '        "description": _tool.description,\n'
+                '        "parameters": _tool.schema,\n'
+                "    }\n"
+                "}\n"
+                'TUI_HINT = "🌐 Fetching and reading webpage content..."\n'
+                "REQUIRED_RING = 1\n\n"
+                "async def execute(url: str = '', max_chars: int = 5000, **kwargs) -> str:\n"
+                '    params = {"url": url, "max_chars": max_chars, **kwargs}\n'
+                "    res = await _tool.execute(params)\n"
+                "    return json.dumps(res.to_dict(tool=_tool.name, arguments=params))\n"
+            ),
+        ),
     ]
     for target_file, code_content in provisions:
         if not target_file.exists():
@@ -412,12 +456,12 @@ def _extract_capability(mod: Any, name: str):
             requires_window=False,
             token_cost=150,
         )
-    if name == "interact_with_browser":
+    if name in ("interact_with_browser", "web_search", "fetch_web_page"):
         return ToolCapability(
             tier=2,
             is_core=False,
-            requires_bridge=True,
-            requires_window=True,
+            requires_bridge=(name == "interact_with_browser"),
+            requires_window=(name == "interact_with_browser"),
             token_cost=250,
         )
     if name in ("interact_with_ui", "vision", "capture_som_screen", "som_click", "som_type", "som_key"):
@@ -542,7 +586,7 @@ TIER_1_TOOLS = DynamicCapabilitySet(
 
 TIER_2_TOOLS = DynamicCapabilitySet(
     lambda n, c: getattr(c, "tier", None) == 2,
-    {"interact_with_browser"},
+    {"interact_with_browser", "web_search", "fetch_web_page"},
 )
 
 TIER_3_TOOLS = DynamicCapabilitySet(
