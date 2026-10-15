@@ -46,9 +46,10 @@ Physical workstation control is partitioned into three deterministic tiers with 
    - Tools: `manage_desktop_window`, `manage_system_process`, `manage_workspace_file`, `query_system_journal`, `manage_media_playback`, `send_desktop_notification`.
    - Returns structured JSON; zero visual hallucination risk.
 
-2. **Tier 2: Semantic Browser DOM Bridge**
+2. **Tier 2: Semantic Browser DOM & Web Search**
    - Interacts with active web pages through an authenticated local WebSocket server (`ws://127.0.0.1:41144`) connected to the AXIOM WebExtension.
-   - Tools: `interact_with_browser` (query DOM trees, click CSS selectors, type text, navigate tabs).
+   - Native Web Tools: `web_search` (query DuckDuckGo / SearXNG with context budgeting) and `fetch_web_page` (HTML text extraction with SSRF security and prompt injection isolation boundaries).
+   - Tools: `interact_with_browser`, `web_search`, `fetch_web_page`.
    - **Negative Gating & Tier Pruning:** When a browser window is focused and the DOM bridge is active, `NativeOrchestrator` strictly purges Tier 3 generic desktop vision tools (`interact_with_ui`, `capture_desktop_vision`) from the LLM tool manifest. This prevents models from guessing pixel coordinates on interactive web pages.
 
 3. **Tier 3: Visual Grounding Fallback (Lowest Precedence)**
@@ -58,7 +59,7 @@ Physical workstation control is partitioned into three deterministic tiers with 
 ---
 
 ### B. Persistent Memory Store (SQLite WAL + FTS5)
-Persistent memory is implemented via [`axiom/db/memory.py`](file:///home/rutytoi/Documents/ChienGPT/axiom/db/memory.py):
+Persistent memory is implemented via [`axiom/db/memory.py`](axiom/db/memory.py):
 - **Concurrency & Resilience:** SQLite configured with Write-Ahead Logging (`PRAGMA journal_mode=WAL`), high busy timeouts (`PRAGMA busy_timeout=5000`), and foreign key enforcement.
 - **Full-Text Retrieval:** Virtual FTS5 tables (`memories_fts`) with triggers automatically index stored facts.
 - **Categorization & Versioning:** Enforces strict categories (`preference`, `environment`, `homelab`, `workflow`, `capability`). Superseded facts track historical lineage without data loss.
@@ -67,7 +68,7 @@ Persistent memory is implemented via [`axiom/db/memory.py`](file:///home/rutytoi
 ---
 
 ### C. Autonomous Dynamic Tool Crafting & Lifecycle Management
-AXIOM synthesizes, validates, and installs new tools at runtime into `~/.config/axiom/tools.d/` via [`axiom/tools/tool_crafter.py`](file:///home/rutytoi/Documents/ChienGPT/axiom/tools/tool_crafter.py) and [`axiom/tools/tool_manager.py`](file:///home/rutytoi/Documents/ChienGPT/axiom/tools/tool_manager.py):
+AXIOM synthesizes, validates, and installs new tools at runtime into `~/.config/axiom/tools.d/` via [`axiom/tools/tool_crafter.py`](axiom/tools/tool_crafter.py) and [`axiom/tools/tool_manager.py`](axiom/tools/tool_manager.py):
 - **AST Contract Inspection:** Statically parses candidate code with Python's `ast` module to confirm valid syntax, required `async def execute` definitions, and standard schema exports (`TOOL_SCHEMA`, `REQUIRED_RING`, `TIER`, `TUI_HINT`).
 - **Privilege Escalation Protection:** Generated dynamic tools cannot claim `REQUIRED_RING = 0` (Ring 0 is immutable and reserved for built-in actuators).
 - **Isolated Staging Dry-Run:** Stages the code into `/tmp/axiom_stage_<uuid>.py`, dynamically imports it via `importlib.util.spec_from_file_location`, tests execution under a 5.0s timeout, and cleans up `sys.modules` and scratch files.
@@ -76,7 +77,7 @@ AXIOM synthesizes, validates, and installs new tools at runtime into `~/.config/
 ---
 
 ### D. Benchmark & Evaluation Harness (`axiom.eval`)
-AXIOM includes a deterministic and live benchmark evaluation suite via [`axiom/eval/`](file:///home/rutytoi/Documents/ChienGPT/axiom/eval/):
+AXIOM includes a deterministic and live benchmark evaluation suite via [`axiom/eval/`](axiom/eval/):
 - **Level 1 (Deterministic Offline):** 6 self-contained tasks evaluating tool dispatch, recovery envelopes, step limits, false success rejection, memory roundtrips, and timeouts in under 3 seconds with zero GPU or network dependencies.
 - **Level 2 (Live Model Evaluation):** Exercises real multi-turn ReAct loops against local models (`qwen3:8b`, `qwen3:1.7b`) with independent disk and state validators.
 - **Level 3 (Complex Workflows):** Tests multi-step triage, tool self-repair, and containment.
@@ -87,7 +88,7 @@ AXIOM includes a deterministic and live benchmark evaluation suite via [`axiom/e
 
 ## 2. Benchmark Baseline Highlights (RTX 4060 8GB VRAM)
 
-Empirical results from [`docs/benchmarks/live_baseline_report.md`](file:///home/rutytoi/Documents/ChienGPT/docs/benchmarks/live_baseline_report.md) executed on consumer hardware (Linux Fedora Atomic, NVIDIA RTX 4060 Laptop 8GB VRAM, Ollama v0.40.1):
+Empirical results from [`docs/benchmarks/live_baseline_report.md`](docs/benchmarks/live_baseline_report.md) executed on consumer hardware (Linux Fedora Atomic, NVIDIA RTX 4060 Laptop 8GB VRAM, Ollama v0.40.1):
 
 | Model | Task ID | Steps | Measured Tokens | Duration | Status | Outcome / Behavioral Verification |
 | :--- | :--- | :---: | :---: | :---: | :---: | :--- |
@@ -121,20 +122,34 @@ cd Axiom
 # 2. Sync virtual environment and dependencies
 uv sync
 
-# 3. Run fast deterministic offline preflight check
-uv run python3 -m axiom.eval --level 1
+# 3. Run automated test suite (61 verified tests)
+uv run pytest -v
 
 # 4. Launch AXIOM interactive streaming CLI
-uv run python3 -m axiom.cli.main
+uv run axiom
 ```
-
-For detailed multi-distribution setup, troubleshooting, and model installation instructions, see the complete [Quickstart Guide](docs/quickstart.md).
 
 ---
 
-## 4. CLI Interface & Commands
+## 4. Technical Documentation Hub
 
-AXIOM provides multiple interfaces accessible via `axiom` or `python -m axiom.cli.main`:
+For developers, architects, and AI coding agents navigating the codebase, refer to the source-verified guides in [`docs/`](docs/):
+
+| Guide | Description | Target Audience |
+| :--- | :--- | :--- |
+| **[`docs/INDEX.md`](docs/INDEX.md)** | **Central AI & Developer Navigation Map** | Coding agents, contributors |
+| **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)** | Runtime architecture, request lifecycle, context budgeting | Architects, developers |
+| **[`docs/SUBSYSTEMS.md`](docs/SUBSYSTEMS.md)** | Subsystem catalog, module responsibilities, public APIs | Developers, maintainers |
+| **[`docs/TOOLS.md`](docs/TOOLS.md)** | Tool creation guide, dynamic plugin format, capability tiers | Tool authors, extenders |
+| **[`docs/SECURITY.md`](docs/SECURITY.md)** | SSRF protection, prompt injection containment, shell auth | Security auditors, engineers |
+| **[`docs/DEVELOPER_GUIDE.md`](docs/DEVELOPER_GUIDE.md)** | Developer workflows, headless testing, packaging | All contributors |
+| **[`AGENTS.md`](AGENTS.md)** | Behavioral & empirical verification standard for AI agents | Autonomous coding agents |
+
+---
+
+## 5. CLI Interface & Commands
+
+AXIOM provides multiple interfaces accessible via `axiom` (registered entrypoint) or `uv run axiom`:
 
 ```bash
 # Modern inline streaming CLI (Tokyo Night theme, default)
@@ -152,8 +167,17 @@ axiom server
 # Run autonomous agent with natural-language prompt
 axiom run "Inspect open windows and list system memory"
 
+# List all registered and dynamic tools
+axiom tool list
+
+# Execute a tool directly by ID
+axiom tool run query_system_journal --args '{"lines": 10}'
+
 # Show system and daemon telemetry
 axiom status
+
+# Run automated headless test suite
+axiom test
 
 # Run deterministic benchmark suite
 python -m axiom.eval --level 1
@@ -164,17 +188,19 @@ python -m axiom.eval --level 2 --live -m qwen3:8b --json benchmark_report.json
 
 ---
 
-## 5. Security & Isolation Model
+## 6. Security & Isolation Model
 
 AXIOM operates under a transparent, single-user workstation security model:
-- **In-Process Execution Reality:** Dynamic tools execute in-process inside the Python interpreter under the host user's UID. AST validation and `/tmp` staging verify syntax and prevent accidental errors, but do **not** constitute an OS-level kernel sandbox (no cgroups, namespaces, or WASM).
-- **Path Traversal Containment:** Evaluation contexts and workspace tools enforce strict path containment via `path.is_relative_to(workspace_dir.resolve())`.
-- **Zero External Telemetry:** All network traffic remains strictly local on loopback (`127.0.0.1:11434`). Zero analytics, error reports, or prompts are sent to external servers.
+- **SSRF Network Protection:** Outbound network requests pass through [`axiom.security.network.validate_safe_url`](axiom/security/network.py), blocking loopback, RFC 1918 private subnets, cloud metadata (169.254.169.254), Carrier-Grade NAT / Tailscale mesh (`100.64.0.0/10`), and re-validating redirect hops.
+- **Prompt Injection Isolation:** Web content and search results are enclosed in `<external_web_content>` XML boundaries with tag escaping.
+- **Fail-Closed Shell Confirmation:** Arbitrary shell commands require explicit interactive user approval via [`axiom/tools/__init__.py`](axiom/tools/__init__.py) (`_request_shell_authorization`) and fail closed in non-interactive sessions.
+- **In-Process Execution Reality:** Dynamic tools execute in-process inside the Python interpreter under the host user's UID. AST validation and `/tmp` staging verify syntax and prevent accidental errors, but do **not** constitute an OS-level kernel sandbox.
+- **Zero External Telemetry:** All inference traffic remains strictly local on loopback (`http://127.0.0.1:11434`). Zero analytics, error reports, or prompts are sent to external servers.
 
-For full technical specifications, read the [AXIOM Security Model](docs/security_model.md).
+For full technical specifications, read [`docs/SECURITY.md`](docs/SECURITY.md) and [`docs/security_model.md`](docs/security_model.md).
 
 ---
 
-## 6. License
+## 7. License
 
 Distributed under the MIT License. See `LICENSE` for more information.

@@ -1,13 +1,18 @@
-"""AXIOM Developer Guide - Building Custom Extensions."""
+# AXIOM Developer Guide (v1.0.0)
+
+> [!IMPORTANT]
+> The authoritative, source-verified developer workflow and testing guide is located in [`docs/DEVELOPER_GUIDE.md`](docs/DEVELOPER_GUIDE.md).  
+> For the comprehensive tool creation guide and dynamic plugin contracts, see [`docs/TOOLS.md`](docs/TOOLS.md).  
+> For the full navigation map, see [`docs/INDEX.md`](docs/INDEX.md).
 
 # Creating Custom Tools
 
-Tools in AXIOM extend the `BaseTool` class and are registered in the engine's registry.
+Tools in AXIOM extend the `BaseTool` class in [`axiom.tools.core`](axiom/tools/core.py) or are authored as dynamic single-file plugins in `~/.config/axiom/tools.d/<name>.py` (see [`docs/TOOLS.md`](docs/TOOLS.md)).
 
-## Example: Creating a Web Scraper Tool
+## Example: Creating a Native Tool Class
 
 ```python
-from axiom import BaseTool, ToolResult, ToolParameter
+from axiom.tools.core import BaseTool, ToolResult, ToolParameter
 import requests
 from bs4 import BeautifulSoup
 

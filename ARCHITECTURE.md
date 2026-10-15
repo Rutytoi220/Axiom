@@ -1,15 +1,23 @@
-# AXIOM V11 Architecture Specification
+# AXIOM Architecture Specification (v1.0.0)
 
-AXIOM is a highly decoupled, modular AI operating system. The architecture isolates the synchronous PySide6 GUI thread from the heavy asynchronous processing tasks performed by the headless daemon and orchestrated LLM agents.
+> [!IMPORTANT]
+> The authoritative, source-verified architecture documentation is located in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).  
+> For the complete task-oriented navigation index, see [`docs/INDEX.md`](docs/INDEX.md).
 
-## 1. Subsystem Map
+AXIOM is a local-first autonomous AI operating system engineered for Linux (specifically Wayland compositors such as Hyprland). It connects local reasoning models to physical desktop workflows through structured system IPC, semantic web DOM automation, persistent memory, and hot-reloadable dynamic tool crafting.
 
-* **GUI Layer (`axiom/gui`)**: Thin PySide6 client running entirely synchronously. The `ThemeManager` applies dynamic declarative CSS natively, and `AxiomGuiBridge` sends/receives events via IPC without ever blocking the Qt main loop.
-* **Kernel & EventBus (`axiom/core`)**: The synchronous central nervous system. Uses publish-subscribe semantics (`event_bus.publish`) to route telemetry, LLM tokens, system anomalies, and tool execution requests between isolated components.
-* **Orchestration Layer (`axiom/agents`)**: The ReAct execution environment where `OrchestratorAgent` invokes dynamically pruned tools, consults the memory graph, and interfaces with `SmartRouter` to invoke models via `LiteLLM`/`Ollama`.
-* **Memory Subsystem (`axiom/memory`)**: A unified SQLite Semantic Vector Memory + Qdrant Vector Store layer. Features temporal decay and background `DeepMemoryConsolidation` that triggers autonomously during system idle to optimize the WAL.
-* **Perception Kernel (`axiom/perception`)**: Background asynchronous daemons (e.g., `SystemHealthWatchdog`) that continuously poll host OS resources (RAM, disk, `journalctl`) and dispatch proactive notifications or trigger REM sleep cycles.
-* **Swarm Execution (`axiom/server`)**: A FastAPI-powered `Node API` allowing remote execution, heavily guarded by an implicit Tailscale `100.x.x.x` Trust Boundary.
+## 1. Subsystem Map & Core Architecture
+
+* **UI & Console Layer (`axiom/cli`, `axiom/gui`)**: The modern inline streaming REPL (`axiom repl`), OpenCode-tier TUI (`axiom chat`), and thin PySide6 client (`axiom ui`).
+* **Fast-Path Routing (`axiom/core/fast_path_router.py`)**: Intercepts standard actions (URLs, app launches, service actions) to execute via native CLI commands in sub-10ms without consuming LLM tokens.
+* **Active Orchestrator (`axiom/agents/native_orchestrator.py`)**: The streaming ReAct execution environment providing sliding-window context budgeting, active window context introspection (`hyprctl activewindow -j`), tolerant tool-call extraction, and closed-loop error recovery.
+* **Three-Tier Actuator Hierarchy (`axiom/agents/actuator_arbiter.py`)**:
+  - **Tier 1 (System IPC):** `manage_desktop_window`, `manage_system_process`, `manage_system_clipboard`, `query_system_journal`, `manage_media_playback`, `manage_workspace_file`, `send_desktop_notification`.
+  - **Tier 2 (Browser DOM & Web Search):** `interact_with_browser` (WebExtension bridge at `ws://127.0.0.1:41144`), `web_search`, `fetch_web_page`.
+  - **Tier 3 (Visual Grounding Fallback):** `interact_with_ui` (Set-of-Mark / OCR / VLM). Strictly purged when browser is active.
+* **Context Budgeting (`axiom/config.py`, `axiom/agents/native_orchestrator.py`)**: Authoritative 4-tier context hierarchy clamped to `[1024, 65536]` with an 8,192 default.
+* **Security & SSRF Guard (`axiom/security/network.py`, `axiom/tools/__init__.py`)**: Outbound URL validation, RFC 1918 / CGNAT / Tailscale blocking, per-hop redirect re-validation, containment tag escaping, and fail-closed shell execution authorization.
+* **Memory & Swarm Subsystem (`axiom/db/memory.py`, `axiom/memory/blackboard.py`)**: SQLite Write-Ahead Logging (`WAL`) with FTS5 fact indexing, context hydration, and multi-agent swarm blackboard with namespace isolation.
 
 ---
 

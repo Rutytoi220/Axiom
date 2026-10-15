@@ -18,14 +18,32 @@ The goal is always: *"I executed it, exercised the behavior, and verified the re
 
 ## 2. Discover the Project & Environment
 Before modifying code or running commands:
-1. **Inspect Repo Conventions:** Read `README.md`, `Makefile`, `justfile`, `package.json`, `pyproject.toml`, `Cargo.toml`, or `./scripts/`. Prefer documented project commands over guessing generic workflows.
-2. **Identify Target Entrypoints:** Locate the actual binary, script, or server entrypoint that users interact with.
-3. **Respect Environment Isolation:**
-   - **Python:** Use the project's virtual environment (`source .venv/bin/activate`, `uv run`, `poetry run`).
-   - **Rust:** Use `cargo run`, target flags, and explicit feature configurations.
-   - **Node:** Use the local package manager (`pnpm`, `yarn`, `npm run`).
-   - **Containers:** Use project-defined container commands.
-   - *Never install packages globally or pollute the host environment when isolated tooling is configured.*
+1. **Inspect Repo Conventions & Documentation Index:** Read [`README.md`](README.md), [`pyproject.toml`](pyproject.toml), and the documentation hub [`docs/INDEX.md`](docs/INDEX.md). Prefer documented project commands over guessing generic workflows.
+2. **Inspect Source Code First (Anti-Hallucination Mandate):** Never assume past reports, comments, or naming conventions reflect the true repository state. Treat all presumed paths and symbols as leads to verify in code before proceeding.
+3. **Active Project Technology Stack:**
+   - **Runtime:** Python 3.10–3.11 (`.venv` in repository root).
+   - **Toolchain & Runner:** [`uv`](https://docs.astral.sh/uv/) (`uv run ...`, `uv sync`, `uv build --wheel`).
+   - **Test Framework:** `pytest` (`uv run pytest -v`).
+   - **Linter & Formatter:** `ruff` (`uv run ruff check .`).
+4. **Mandatory Project Commands:**
+   - **Full Test Suite:** `uv run pytest -v` (runs all 61 consolidated tests across `tests/test_*.py`).
+   - **Static Linter Audit:** `uv run ruff check .`
+   - **CLI Smoke Test:** `uv run axiom --help`
+5. **Verified "Where to Look First" Repository Topology:**
+   - **Entry Points:** [`axiom/cli/main.py`](axiom/cli/main.py) (CLI dispatch), [`axiom/cli/repl.py`](axiom/cli/repl.py) (Inline REPL), [`axiom/server/daemon.py`](axiom/server/daemon.py) (Daemon).
+   - **Active ReAct Orchestrator:** [`axiom/agents/native_orchestrator.py`](axiom/agents/native_orchestrator.py).
+   - **Actuator Routing & Negative Gating:** [`axiom/agents/actuator_arbiter.py`](axiom/agents/actuator_arbiter.py), [`axiom/core/fast_path_router.py`](axiom/core/fast_path_router.py).
+   - **Dynamic Tools Directory:** `~/.config/axiom/tools.d/` (configured in [`axiom/core/plugins.py`](axiom/core/plugins.py)).
+   - **SSRF & Network Security:** [`axiom/security/network.py`](axiom/security/network.py).
+   - **Shell Execution Authorization:** [`axiom/tools/__init__.py`](axiom/tools/__init__.py) (`_request_shell_authorization`).
+   - **Configuration & Context Precedence:** [`axiom/config.py`](axiom/config.py).
+   - **Swarm Blackboard:** [`axiom/memory/blackboard.py`](axiom/memory/blackboard.py).
+   - **Consolidated Test Battery:** [`tests/`](tests/) (configured via [`pyproject.toml`](pyproject.toml)).
+6. **Non-Negotiable Headless & Isolation Safeguards:**
+   - **Headless Only:** Tests must run without opening browser windows or desktop popups. Calls to `webbrowser.open` and subprocesses must be mocked.
+   - **Zero Unprompted Git Mutations:** Never run `git add`, `git commit`, `git push`, or `git reset` unless explicitly ordered by the user. Leave changes unstaged in the working tree.
+   - **Preserve Pre-Existing Work:** Never overwrite, delete, or absorb pre-existing files without explicit instruction.
+   - **Fail-Closed Security:** Shell commands must fail closed in non-interactive sessions unless `AXIOM_TESTING=1` or `AXIOM_AUTOPILOT=1` is explicitly set.
 
 ---
 
