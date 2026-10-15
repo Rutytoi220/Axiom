@@ -13,6 +13,14 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
+# Additional reserved / private subnets not flagged by is_private or is_reserved in stdlib
+DISALLOWED_NETWORKS = (
+    ipaddress.ip_network("100.64.0.0/10"),  # RFC 6598 Carrier-Grade NAT / Tailscale private mesh
+    ipaddress.ip_network("0.0.0.0/8"),      # RFC 1122 Current network / local host
+    ipaddress.ip_network("2001:db8::/32"),  # RFC 3849 IPv6 Documentation
+)
+
+
 def validate_safe_url(url: str) -> str:
     """Validate that a URL is safe to fetch, enforcing strict SSRF protections.
 
@@ -21,6 +29,7 @@ def validate_safe_url(url: str) -> str:
     - Missing or empty hostnames
     - Loopback IPs (127.0.0.0/8, ::1)
     - Private network subnets (RFC 1918: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
+    - Carrier-Grade NAT / Tailscale private mesh IPs (RFC 6598: 100.64.0.0/10)
     - Link-local and cloud metadata IPs (169.254.0.0/16, fe80::/10)
     - Reserved, multicast, unspecified (0.0.0.0), and IPv4-mapped IPv6 private ranges
 
@@ -77,6 +86,7 @@ def validate_safe_url(url: str) -> str:
             or ip_obj.is_reserved
             or ip_obj.is_multicast
             or ip_obj.is_unspecified
+            or any(ip_obj in net for net in DISALLOWED_NETWORKS)
         ):
             raise ValueError(
                 f"SSRF blocked: Access to private/loopback network disallowed ({ip_obj})"
