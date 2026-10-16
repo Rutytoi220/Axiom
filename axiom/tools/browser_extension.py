@@ -14,7 +14,10 @@ import uuid
 from typing import Any, Dict, List, Optional, Set
 
 import websockets
-from websockets.server import WebSocketServer
+try:
+    from websockets.asyncio.server import Server as WebSocketServer, serve as ws_serve
+except ImportError:
+    from websockets.server import WebSocketServer, serve as ws_serve  # type: ignore[no-redef]
 
 logger = logging.getLogger("axiom.browser_bridge")
 
@@ -230,7 +233,7 @@ class BrowserExtensionBridge:
             if self.server is not None:
                 return
             try:
-                self.server = await websockets.serve(
+                self.server = await ws_serve(
                     self._listen,
                     self.host,
                     self.port,

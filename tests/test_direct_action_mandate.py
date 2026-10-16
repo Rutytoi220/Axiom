@@ -10,7 +10,6 @@ Verifies:
 5. generate_stream() execution when model output has prose preceding code block.
 """
 
-import asyncio
 import contextlib
 import json
 import unittest
@@ -24,12 +23,11 @@ from axiom.core.system_prompt import (
 )
 
 
-class TestDirectActionMandate(unittest.TestCase):
+class TestDirectActionMandate(unittest.IsolatedAsyncioTestCase):
 
     def test_instruction_text_tab_distinction_and_anti_consultant(self):
         compiled = InstructionManager().get_compiled_instructions()
 
-        # Check Tab distinction in instructions and system prompts
         expected_switch = "To switch to an EXISTING tab, use action 'switch_tab'"
         expected_open = (
             "To open a NEW website or tab, ALWAYS use action 'open_tab' (or 'navigate_url' to change the current tab). "
@@ -83,7 +81,7 @@ class TestDirectActionMandate(unittest.TestCase):
         self.assertEqual(res.get("arguments", {}).get("url"), "https://github.com")
         self.assertEqual(res.get("function", {}).get("arguments", {}).get("url"), "https://github.com")
 
-    def test_generate_stream_executes_tool_call_with_prose(self):
+    async def test_generate_stream_executes_tool_call_with_prose(self):
         orch = NativeOrchestrator()
         executed_tools = []
 
@@ -101,7 +99,6 @@ class TestDirectActionMandate(unittest.TestCase):
             resp.status_code = 200
 
             if turn_counter == 1:
-                # Turn 1: Model outputs conversational prose preceding a markdown tool call
                 content = (
                     "Please verify the current active window before proceeding:\n"
                     "```json\n"
@@ -113,7 +110,6 @@ class TestDirectActionMandate(unittest.TestCase):
                     "data: [DONE]",
                 ]
             else:
-                # Turn 2: Observation received -> final answer
                 lines = [
                     'data: {"choices": [{"delta": {"content": "The active window is Zen Browser."}}]}',
                     "data: [DONE]",
@@ -126,37 +122,34 @@ class TestDirectActionMandate(unittest.TestCase):
             resp.aiter_lines = aiter_lines
             yield resp
 
-        async def run_test():
-            payload = {
-                "messages": [{"role": "user", "content": "What window is open?"}],
-                "tools": [
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": "manage_desktop_window",
-                            "description": "Manage desktop windows",
-                            "parameters": {"type": "object"},
-                        },
-                    }
-                ],
-            }
+        payload = {
+            "messages": [{"role": "user", "content": "What window is open?"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "manage_desktop_window",
+                        "description": "Manage desktop windows",
+                        "parameters": {"type": "object"},
+                    },
+                }
+            ],
+        }
 
-            with patch("axiom.agents.native_orchestrator.execute_tool", side_effect=mock_execute), \
-                 patch.object(orch, "get_active_window_context", return_value=None), \
-                 patch("httpx.AsyncClient") as mock_client:
+        with patch("axiom.agents.native_orchestrator.execute_tool", side_effect=mock_execute), \
+             patch.object(orch, "get_active_window_context", return_value=None), \
+             patch("httpx.AsyncClient") as mock_client:
 
-                mock_client.return_value.__aenter__.return_value.stream = mock_stream_client
-                mock_client.return_value.__aenter__.return_value.post = AsyncMock()
+            mock_client.return_value.__aenter__.return_value.stream = mock_stream_client
+            mock_client.return_value.__aenter__.return_value.post = AsyncMock()
 
-                chunks = []
-                async for chunk in orch.generate_stream(payload):
-                    chunks.append(chunk)
+            chunks = []
+            async for chunk in orch.generate_stream(payload):
+                chunks.append(chunk)
 
-                self.assertEqual(len(executed_tools), 1)
-                self.assertEqual(executed_tools[0][0], "manage_desktop_window")
-                self.assertEqual(executed_tools[0][1], {"action": "get_active"})
-
-        asyncio.run(run_test())
+            self.assertEqual(len(executed_tools), 1)
+            self.assertEqual(executed_tools[0][0], "manage_desktop_window")
+            self.assertEqual(executed_tools[0][1], {"action": "get_active"})
 
 
 if __name__ == "__main__":

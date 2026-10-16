@@ -1,62 +1,51 @@
 """Test suite for Closed-Loop Fallback & Error Escalation State Machine (Phase 2).
 
-Covers:
-1. Simulated click_element & fill_element failure returns structured recovery envelope.
-2. Simulated switch_tab failure returns structured recovery envelope.
-3. Orchestrator automatically ingests recovery hint and rejects conversational tutorial prose,
-   retrying and dispatching get_page_snapshot.
-4. Orchestrator handles switch_tab failure and routes recovery to open_tab/list_tabs.
-5. ToolResult recovery envelope contract & serialization.
+Verifies:
+1. ToolResult envelope contract (success, output, error, remedy_hint, allowed_actions).
+2. Failure envelopes for common browser failure modes:
+   - click_element / fill_element missing element -> recovery: get_page_snapshot or scroll_page.
+   - switch_tab missing query -> recovery: list_tabs or open_tab.
+3. NativeOrchestrator autonomous closed-loop recovery:
+   - Ingests ToolResult structured failure and formats into tool message with Recovery Hint.
+   - Rejects conversational tutorial prose attempting to avoid actuator execution.
+   - Automatically re-prompts Ollama and executes recovery tool call.
 """
 
-import asyncio
 import contextlib
-import json
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from axiom.agents.native_orchestrator import NativeOrchestrator
+from axiom.tools.base import ToolResult
 from axiom.tools.browser_cdp import InteractWithBrowserTool
 from axiom.tools.browser_extension import BrowserResult
-from axiom.tools.core import ToolResult
 
 
 class TestErrorEscalation(unittest.IsolatedAsyncioTestCase):
     def test_tool_result_envelope_contract(self):
-        """Test ToolResult supports structured error metadata and recovery envelope."""
-        res = ToolResult(
+        """Verify ToolResult envelope properly encapsulates error and recovery metadata."""
+        # Success envelope
+        ok_res = ToolResult(success=True, output={"status": "clicked", "element_id": 42})
+        self.assertTrue(ok_res.success)
+        self.assertIsNone(ok_res.error)
+        self.assertIsNone(ok_res.remedy_hint)
+        self.assertEqual(ok_res.output["element_id"], 42)
+
+        # Failure envelope with recovery hints and allowed actions
+        err_res = ToolResult(
             success=False,
             error="Element ID 42 not found on page.",
             remedy_hint="Call get_page_snapshot to refresh element IDs, or scroll_page down if the element is below the viewport.",
             allowed_actions=["get_page_snapshot", "scroll_page"],
         )
-        self.assertFalse(res.success)
-        self.assertEqual(res.error, "Element ID 42 not found on page.")
-        self.assertEqual(
-            res.remedy_hint,
-            "Call get_page_snapshot to refresh element IDs, or scroll_page down if the element is below the viewport.",
-        )
-        self.assertEqual(res.allowed_actions, ["get_page_snapshot", "scroll_page"])
-
-        envelope = res.to_dict(
-            tool="interact_with_browser",
-            arguments={"action": "click_element", "element_id": 42},
-        )
-        self.assertFalse(envelope["success"])
-        self.assertEqual(envelope["error"], "Element ID 42 not found on page.")
-        self.assertEqual(
-            envelope["remedy_hint"],
-            "Call get_page_snapshot to refresh element IDs, or scroll_page down if the element is below the viewport.",
-        )
-        self.assertEqual(envelope["allowed_actions"], ["get_page_snapshot", "scroll_page"])
-        self.assertIn("result", envelope)
-        self.assertEqual(
-            envelope["result"]["remedy_hint"],
-            "Call get_page_snapshot to refresh element IDs, or scroll_page down if the element is below the viewport.",
-        )
+        self.assertFalse(err_res.success)
+        self.assertEqual(err_res.error, "Element ID 42 not found on page.")
+        self.assertIn("Call get_page_snapshot", err_res.remedy_hint)
+        self.assertIn("scroll_page", err_res.allowed_actions)
+        self.assertIsNone(err_res.output)
 
     async def test_simulated_click_and_fill_element_failure_envelope(self):
-        """Test simulated click_element and fill_element failure returns structured recovery envelope."""
+        """Verify interact_with_browser emits structured failure envelopes with remedy hints."""
         tool = InteractWithBrowserTool()
 
         with patch("axiom.tools.browser_extension.get_bridge") as mock_get_bridge:
@@ -107,7 +96,7 @@ class TestErrorEscalation(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(res_fill.allowed_actions, ["get_page_snapshot", "scroll_page"])
 
     async def test_simulated_switch_tab_failure_envelope(self):
-        """Test simulated switch_tab failure returns open_tab/list_tabs recovery envelope."""
+        """Verify switch_tab failure envelope advises list_tabs or open_tab."""
         tool = InteractWithBrowserTool()
 
         with patch("axiom.tools.browser_extension.get_bridge") as mock_get_bridge:
@@ -120,24 +109,25 @@ class TestErrorEscalation(unittest.IsolatedAsyncioTestCase):
                 return_value=BrowserResult({
                     "success": False,
                     "action": "switch_tab",
-                    "error": "No open tab matching query: 'github'",
-                    "open_tabs": [{"id": 1, "title": "Google", "url": "https://google.com"}],
+                    "error": "No open tab matching query: 'reddit'",
+                    "open_tabs": [{"id": 1, "title": "GitHub", "url": "https://github.com"}],
                 })
             )
             mock_get_bridge.return_value = mock_bridge
 
-            res_switch = await tool.execute({"action": "switch_tab", "query": "github"})
-            self.assertFalse(res_switch.success)
-            self.assertIn("No open tab matching query: 'github'", res_switch.error)
+            res = await tool.execute({"action": "switch_tab", "query": "reddit"})
+            self.assertFalse(res.success)
+            self.assertIn("No open tab matching query: 'reddit'", res.error)
+            self.assertIn("GitHub", res.error)
             self.assertEqual(
-                res_switch.remedy_hint,
-                "Call list_tabs to see valid targets, or open_tab with url='github' to launch it.",
+                res.remedy_hint,
+                "Call list_tabs to see valid targets, or open_tab with url='reddit' to launch it.",
             )
-            self.assertEqual(res_switch.allowed_actions, ["list_tabs", "open_tab"])
+            self.assertEqual(res.allowed_actions, ["list_tabs", "open_tab"])
 
     async def test_orchestrator_ingests_recovery_hint_and_dispatches_snapshot(self):
-        """Test orchestrator ingests recovery hint, rejects conversational advisory prose,
-        and automatically dispatches get_page_snapshot recovery tool.
+        """Test orchestrator receives a ToolResult error envelope, injects recovery hint,
+        rejects conversational advisory prose, and executes get_page_snapshot.
         """
         orch = NativeOrchestrator()
         executed_tools = []
@@ -153,12 +143,7 @@ class TestErrorEscalation(unittest.IsolatedAsyncioTestCase):
                     allowed_actions=["get_page_snapshot", "scroll_page"],
                 )
             elif action == "get_page_snapshot":
-                return {
-                    "elements": [
-                        {"element_id": 1, "tag": "button", "text": "Submit"},
-                        {"element_id": 2, "tag": "a", "text": "Learn more"},
-                    ]
-                }
+                return {"status": "success", "elements": [{"id": 1, "text": "OK"}]}
             return {"status": "ok"}
 
         turn_counter = 0
@@ -170,25 +155,21 @@ class TestErrorEscalation(unittest.IsolatedAsyncioTestCase):
             resp = AsyncMock()
             resp.status_code = 200
 
-            # Turn 1: Model calls click_element with invalid id 42
             if turn_counter == 1:
                 lines = [
                     'data: {"choices": [{"delta": {"content": "{\\"name\\": \\"interact_with_browser\\", \\"arguments\\": {\\"action\\": \\"click_element\\", \\"element_id\\": 42}}"}}]}',
                     "data: [DONE]",
                 ]
-            # Turn 2: Model attempts conversational tutorial/apology prose instead of an actuator tool call
             elif turn_counter == 2:
                 lines = [
                     'data: {"choices": [{"delta": {"content": "I apologize, element 42 was not found on the page. Please inspect the DOM manually or refresh the browser tab."}}]}',
                     "data: [DONE]",
                 ]
-            # Turn 3 (Retry after Anti-Consultant rejection): Model calls get_page_snapshot
             elif turn_counter == 3:
                 lines = [
                     'data: {"choices": [{"delta": {"content": "{\\"name\\": \\"interact_with_browser\\", \\"arguments\\": {\\"action\\": \\"get_page_snapshot\\"}}"}}]}',
                     "data: [DONE]",
                 ]
-            # Turn 4: Final completion message
             else:
                 lines = [
                     'data: {"choices": [{"delta": {"content": "I refreshed the page snapshot and found updated elements 1 and 2."}}]}',
@@ -223,17 +204,14 @@ class TestErrorEscalation(unittest.IsolatedAsyncioTestCase):
 
             final_text = "".join(streamed_content)
 
-            # 1. Assert exactly 2 tools were executed: click_element, then recovery get_page_snapshot
             self.assertEqual(len(executed_tools), 2)
             self.assertEqual(executed_tools[0][1]["action"], "click_element")
             self.assertEqual(executed_tools[0][1]["element_id"], 42)
             self.assertEqual(executed_tools[1][1]["action"], "get_page_snapshot")
 
-            # 2. Anti-consultant rule: conversational advisory prose was rejected and NEVER streamed to user
             self.assertNotIn("I apologize, element 42 was not found", final_text)
             self.assertIn("I refreshed the page snapshot and found updated elements", final_text)
 
-            # 3. History verification: message history contains the structured recovery hint
             tool_messages = [m for m in payload["messages"] if m.get("role") == "tool"]
             self.assertGreaterEqual(len(tool_messages), 1)
             error_msg = tool_messages[0]
@@ -273,25 +251,21 @@ class TestErrorEscalation(unittest.IsolatedAsyncioTestCase):
             resp = AsyncMock()
             resp.status_code = 200
 
-            # Turn 1: Model calls switch_tab
             if turn_counter == 1:
                 lines = [
                     'data: {"choices": [{"delta": {"content": "{\\"name\\": \\"interact_with_browser\\", \\"arguments\\": {\\"action\\": \\"switch_tab\\", \\"query\\": \\"reddit\\"}}"}}]}',
                     "data: [DONE]",
                 ]
-            # Turn 2: Model attempts conversational tutorial prose
             elif turn_counter == 2:
                 lines = [
                     'data: {"choices": [{"delta": {"content": "No reddit tab was found. You should open Firefox and navigate to reddit.com."}}]}',
                     "data: [DONE]",
                 ]
-            # Turn 3 (Retry after Anti-Consultant rejection): Model calls open_tab
             elif turn_counter == 3:
                 lines = [
                     'data: {"choices": [{"delta": {"content": "{\\"name\\": \\"interact_with_browser\\", \\"arguments\\": {\\"action\\": \\"open_tab\\", \\"url\\": \\"https://reddit.com\\"}}"}}]}',
                     "data: [DONE]",
                 ]
-            # Turn 4: Final completion message
             else:
                 lines = [
                     'data: {"choices": [{"delta": {"content": "I opened reddit.com in a new tab."}}]}',

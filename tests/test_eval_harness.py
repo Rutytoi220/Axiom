@@ -1,15 +1,17 @@
-"""Unit test suite for AXIOM Deterministic Evaluation Harness."""
+"""Comprehensive unit and integration test suite for AXIOM Evaluation Harness."""
 
 from __future__ import annotations
 
 import asyncio
 import json
+import tempfile
 import unittest
 from pathlib import Path
 
 from axiom.agents.native_orchestrator import NativeOrchestrator
 from axiom.eval.context import EvaluationContext
-from axiom.eval.harness import EvaluationHarness
+from axiom.eval.harness import EvalHarness, EvaluationHarness
+from axiom.eval.metrics import EvalStatus, export_json_report, format_summary_table
 from axiom.eval.provider import DeterministicModelProvider, MockTurn
 from axiom.eval.report import BenchmarkReport
 from axiom.eval.suite_l1 import (
@@ -21,16 +23,17 @@ from axiom.eval.suite_l1 import (
     build_eval_l1_tool_dispatch,
     get_level_1_suite,
 )
-from axiom.eval.task import EvaluationTask
-from axiom.eval.types import EvaluationResult, ResultStatus, ValidationResult
-from axiom.eval.validators import (
-    combine_validators,
-    validate_file_content,
-    validate_file_exists,
-    validate_memory_record,
-    validate_tool_called,
-    validate_tool_sequence,
+from axiom.eval.task import EvalContext, EvaluationTask
+from axiom.eval.tasks.deterministic_p1 import (
+    build_task_false_success_rejection,
+    build_task_memory_persistence_roundtrip,
+    build_task_recovery_envelope,
+    build_task_step_limit_enforcement,
+    build_task_timeout_containment,
+    build_task_tool_dispatch,
+    get_deterministic_p1_tasks,
 )
+from axiom.eval.types import ResultStatus
 
 
 class TestEvaluationHarness(unittest.IsolatedAsyncioTestCase):
@@ -62,20 +65,21 @@ class TestEvaluationHarness(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, ResultStatus.FAIL)
         self.assertFalse(result.is_success)
         self.assertEqual(result.failure_category, "VALIDATION_FAILED")
-        self.assertIn("does not exist", result.validator_message)
+        self.assertIn("Model claimed success", result.validator_message)
         self.assertTrue(result.cleanup_success)
 
     async def test_tool_dispatch_and_recovery(self) -> None:
-        """Verify orchestrator recovers from structured error and triggers allowed recovery action."""
+        """Verify model handles tool error response and executes recovery tool call."""
         task = build_eval_l1_recovery()
         result = await self.harness.execute_task(task)
 
         self.assertEqual(result.status, ResultStatus.PASS)
+        self.assertTrue(result.is_success)
         self.assertEqual(result.tool_sequence, ["query_status", "initialize_status"])
         self.assertTrue(result.cleanup_success)
 
     async def test_step_limit_boundaries(self) -> None:
-        """Verify non-terminating loops are strictly halted at max_steps boundary."""
+        """Verify non-terminating tool dispatch loops are terminated strictly at step_limit."""
         task = build_eval_l1_step_limit()
         result = await self.harness.execute_task(task)
 
@@ -86,30 +90,8 @@ class TestEvaluationHarness(unittest.IsolatedAsyncioTestCase):
 
     async def test_timeout_and_cancellation(self) -> None:
         """Verify timeout boundary terminates execution and cleans up resources."""
-        async def slow_stream(payload: dict):
-            await asyncio.sleep(0.5)
-            yield {"choices": [{"delta": {"content": "too late"}}]}
-
-        class SlowProvider:
-            def __init__(self):
-                self.request_count = 1
-                self.estimated_tokens = {}
-            def stream_chat(self, payload):
-                return slow_stream(payload)
-
-        task = EvaluationTask(
-            task_id="eval_timeout_test",
-            description="Tests timeout enforcement",
-            user_prompt="Run slow task",
-            timeout=0.05,
-            mock_turns=[MockTurn.text("placeholder")],
-        )
-        # Manually wrap orchestrator with slow provider by subbing mock_turns
-        task.mock_turns = []
-        
-        # Override harness provider for this specific test
         harness = EvaluationHarness()
-        # Test using slow fake tool instead
+
         async def slow_fake_tool() -> dict:
             await asyncio.sleep(0.5)
             return {"success": True}
@@ -167,7 +149,6 @@ class TestEvaluationHarness(unittest.IsolatedAsyncioTestCase):
         )
 
         result = await self.harness.execute_task(task)
-        # Tool was called and recorded, but returned a security violation envelope
         self.assertEqual(len(result.tool_sequence), 1)
         self.assertEqual(result.tool_sequence[0], "forbidden_tool")
         self.assertTrue(result.cleanup_success)
@@ -235,13 +216,6 @@ class TestEvaluationHarness(unittest.IsolatedAsyncioTestCase):
         report = await self.harness.run_suite(suite, suite_name="Level 1 Benchmark")
 
         self.assertEqual(report.total_tasks, 6)
-        # Expected outcomes:
-        # 1. tool_dispatch: PASS
-        # 2. recovery: PASS
-        # 3. step_limit: STEP_LIMIT_EXCEEDED
-        # 4. false_success: FAIL
-        # 5. memory_round_trip: PASS
-        # 6. exception_cleanup: ERROR
         results_by_id = {r.task_id: r for r in report.results}
 
         self.assertEqual(results_by_id["eval_l1_tool_dispatch"].status, ResultStatus.PASS)
@@ -251,9 +225,142 @@ class TestEvaluationHarness(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results_by_id["eval_l1_memory_round_trip"].status, ResultStatus.PASS)
         self.assertEqual(results_by_id["eval_l1_exception_cleanup"].status, ResultStatus.ERROR)
 
-        # Confirm all temporary resources were cleaned up across all tasks
         for r in report.results:
             self.assertTrue(r.cleanup_success, f"Task {r.task_id} failed resource cleanup")
+
+
+class TestEvalHarnessP1(unittest.IsolatedAsyncioTestCase):
+    """Test suite covering deterministic orchestration, independent validators, and metrics."""
+
+    async def asyncSetUp(self) -> None:
+        self.harness = EvalHarness()
+
+    async def test_harness_successful_task_passes(self) -> None:
+        """Verify valid task lifecycle dispatches tool and achieves PASS status."""
+        task = build_task_tool_dispatch()
+        result = await self.harness.run_task(task)
+
+        self.assertEqual(result.status, EvalStatus.PASS)
+        self.assertTrue(result.is_success)
+        self.assertIn("verified file contents", result.message)
+        self.assertIn("mock_read_file", result.tool_calls)
+        self.assertGreater(result.step_count, 0)
+        self.assertGreater(result.estimated_tokens, 0)
+        self.assertIsNone(result.measured_tokens)
+
+    async def test_harness_catches_false_success(self) -> None:
+        """Verify model prose claiming completion without real side-effects is rejected as FALSE_SUCCESS."""
+        task = build_task_false_success_rejection()
+        result = await self.harness.run_task(task)
+
+        self.assertEqual(result.status, EvalStatus.FALSE_SUCCESS)
+        self.assertFalse(result.is_success)
+        self.assertEqual(result.failure_category, "FALSE_SUCCESS")
+        self.assertIn("Model claimed success in text without observable state change", result.message)
+
+    async def test_harness_enforces_step_limit(self) -> None:
+        """Verify non-terminating loops are strictly halted at max_steps with STEP_LIMIT_EXCEEDED."""
+        task = build_task_step_limit_enforcement()
+        result = await self.harness.run_task(task)
+
+        self.assertEqual(result.status, EvalStatus.STEP_LIMIT_EXCEEDED)
+        self.assertEqual(result.failure_category, "STEP_LIMIT_EXCEEDED")
+        self.assertEqual(result.step_count, 3)
+
+    async def test_harness_remedy_recovery_flow(self) -> None:
+        """Verify orchestrator recovers from ToolResult structured error and executes remedy tool."""
+        task = build_task_recovery_envelope()
+        result = await self.harness.run_task(task)
+
+        self.assertEqual(result.status, EvalStatus.PASS)
+        self.assertIn("Recovery envelope successfully processed", result.message)
+        self.assertEqual(result.tool_calls, ["read_locked_file", "unlock_file", "read_locked_file"])
+
+    async def test_harness_timeout_cancellation(self) -> None:
+        """Verify long-running or blocking tasks abort cleanly with TIMEOUT."""
+        task = build_task_timeout_containment()
+        result = await self.harness.run_task(task)
+
+        self.assertEqual(result.status, EvalStatus.TIMEOUT)
+        self.assertEqual(result.failure_category, "TIMEOUT")
+        self.assertIn("timed out", result.message)
+
+    async def test_harness_workspace_and_db_isolation(self) -> None:
+        """Verify evaluation executes strictly inside temporary workspace without host pollution."""
+        task = build_task_memory_persistence_roundtrip()
+        result = await self.harness.run_task(task)
+
+        self.assertEqual(result.status, EvalStatus.PASS)
+        self.assertIn("query_memory", result.tool_calls)
+
+        self.assertFalse(Path("test_eval.db").exists())
+        self.assertFalse(Path("/tmp/test_eval.db").exists())
+
+    async def test_metrics_and_token_distinction(self) -> None:
+        """Verify telemetry distinguishes estimated vs measured tokens and serializes valid JSON report."""
+        t1 = build_task_tool_dispatch()
+        t2 = build_task_false_success_rejection()
+
+        res1 = await self.harness.run_task(t1)
+        res2 = await self.harness.run_task(t2)
+
+        results = [res1, res2]
+        table_str = format_summary_table(results)
+        self.assertIn("AXIOM DETERMINISTIC EVALUATION BENCHMARK REPORT", table_str)
+        self.assertIn("task_tool_dispatch", table_str)
+        self.assertIn("task_false_success_rejection", table_str)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            json_file = Path(tmp_dir) / "eval_report.json"
+            export_json_report(results, json_file)
+            self.assertTrue(json_file.exists())
+
+            data = json.loads(json_file.read_text(encoding="utf-8"))
+            self.assertEqual(data["summary"]["total"], 2)
+            self.assertEqual(data["summary"]["passed"], 1)
+            self.assertEqual(data["summary"]["false_success"], 1)
+
+            for r in data["results"]:
+                self.assertIsNone(r["measured_tokens"])
+                self.assertIsInstance(r["estimated_tokens"], int)
+                self.assertGreater(r["estimated_tokens"], 0)
+
+    async def test_full_deterministic_p1_suite(self) -> None:
+        """Verify the full 6-task deterministic suite executes cleanly with expected classifications."""
+        tasks = get_deterministic_p1_tasks()
+        self.assertEqual(len(tasks), 6)
+
+        results = {}
+        for t in tasks:
+            res = await self.harness.run_task(t)
+            results[t.task_id] = res
+
+        self.assertEqual(results["task_tool_dispatch"].status, EvalStatus.PASS)
+        self.assertEqual(results["task_recovery_envelope"].status, EvalStatus.PASS)
+        self.assertEqual(results["task_step_limit_enforcement"].status, EvalStatus.STEP_LIMIT_EXCEEDED)
+        self.assertEqual(results["task_false_success_rejection"].status, EvalStatus.FALSE_SUCCESS)
+        self.assertEqual(results["task_memory_persistence_roundtrip"].status, EvalStatus.PASS)
+        self.assertEqual(results["task_timeout_containment"].status, EvalStatus.TIMEOUT)
+
+    def test_workspace_path_traversal_prevention(self) -> None:
+        """Verify that attempting to escape workspace_dir via relative path traversal raises ValueError."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace = Path(tmp_dir) / "workspace"
+            workspace.mkdir()
+            db_path = Path(tmp_dir) / "test.db"
+            task = build_task_tool_dispatch()
+            ctx = EvalContext(task=task, workspace_dir=workspace, db_path=db_path)
+
+            valid_path = ctx.resolve_path("subdir/file.txt")
+            self.assertEqual(valid_path, (workspace / "subdir/file.txt").resolve())
+
+            with self.assertRaises(ValueError) as cm:
+                ctx.resolve_path("../../etc/shadow")
+            self.assertIn("Path traversal detected", str(cm.exception))
+
+            with self.assertRaises(ValueError) as cm2:
+                ctx.resolve_path("../other_folder")
+            self.assertIn("Path traversal detected", str(cm2.exception))
 
 
 if __name__ == "__main__":

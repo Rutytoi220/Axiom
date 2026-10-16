@@ -11,13 +11,12 @@ Covers:
 6. Integration with NativeOrchestrator and schema filtering.
 """
 
-import asyncio
+import contextlib
 import unittest
 from unittest.mock import AsyncMock, patch
 
 from axiom.agents.actuator_arbiter import (
     ActuatorArbiter,
-    arbitrate,
     is_browser_window,
     is_terminal_or_ide_window,
 )
@@ -165,8 +164,6 @@ class TestActuatorArbiter(unittest.IsolatedAsyncioTestCase):
             "messages": [{"role": "user", "content": "Click the submit button"}],
             "tools": list(self.all_schemas),
         }
-
-        import contextlib
 
         @contextlib.asynccontextmanager
         async def mock_stream_client(method, url, **kwargs):

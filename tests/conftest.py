@@ -7,6 +7,8 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
+_GLOBAL_TEST_TEMP_DIR = tempfile.TemporaryDirectory(prefix="axiom_test_global_")
+os.environ.setdefault("AXIOM_MEMORY_DB", os.path.join(_GLOBAL_TEST_TEMP_DIR.name, "default_test_memory.db"))
 
 def pytest_configure(config):
     """Pytest configuration hook."""
@@ -21,6 +23,7 @@ def mock_home_directory(monkeypatch):
         monkeypatch.setenv("USERPROFILE", temp_home) # Windows
         monkeypatch.setenv("XDG_CONFIG_HOME", os.path.join(temp_home, ".config"))
         monkeypatch.setenv("XDG_DATA_HOME", os.path.join(temp_home, ".local", "share"))
+        monkeypatch.setenv("AXIOM_MEMORY_DB", os.path.join(temp_home, "test_isolated_memory.db"))
         
         with patch("pathlib.Path.home", return_value=Path(temp_home)):
             yield temp_home
@@ -46,18 +49,24 @@ def block_external_io(request, monkeypatch):
         return
 
     # 1. Block outbound HTTPX requests
-    async def mock_httpx_post(*args, **kwargs):
+    def mock_sync_httpx_post(*args, **kwargs):
         raise RuntimeError(f"Strict Mock: Network IO is blocked for unit tests (Attempted: {args})")
-    
-    async def mock_httpx_get(*args, **kwargs):
+
+    def mock_sync_httpx_get(*args, **kwargs):
+        raise RuntimeError(f"Strict Mock: Network IO is blocked for unit tests (Attempted: {args})")
+
+    async def mock_async_httpx_post(*args, **kwargs):
+        raise RuntimeError(f"Strict Mock: Network IO is blocked for unit tests (Attempted: {args})")
+
+    async def mock_async_httpx_get(*args, **kwargs):
         raise RuntimeError(f"Strict Mock: Network IO is blocked for unit tests (Attempted: {args})")
 
     try:
         import httpx
-        monkeypatch.setattr(httpx, "post", mock_httpx_post)
-        monkeypatch.setattr(httpx, "get", mock_httpx_get)
-        monkeypatch.setattr(httpx.AsyncClient, "post", mock_httpx_post)
-        monkeypatch.setattr(httpx.AsyncClient, "get", mock_httpx_get)
+        monkeypatch.setattr(httpx, "post", mock_sync_httpx_post)
+        monkeypatch.setattr(httpx, "get", mock_sync_httpx_get)
+        monkeypatch.setattr(httpx.AsyncClient, "post", mock_async_httpx_post)
+        monkeypatch.setattr(httpx.AsyncClient, "get", mock_async_httpx_get)
     except ImportError:
         pass
 

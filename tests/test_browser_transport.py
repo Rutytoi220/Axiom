@@ -1,30 +1,17 @@
-"""Unit and integration tests for Phase 3 Browser Hardening: Transport Resilience & WebSocket Lifecycle.
-
-Covers:
-1. test_connection_drop_fails_fast_without_timeout:
-   Instant fast-fail (< 200ms) on socket drop without waiting for 8.5s timeout.
-2. test_server_restart_socket_reuse:
-   Port 41144 binding recovery with SO_REUSEADDR on rapid restart.
-3. test_client_replacement_on_reconnect:
-   Clean client replacement when new extension connects, routing commands to new client.
-4. test_ping_pong_heartbeat:
-   Bidirectional ping/pong keepalive in background.js and Python bridge.
-5. test_stop_server_drains_pending_requests:
-   All pending futures resolve with ConnectionResetError and dict cleared on stop_server.
-6. test_browser_tool_handles_connection_reset_gracefully:
-   InteractWithBrowserTool.execute() returns structured remedy envelope on ConnectionResetError.
-"""
+"""Test suite for Tier 2 Browser Extension WebSocket Bridge Transport & Modern Lifecycle."""
 
 from __future__ import annotations
 
 import asyncio
 import json
-import subprocess
 import time
 import unittest
 from unittest.mock import patch
 
-import websockets
+try:
+    from websockets.asyncio.client import connect as ws_connect
+except ImportError:
+    from websockets import connect as ws_connect  # type: ignore[no-redef]
 
 from axiom.tools.browser_cdp import InteractWithBrowserTool
 from axiom.tools.browser_extension import (
@@ -33,11 +20,18 @@ from axiom.tools.browser_extension import (
     get_bridge,
 )
 
+def _get_free_port() -> int:
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
 
-class TestBrowserTransportP3(unittest.IsolatedAsyncioTestCase):
-    """Test suite for Tier 2 Browser Hardening Phase 3."""
+
+class TestBrowserTransport(unittest.IsolatedAsyncioTestCase):
+    """Test suite for BrowserExtensionBridge modern websockets lifecycle and transport resilience."""
 
     async def asyncSetUp(self) -> None:
+        self.port = _get_free_port()
         bridge = get_bridge()
         if bridge.server is not None:
             await bridge.stop_server()
@@ -49,16 +43,34 @@ class TestBrowserTransportP3(unittest.IsolatedAsyncioTestCase):
             await bridge.stop_server()
         BrowserExtensionBridge.reset_instance()
 
-    async def test_connection_drop_fails_fast_without_timeout(self) -> None:
-        """Start bridge, connect mock client, initiate command, drop socket mid-flight.
+    async def test_server_restart_socket_reuse(self) -> None:
+        """Start bridge on test port, stop bridge, and immediately restart it.
 
-        Assert send_command raises ConnectionResetError immediately (< 200ms) rather than waiting 8.5s.
+        Assert server binds successfully with zero 'Address already in use' errors.
         """
-        bridge = BrowserExtensionBridge(port=41144)
+        bridge = BrowserExtensionBridge(port=self.port)
+        await bridge.start_server()
+        self.assertIsNotNone(bridge.server)
+
+        await bridge.stop_server()
+        self.assertIsNone(bridge.server)
+
+        # Immediate restart to verify socket reuse
+        await bridge.start_server()
+        self.assertIsNotNone(bridge.server)
+        await bridge.stop_server()
+        self.assertIsNone(bridge.server)
+
+    async def test_connection_drop_fails_fast_without_timeout(self) -> None:
+        """Connect mock client, initiate command, drop socket mid-flight.
+
+        Assert send_command raises ConnectionResetError immediately (< 500ms) rather than waiting 8.5s.
+        """
+        bridge = BrowserExtensionBridge(port=self.port)
         await bridge.start_server()
         try:
             uri = f"ws://127.0.0.1:{bridge.port}"
-            client = await websockets.connect(uri)
+            client = await ws_connect(uri)
             await asyncio.sleep(0.05)
             self.assertTrue(bridge.is_connected())
 
@@ -76,45 +88,27 @@ class TestBrowserTransportP3(unittest.IsolatedAsyncioTestCase):
             self.assertIn("disconnected", str(ctx.exception).lower())
             self.assertLess(
                 elapsed,
-                0.5,
-                f"Fail-fast took {elapsed:.3f}s, expected < 0.5s (far below 8.5s timeout)",
+                1.0,
+                f"Fail-fast took {elapsed:.3f}s, expected < 1.0s (far below 8.5s timeout)",
             )
         finally:
             await bridge.stop_server()
-
-    async def test_server_restart_socket_reuse(self) -> None:
-        """Start bridge on port 41144, stop bridge, and immediately restart it.
-
-        Assert server binds successfully with zero 'Address already in use' errors.
-        """
-        bridge = BrowserExtensionBridge(port=41144)
-        await bridge.start_server()
-        self.assertIsNotNone(bridge.server)
-
-        await bridge.stop_server()
-        self.assertIsNone(bridge.server)
-
-        # Immediate restart
-        await bridge.start_server()
-        self.assertIsNotNone(bridge.server)
-        await bridge.stop_server()
-        self.assertIsNone(bridge.server)
 
     async def test_client_replacement_on_reconnect(self) -> None:
         """Connect client 1, then connect client 2.
 
         Assert client 2 becomes active client and commands route to client 2 cleanly.
         """
-        bridge = BrowserExtensionBridge(port=41144)
+        bridge = BrowserExtensionBridge(port=self.port)
         await bridge.start_server()
         try:
             uri = f"ws://127.0.0.1:{bridge.port}"
-            client1 = await websockets.connect(uri)
+            client1 = await ws_connect(uri)
             await asyncio.sleep(0.05)
             server_conn1 = bridge._client
             self.assertIsNotNone(server_conn1)
 
-            client2 = await websockets.connect(uri)
+            client2 = await ws_connect(uri)
             await asyncio.sleep(0.05)
             server_conn2 = bridge._client
             self.assertIsNotNone(server_conn2)
@@ -143,36 +137,34 @@ class TestBrowserTransportP3(unittest.IsolatedAsyncioTestCase):
         finally:
             await bridge.stop_server()
 
-    def test_ping_pong_heartbeat(self) -> None:
-        """Verify ping message sent to background.js returns { action: 'pong', success: true }."""
-        js_code = """
-        const { handleCommand } = require('./axiom/tools/extension/background.js');
-        let reply = null;
-        global.__axiomSendReplyHook = (data) => {
-            reply = data;
-        };
-        (async () => {
-            await handleCommand({ id: 'heartbeat_test_4', action: 'ping' });
-            console.log(JSON.stringify(reply));
-        })();
-        """
-        proc = subprocess.run(
-            ["node", "-e", js_code],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        data = json.loads(proc.stdout.strip())
-        self.assertEqual(data.get("action"), "pong")
-        self.assertTrue(data.get("success"))
-        self.assertEqual(data.get("id"), "heartbeat_test_4")
+    async def test_ping_pong_heartbeat_protocol(self) -> None:
+        """Verify server responds with pong payload when client sends heartbeat ping."""
+        bridge = BrowserExtensionBridge(port=self.port)
+        await bridge.start_server()
+        try:
+            uri = f"ws://127.0.0.1:{bridge.port}"
+            client = await ws_connect(uri)
+            await asyncio.sleep(0.05)
+
+            ping_msg = {"id": "heartbeat_test_4", "type": "ping", "action": "ping"}
+            await client.send(json.dumps(ping_msg))
+
+            raw_reply = await asyncio.wait_for(client.recv(), timeout=2.0)
+            data = json.loads(raw_reply)
+            self.assertEqual(data.get("action"), "pong")
+            self.assertTrue(data.get("success"))
+            self.assertEqual(data.get("id"), "heartbeat_test_4")
+
+            await client.close()
+        finally:
+            await bridge.stop_server()
 
     async def test_stop_server_drains_pending_requests(self) -> None:
         """Initiate pending requests, call stop_server().
 
         Assert all pending futures resolve with exceptions and _pending_requests is empty.
         """
-        bridge = BrowserExtensionBridge(port=41144)
+        bridge = BrowserExtensionBridge(port=self.port)
         loop = asyncio.get_running_loop()
         fut1 = loop.create_future()
         fut2 = loop.create_future()

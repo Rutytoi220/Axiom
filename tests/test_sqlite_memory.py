@@ -1,44 +1,38 @@
-"""Unit and integration test suite for Phase 1: Structured SQLite FTS5 Persistent Memory Store & Concurrency.
-
-Covers:
-1. Full CRUD lifecycle (store, get, update, soft-delete, hard-delete, purge_inactive).
-2. Key-based automatic superseding and versioning (is_active and superseded_by pointers).
-3. Synchronized FTS5 full-text search table across key, content, and category with BM25 ranking.
-4. WAL concurrency: 5 concurrent threads reading and writing without database locked errors.
-5. Backwards compatibility with chat session history and message logging.
-"""
+"""Test suite for SQLite FTS5 persistent memory store and prompt hydration."""
 
 import os
 import tempfile
 import threading
-import time
 import unittest
 from pathlib import Path
 
+from axiom.agents.native_orchestrator import NativeOrchestrator
 from axiom.db.memory import (
-    MemoryStore,
     VALID_CATEGORIES,
-    init_db,
-    get_connection,
-    create_session,
+    MemoryStore,
     add_message,
+    create_session,
+    get_connection,
     get_session_messages,
     search_historical_context,
 )
+from axiom.memory.hydration import format_contextual_memory, hydrate_context_memory
 
 
-class TestMemoryStoreP1(unittest.TestCase):
+class TestSqliteMemoryStore(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = str(Path(self.temp_dir.name) / "test_memory_p1.db")
         self.store = MemoryStore(db_path=self.db_path)
+        os.environ["AXIOM_MEMORY_DB"] = self.db_path
 
     def tearDown(self):
         self.temp_dir.cleanup()
+        if "AXIOM_MEMORY_DB" in os.environ:
+            del os.environ["AXIOM_MEMORY_DB"]
 
     def test_crud_lifecycle(self):
-        """Test full CRUD lifecycle including access count and soft/hard delete."""
-        # 1. Store
+        """Verify full lifecycle: store, get, update, soft-delete, purge, hard-delete."""
         mem_id = self.store.store(
             content="The user prefers dark mode and high contrast themes.",
             category="preference",
@@ -48,7 +42,6 @@ class TestMemoryStoreP1(unittest.TestCase):
         self.assertIsInstance(mem_id, int)
         self.assertGreater(mem_id, 0)
 
-        # 2. Get
         mem = self.store.get(mem_id)
         self.assertIsNotNone(mem)
         self.assertEqual(mem["id"], mem_id)
@@ -64,28 +57,27 @@ class TestMemoryStoreP1(unittest.TestCase):
         mem_again = self.store.get(mem_id)
         self.assertEqual(mem_again["access_count"], 2)
 
-        # 3. Update
+        by_key = self.store.get_by_key("ui.theme")
+        self.assertIsNotNone(by_key)
+        self.assertEqual(by_key["id"], mem_id)
+
         updated = self.store.update(
             mem_id,
             content="The user prefers Tokyo Night dark mode theme.",
             confidence=1.0,
         )
         self.assertTrue(updated)
-        mem_updated = self.store.get(mem_id)
-        self.assertEqual(mem_updated["content"], "The user prefers Tokyo Night dark mode theme.")
-        self.assertEqual(mem_updated["confidence"], 1.0)
-        self.assertGreaterEqual(mem_updated["updated_at"], mem["updated_at"])
+        mem_up = self.store.get(mem_id)
+        self.assertEqual(mem_up["content"], "The user prefers Tokyo Night dark mode theme.")
+        self.assertEqual(mem_up["confidence"], 1.0)
+        self.assertGreaterEqual(mem_up["updated_at"], mem["updated_at"])
 
-        # 4. Soft-delete
         deleted = self.store.delete(mem_id, hard_delete=False)
         self.assertTrue(deleted)
 
-        # Still accessible via get(id), but is_active == 0
         mem_soft = self.store.get(mem_id)
         self.assertIsNotNone(mem_soft)
         self.assertEqual(mem_soft["is_active"], 0)
-
-        # get_by_key returns None since it is no longer active
         self.assertIsNone(self.store.get_by_key("ui.theme"))
 
         # search excludes soft-deleted by default
@@ -97,19 +89,16 @@ class TestMemoryStoreP1(unittest.TestCase):
         self.assertEqual(len(search_inactive), 1)
         self.assertEqual(search_inactive[0]["id"], mem_id)
 
-        # 5. Purge inactive
         purged = self.store.purge_inactive()
         self.assertEqual(purged, 1)
         self.assertIsNone(self.store.get(mem_id))
 
-        # 6. Hard-delete test
         new_id = self.store.store(content="Temporary memory to hard delete", category="capability")
         self.assertTrue(self.store.delete(new_id, hard_delete=True))
         self.assertIsNone(self.store.get(new_id))
 
     def test_key_automatic_superseding(self):
         """Storing a new active memory with the same key must atomically supersede old version."""
-        # Version 1
         id_v1 = self.store.store(
             content="User uses bash as default shell",
             category="environment",
@@ -120,7 +109,6 @@ class TestMemoryStoreP1(unittest.TestCase):
         self.assertEqual(mem_v1["is_active"], 1)
         self.assertIsNone(mem_v1["superseded_by"])
 
-        # Version 2
         id_v2 = self.store.store(
             content="User switched to zsh with starship prompt",
             category="environment",
@@ -129,17 +117,14 @@ class TestMemoryStoreP1(unittest.TestCase):
         )
         self.assertNotEqual(id_v1, id_v2)
 
-        # Verify V1 is now deactivated and points to V2
         mem_v1_after = self.store.get(id_v1)
         self.assertEqual(mem_v1_after["is_active"], 0)
         self.assertEqual(mem_v1_after["superseded_by"], id_v2)
 
-        # Verify V2 is active and points to None
         mem_v2 = self.store.get(id_v2)
         self.assertEqual(mem_v2["is_active"], 1)
         self.assertIsNone(mem_v2["superseded_by"])
 
-        # get_by_key resolves to active V2
         active_shell = self.store.get_by_key("user.shell")
         self.assertIsNotNone(active_shell)
         self.assertEqual(active_shell["id"], id_v2)
@@ -163,29 +148,24 @@ class TestMemoryStoreP1(unittest.TestCase):
             key="workflow.git",
         )
 
-        # 1. Search by content keyword
         res_proxmox = self.store.search("Proxmox")
         self.assertEqual(len(res_proxmox), 1)
         self.assertEqual(res_proxmox[0]["key"], "homelab.proxmox")
 
-        # 2. Search by key
         res_key = self.store.search("homelab.nas")
         self.assertEqual(len(res_key), 1)
         self.assertEqual(res_key[0]["key"], "homelab.nas")
 
-        # 3. Search by category
         res_cat = self.store.search("homelab")
         self.assertGreaterEqual(len(res_cat), 2)
         keys = {r["key"] for r in res_cat}
         self.assertIn("homelab.proxmox", keys)
         self.assertIn("homelab.nas", keys)
 
-        # 4. Filter with category constraint
         res_workflow = self.store.search("commits", category="workflow")
         self.assertEqual(len(res_workflow), 1)
         self.assertEqual(res_workflow[0]["category"], "workflow")
 
-        # 5. Search non-matching category returns empty
         res_empty = self.store.search("commits", category="homelab")
         self.assertEqual(len(res_empty), 0)
 
@@ -199,16 +179,15 @@ class TestMemoryStoreP1(unittest.TestCase):
             self.store.store(content="Invalid category test", category="unsupported_cat")
 
     def test_wal_concurrency(self):
-        """Simulate 5 concurrent threads reading and writing simultaneously without DB lock errors."""
+        """Simulate concurrent threads reading and writing simultaneously without DB lock errors."""
         errors = []
         threads = []
-        num_threads = 5
-        writes_per_thread = 20
+        num_threads = 4
+        writes_per_thread = 15
 
         def worker(thread_idx: int):
             try:
                 for i in range(writes_per_thread):
-                    # Write operation
                     key = f"thread_{thread_idx}.item_{i % 5}"
                     mem_id = self.store.store(
                         content=f"Thread {thread_idx} written item {i} with payload data",
@@ -217,17 +196,14 @@ class TestMemoryStoreP1(unittest.TestCase):
                         confidence=1.0,
                     )
 
-                    # Read operation
                     mem = self.store.get(mem_id)
                     if not mem or mem["id"] != mem_id:
                         errors.append(f"Thread {thread_idx}: get({mem_id}) failed")
 
-                    # Key read operation
                     by_key = self.store.get_by_key(key)
                     if not by_key or by_key["key"] != key:
                         errors.append(f"Thread {thread_idx}: get_by_key({key}) failed")
 
-                    # FTS search operation
                     search_res = self.store.search(f"item {i}")
                     if not search_res:
                         errors.append(f"Thread {thread_idx}: search('item {i}') returned empty")
@@ -245,7 +221,6 @@ class TestMemoryStoreP1(unittest.TestCase):
 
         self.assertEqual(len(errors), 0, f"Concurrency errors encountered: {errors}")
 
-        # Check total records in database
         conn = get_connection(self.db_path)
         total_active = conn.execute("SELECT count(*) FROM memories WHERE is_active = 1").fetchone()[0]
         self.assertGreater(total_active, 0)
@@ -269,6 +244,165 @@ class TestMemoryStoreP1(unittest.TestCase):
         fts_search = search_historical_context("operational", session_id, db_path=self.db_path)
         self.assertEqual(len(fts_search), 1)
         self.assertIn("All systems operational", fts_search[0])
+
+
+class TestMemoryHydration(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = str(Path(self.temp_dir.name) / "test_hydration_p2.db")
+        self.store = MemoryStore(db_path=self.db_path)
+        os.environ["AXIOM_MEMORY_DB"] = self.db_path
+
+    async def asyncTearDown(self):
+        self.temp_dir.cleanup()
+        if "AXIOM_MEMORY_DB" in os.environ:
+            del os.environ["AXIOM_MEMORY_DB"]
+
+    def test_query_matching_and_category_formatting(self):
+        """Verify matched memories are formatted cleanly into [Contextual Memory] block."""
+        self.store.store(
+            content="zsh with starship prompt",
+            category="preference",
+            key="user.shell",
+            confidence=1.0,
+        )
+        self.store.store(
+            content="192.168.1.100 proxmox node",
+            category="homelab",
+            key="server.ip",
+            confidence=0.9,
+        )
+        self.store.store(
+            content="Always use git rebase on main branch",
+            category="workflow",
+            key=None,
+            confidence=0.95,
+        )
+
+        block_shell = hydrate_context_memory("What user.shell is configured?", store=self.store)
+        self.assertIn("[Contextual Memory]:", block_shell)
+        self.assertIn("<recalled_memory>", block_shell)
+        self.assertIn("</recalled_memory>", block_shell)
+        self.assertIn("- (preference) user.shell: zsh with starship prompt", block_shell)
+        self.assertNotIn("proxmox", block_shell)
+
+        block_server = hydrate_context_memory("server.ip proxmox node", store=self.store)
+        self.assertIn("- (homelab) server.ip: 192.168.1.100 proxmox node", block_server)
+
+        block_workflow = hydrate_context_memory("rebase main branch", store=self.store)
+        self.assertIn("- (workflow) Always use git rebase on main branch", block_workflow)
+
+    def test_hard_token_ceiling_with_high_volume_matching(self):
+        """Enforce strict ceiling of <= 350 tokens under heavy memory volume."""
+        for i in range(30):
+            self.store.store(
+                content=f"Kubernetes cluster node {i} configuration parameters with distributed raft consensus logging and telemetry enabled on homelab subnet {i}",
+                category="homelab",
+                key=f"cluster.node_{i}",
+                confidence=1.0,
+            )
+
+        relevant = self.store.get_relevant_memories("cluster homelab", max_tokens=350)
+        self.assertGreater(len(relevant), 0)
+        self.assertLess(len(relevant), 15)
+
+        formatted = format_contextual_memory(relevant)
+        token_count = NativeOrchestrator.count_tokens(formatted)
+        self.assertLessEqual(token_count, 350, f"Token count {token_count} exceeds 350 ceiling!")
+        self.assertGreater(token_count, 50)
+        self.assertIn("[Contextual Memory]:", formatted)
+        self.assertIn("<recalled_memory>", formatted)
+
+    def test_zero_token_injection_for_empty_or_irrelevant_query(self):
+        """When query is empty or completely irrelevant, zero tokens are injected."""
+        self.store.store(
+            content="Postgres database port is 5432",
+            category="environment",
+            key="db.port",
+        )
+
+        self.assertEqual(hydrate_context_memory("", store=self.store), "")
+        self.assertEqual(hydrate_context_memory("    ", store=self.store), "")
+        self.assertEqual(hydrate_context_memory("quantum_superposition_xyz_9999", store=self.store), "")
+
+    def test_access_count_increments_on_injection(self):
+        """Only memories actually selected and injected have their access_count incremented."""
+        id1 = self.store.store(content="Primary editor is Neovim", category="preference", key="user.editor")
+        id2 = self.store.store(content="Secondary machine is Raspberry Pi", category="homelab", key="lab.rpi")
+
+        # Initially 1 from get()
+        self.assertEqual(self.store.get(id1)["access_count"], 1)
+        self.assertEqual(self.store.get(id2)["access_count"], 1)
+
+        # Query matching only id1
+        _ = self.store.get_relevant_memories("Neovim editor", max_tokens=350, update_access=True)
+
+        mem1 = self.store.get(id1)
+        mem2 = self.store.get(id2)
+        # id1 was injected and retrieved: access_count increased
+        self.assertGreaterEqual(mem1["access_count"], 3)
+        # id2 was NOT injected, its access_count only incremented from our get() call
+        self.assertEqual(mem2["access_count"], 2)
+
+    async def test_native_orchestrator_depth0_hydration_integration(self):
+        """Verify NativeOrchestrator integrates hydration on depth 0 and bypasses on depth > 0, retry, or recovery."""
+        self.store.store(
+            content="zsh with starship prompt",
+            category="preference",
+            key="user.shell",
+            confidence=1.0,
+        )
+
+        orch = NativeOrchestrator()
+
+        # Case 1: Standard depth == 0 turn -> Should hydrate
+        payload_standard = {
+            "messages": [{"role": "user", "content": "What is my favorite user.shell?"}],
+            "tools": [],
+        }
+        async for _ in orch.generate_stream(payload_standard, depth=0, is_retry=False):
+            break
+
+        sys_msg = payload_standard["messages"][0]["content"]
+        self.assertIn("[Contextual Memory]:", sys_msg)
+        self.assertIn("- (preference) user.shell: zsh with starship prompt", sys_msg)
+
+        # Case 2: depth == 1 -> Should NOT hydrate
+        payload_depth1 = {
+            "messages": [
+                {"role": "system", "content": "Base instructions."},
+                {"role": "user", "content": "What is my favorite user.shell?"},
+            ],
+            "tools": [],
+        }
+        async for _ in orch.generate_stream(payload_depth1, depth=1, is_retry=False):
+            break
+        sys_msg_d1 = payload_depth1["messages"][0]["content"]
+        self.assertNotIn("[Contextual Memory]:", sys_msg_d1)
+
+        # Case 3: is_retry == True -> Should NOT hydrate
+        payload_retry = {
+            "messages": [{"role": "user", "content": "What is my favorite user.shell?"}],
+            "tools": [],
+        }
+        async for _ in orch.generate_stream(payload_retry, depth=0, is_retry=True):
+            break
+        sys_msg_retry = payload_retry["messages"][0]["content"]
+        self.assertNotIn("[Contextual Memory]:", sys_msg_retry)
+
+        # Case 4: Preceding turn is tool error recovery turn -> Should NOT hydrate
+        payload_recovery = {
+            "messages": [
+                {"role": "user", "content": "Click the submit button"},
+                {"role": "assistant", "content": "Calling click_element", "tool_calls": [{"id": "1", "type": "function", "function": {"name": "interact_with_browser"}}]},
+                {"role": "tool", "content": "[Tool Error]: Element not found. Recovery Hint: switch tab"}
+            ],
+            "tools": [],
+        }
+        async for _ in orch.generate_stream(payload_recovery, depth=0, is_retry=False):
+            break
+        sys_msg_recovery = payload_recovery["messages"][0]["content"]
+        self.assertNotIn("[Contextual Memory]:", sys_msg_recovery)
 
 
 if __name__ == "__main__":

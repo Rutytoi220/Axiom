@@ -1,24 +1,26 @@
-import unittest
-import tempfile
+"""Unit and integration test suite for ToolCapability matrix and dynamic capability loading."""
+
 import shutil
+import tempfile
+import unittest
 from pathlib import Path
 
-from axiom.tools.core import ToolCapability, BaseTool
-from axiom.tools.hyprland_ipc import ManageDesktopWindowTool
-from axiom.tools.browser_cdp import InteractWithBrowserTool
-from axiom.tools.vision import InteractWithUITool
 from axiom.core.plugins import (
-    load_plugins,
-    get_tool_capability,
-    get_tool_capabilities,
-    filter_tool_schemas_by_tier,
-    get_tool_schemas,
-    reload_plugin,
     CORE_TOOLS,
     TIER_1_TOOLS,
     TIER_2_TOOLS,
     TIER_3_TOOLS,
+    filter_tool_schemas_by_tier,
+    get_tool_capabilities,
+    get_tool_capability,
+    get_tool_schemas,
+    load_plugins,
+    reload_plugin,
 )
+from axiom.tools.browser_cdp import InteractWithBrowserTool
+from axiom.tools.core import ToolCapability
+from axiom.tools.hyprland_ipc import ManageDesktopWindowTool
+from axiom.tools.vision import InteractWithUITool
 
 
 class TestCapabilityMatrix(unittest.TestCase):
@@ -63,7 +65,6 @@ class TestCapabilityMatrix(unittest.TestCase):
         self.assertIn("manage_desktop_window", all_caps)
         self.assertIn("interact_with_browser", all_caps)
 
-        # Inspect hyprland capability in registry
         hypr_cap = get_tool_capability("manage_desktop_window")
         self.assertEqual(hypr_cap.tier, 1)
         self.assertTrue(hypr_cap.is_core)
@@ -76,7 +77,6 @@ class TestCapabilityMatrix(unittest.TestCase):
         self.assertIn("interact_with_browser", TIER_2_TOOLS)
         self.assertIn("interact_with_ui", TIER_3_TOOLS)
 
-        # Verify set operations
         union_set = CORE_TOOLS | TIER_1_TOOLS
         self.assertTrue("execute_command" in union_set)
         self.assertTrue("manage_desktop_window" in union_set)
@@ -92,8 +92,7 @@ class TestCapabilityMatrix(unittest.TestCase):
     def test_filter_tool_schemas_by_tier(self):
         """Verify dynamic schema pruning keeps core tools + target tier tools."""
         schemas = get_tool_schemas()
-        
-        # Filter Tier 1
+
         tier1_schemas = filter_tool_schemas_by_tier(schemas, tier="1")
         tier1_names = {s.get("function", {}).get("name") or s.get("name") for s in tier1_schemas}
         self.assertIn("execute_command", tier1_names)
@@ -101,21 +100,18 @@ class TestCapabilityMatrix(unittest.TestCase):
         self.assertNotIn("interact_with_browser", tier1_names)
         self.assertNotIn("interact_with_ui", tier1_names)
 
-        # Filter Tier 2
         tier2_schemas = filter_tool_schemas_by_tier(schemas, tier="2")
         tier2_names = {s.get("function", {}).get("name") or s.get("name") for s in tier2_schemas}
         self.assertIn("execute_command", tier2_names)
         self.assertIn("interact_with_browser", tier2_names)
         self.assertNotIn("interact_with_ui", tier2_names)
 
-        # Filter Tier 3 (returns full active set)
         tier3_schemas = filter_tool_schemas_by_tier(schemas, tier="3")
         tier3_names = {s.get("function", {}).get("name") or s.get("name") for s in tier3_schemas}
         self.assertIn("execute_command", tier3_names)
         self.assertIn("interact_with_ui", tier3_names)
         self.assertEqual(len(tier3_schemas), len(schemas))
 
-        # Test is_browser prune for interact_with_ui
         filtered_browser = filter_tool_schemas_by_tier(schemas, tier="3", is_browser=True)
         filtered_browser_names = {s.get("function", {}).get("name") or s.get("name") for s in filtered_browser}
         self.assertNotIn("interact_with_ui", filtered_browser_names)
@@ -161,11 +157,9 @@ def execute(arg: str):
             self.assertFalse(cap.requires_window)
             self.assertEqual(cap.token_cost, 180)
 
-            # Test inclusion in TIER_2_TOOLS dynamic set
             self.assertIn("custom_test_tool", TIER_2_TOOLS)
             self.assertNotIn("custom_test_tool", TIER_1_TOOLS)
 
-            # Test schema filtering includes it for Tier 2 but excludes for Tier 1
             schemas = get_tool_schemas()
             t2_schemas = filter_tool_schemas_by_tier(schemas, tier="2")
             t2_names = {s.get("function", {}).get("name") or s.get("name") for s in t2_schemas}

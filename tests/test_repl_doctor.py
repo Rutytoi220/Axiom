@@ -6,7 +6,6 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 from rich.console import Console
 
@@ -19,7 +18,6 @@ class TestReplDoctorAndUndo(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
         self.repl = InlineRepl()
-        # Redirect repl console to capture output
         self.string_io = io.StringIO()
         repl_module.console = Console(file=self.string_io, force_terminal=False, color_system=None)
 
@@ -30,8 +28,7 @@ class TestReplDoctorAndUndo(unittest.TestCase):
         handled = self.repl.handle_command("/doctor")
         self.assertTrue(handled)
         output = self.string_io.getvalue()
-        
-        # Verify subsystem presence in output
+
         self.assertIn("AXIOM Subsystem Health Diagnostics", output)
         self.assertIn("Ollama Engine", output)
         self.assertIn("Compositor", output)
@@ -44,14 +41,12 @@ class TestReplDoctorAndUndo(unittest.TestCase):
         test_file = Path(self.test_dir) / "doc.txt"
         tool = ManageWorkspaceFileTool()
 
-        # Step 1: write initial
         asyncio.run(tool.execute({
             "action": "write",
             "path": str(test_file),
             "content": "Original Content",
         }))
 
-        # Step 2: overwrite (creates backup)
         asyncio.run(tool.execute({
             "action": "write",
             "path": str(test_file),
@@ -60,7 +55,6 @@ class TestReplDoctorAndUndo(unittest.TestCase):
 
         self.assertEqual(test_file.read_text(encoding="utf-8"), "Modified Content")
 
-        # Step 3: Run /undo with explicit path
         handled = self.repl.handle_command(f"/undo {test_file}")
         self.assertTrue(handled)
         self.assertEqual(test_file.read_text(encoding="utf-8"), "Original Content")
@@ -82,12 +76,49 @@ class TestReplDoctorAndUndo(unittest.TestCase):
             "content": "After Change",
         }))
 
-        # Run /undo without path - should deduce implicit_doc.txt
         handled = self.repl.handle_command("/undo")
         self.assertTrue(handled)
         self.assertEqual(test_file.read_text(encoding="utf-8"), "Before Change")
         output = self.string_io.getvalue()
         self.assertIn("Rollback Successful", output)
+
+    def test_repl_bridge_lifecycle_and_gc_retention(self):
+        async def run_lifecycle():
+            import socket
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(("127.0.0.1", 0))
+                free_port = s.getsockname()[1]
+
+            from axiom.tools.browser_extension import BrowserExtensionBridge, get_bridge
+            BrowserExtensionBridge.reset_instance()
+            BrowserExtensionBridge.get_instance(port=free_port)
+            repl = InlineRepl(session_id="test_bridge_binding_session")
+            self.assertIsNone(repl.bridge)
+            self.assertIsNone(repl._bridge_server)
+
+            await repl.start_services()
+
+            self.assertIsNotNone(repl.bridge)
+            self.assertIsNotNone(repl.bridge.server)
+            self.assertIsNotNone(repl._bridge_server)
+            self.assertIs(repl._bridge_server, repl.bridge.server)
+            self.assertIsNotNone(get_bridge().server)
+            self.assertTrue(get_bridge().server.is_serving())
+
+            ws_uri = f"ws://{repl.bridge.host}:{repl.bridge.port}"
+            import websockets
+            async with websockets.connect(ws_uri):
+                await asyncio.sleep(0.05)
+                self.assertTrue(repl.bridge.is_connected())
+
+            await repl.do_exit()
+            self.assertIsNone(repl._bridge_server)
+            self.assertIsNone(repl.bridge.server)
+            self.assertFalse(repl.bridge.is_connected())
+
+            BrowserExtensionBridge.reset_instance()
+
+        asyncio.run(run_lifecycle())
 
 
 if __name__ == "__main__":

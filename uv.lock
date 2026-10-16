@@ -401,7 +401,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.20.0" },
     { name = "wasmtime", marker = "extra == 'experimental'", specifier = ">=12.0.0" },
     { name = "watchdog", specifier = ">=3.0.0" },
-    { name = "websockets", specifier = ">=10.0" },
+    { name = "websockets", specifier = ">=14.0" },
 ]
 provides-extras = ["audio", "automation", "experimental"]
 
