@@ -137,7 +137,12 @@ class EvalHarness:
         """Execute an EvalTask inside an isolated workspace and validate observable state."""
         start_time = time.perf_counter()
 
-        eff_use_live_model = bool(use_live_model or (task.metadata and task.metadata.get("use_live_model", False)))
+        eff_use_live_model = bool(
+            (use_live_model or (task.metadata and task.metadata.get("use_live_model", False)))
+            and mock_responses is None
+            and not task.mock_responses
+            and mock_stream_fn is None
+        )
         eff_model = model or (task.metadata.get("model") if task.metadata else None) or "qwen3:8b"
         eff_base_url = base_url or (task.metadata.get("base_url") if task.metadata else None) or "http://127.0.0.1:11434"
 

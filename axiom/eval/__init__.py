@@ -8,7 +8,11 @@ from axiom.eval.report import BenchmarkReport
 from axiom.eval.suite_l1 import get_level_1_suite
 from axiom.eval.task import EvalContext, EvalTask, EvaluationContext, EvaluationTask
 from axiom.eval.tasks.deterministic_p1 import get_deterministic_p1_tasks
-from axiom.eval.tasks.model_tasks_p3 import check_ollama_status, get_model_tasks_p3
+from axiom.eval.tasks.model_tasks_p3 import (
+    check_ollama_status,
+    get_model_tasks_p3,
+    task_live_web_research_synthesis,
+)
 from axiom.eval.tasks.synthetic_workflows_p2 import get_synthetic_workflows_p2_tasks
 from axiom.eval.types import EvaluationResult, ResultStatus, ValidationResult
 from axiom.eval.validators import (
@@ -16,6 +20,8 @@ from axiom.eval.validators import (
     assert_file_exists,
     assert_json_field,
     assert_memory_record,
+    assert_no_tool_errors,
+    assert_regex_match,
     assert_tool_called,
     assert_tool_sequence,
     assert_tool_updated,
@@ -40,11 +46,14 @@ __all__ = [
     "get_deterministic_p1_tasks",
     "get_synthetic_workflows_p2_tasks",
     "get_model_tasks_p3",
+    "task_live_web_research_synthesis",
     "check_ollama_status",
     "check_ollama_status_async",
     "LiveOllamaStreamAdapter",
     "assert_file_exists",
     "assert_file_content",
+    "assert_regex_match",
+    "assert_no_tool_errors",
     "assert_memory_record",
     "assert_tool_called",
     "assert_tool_sequence",

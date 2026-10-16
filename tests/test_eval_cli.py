@@ -182,17 +182,17 @@ class TestModelTasksAndOfflineInvariants(unittest.IsolatedAsyncioTestCase):
     def test_model_tasks_definitions(self) -> None:
         """Verify model task structure, tools, and metadata."""
         tasks = get_model_tasks_p3(model="qwen3:8b", base_url="http://127.0.0.1:11434")
-        self.assertEqual(len(tasks), 2)
+        self.assertEqual(len(tasks), 3)
 
         task_ids = [t.task_id for t in tasks]
         self.assertIn("task_live_workspace_diagnostic", task_ids)
         self.assertIn("task_live_metric_formatting", task_ids)
+        self.assertIn("task_live_web_research_synthesis", task_ids)
 
         for t in tasks:
             self.assertEqual(t.level, 2)
             self.assertTrue(t.metadata.get("use_live_model"))
-            self.assertEqual(t.allowed_tools, ["read_file", "write_file"])
-            self.assertIn("read_file", t.custom_tools)
+            self.assertTrue(set(t.allowed_tools).issubset({"read_file", "write_file", "web_search", "fetch_web_page"}))
             self.assertIn("write_file", t.custom_tools)
             self.assertIsNotNone(t.tool_schemas)
 

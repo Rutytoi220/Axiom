@@ -11,7 +11,14 @@ import httpx
 from axiom.db.memory import MemoryStore
 from axiom.eval.harness import check_ollama_status_async
 from axiom.eval.task import EvalContext, EvalTask
-from axiom.eval.validators import assert_file_exists, assert_json_field, assert_tool_called
+from axiom.eval.validators import (
+    assert_file_content,
+    assert_file_exists,
+    assert_json_field,
+    assert_no_tool_errors,
+    assert_regex_match,
+    assert_tool_called,
+)
 from axiom.tools.core import ToolResult
 
 
@@ -217,6 +224,139 @@ def build_task_live_metric_formatting(
     )
 
 
+WEB_RESEARCH_TOOL_SCHEMAS = [
+    *FILE_TOOL_SCHEMAS,
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "Searches the web for candidate information and links.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query keywords"},
+                    "num_results": {"type": "integer", "description": "Number of results to return (1-6)"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_web_page",
+            "description": "Fetches and extracts clean, readable text from a web page URL with SSRF protection.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "The HTTP or HTTPS URL of the webpage to fetch."},
+                    "max_chars": {"type": "integer", "description": "Maximum characters to extract (default 5000, max 8000)"},
+                },
+                "required": ["url"],
+            },
+        },
+    },
+]
+
+
+def _make_web_research_tools():
+    tools = _make_file_tools()
+
+    async def web_search(query: str, num_results: int = 5, **kwargs) -> dict:
+        try:
+            from axiom.tools.web_search import web_search as real_web_search
+            output = await real_web_search(query, num_results=num_results)
+            return {"success": True, "output": output}
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    async def fetch_web_page(url: str, max_chars: int = 5000, **kwargs) -> dict:
+        try:
+            from axiom.tools.web_search import fetch_web_page as real_fetch_web_page
+            output = await real_fetch_web_page(url, max_chars=max_chars)
+            return {"success": True, "output": output}
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    tools["web_search"] = web_search
+    tools["fetch_web_page"] = fetch_web_page
+    return tools
+
+
+async def _validate_web_research_synthesis(ctx: EvalContext) -> Tuple[bool, str]:
+    """Validate observable state and trajectory for web research and synthesis workflow."""
+    # 1. Artifact Check: Verify research_summary.md was created
+    ok_file, msg_file = assert_file_exists(ctx, "research_summary.md")
+    if not ok_file:
+        return False, msg_file
+
+    # 2. Grounded Facts Check: Verify core facts from fetched documentation are present
+    ok_feat, msg_feat = assert_file_content(ctx, "research_summary.md", "Quantum-Safe Encryption")
+    if not ok_feat:
+        return False, f"Missing core feature fact: {msg_feat}"
+
+    ok_date, msg_date = assert_file_content(ctx, "research_summary.md", "2026-11-15")
+    if not ok_date:
+        return False, f"Missing release date fact: {msg_date}"
+
+    # 3. Source Attribution Check: Verify exact source URL is cited
+    ok_url, msg_url = assert_regex_match(
+        ctx,
+        "research_summary.md",
+        r"https://example\.com/chimera-v2-docs",
+    )
+    if not ok_url:
+        return False, f"Missing source attribution URL: {msg_url}"
+
+    # 4. Tool Trajectory Check: Verify both web_search and fetch_web_page were invoked
+    ok_search, msg_search = assert_tool_called(ctx, "web_search", min_count=1)
+    if not ok_search:
+        return False, msg_search
+
+    ok_fetch, msg_fetch = assert_tool_called(ctx, "fetch_web_page", min_count=1)
+    if not ok_fetch:
+        return False, msg_fetch
+
+    # 5. Tool Health Check: Verify no unhandled tool exceptions
+    ok_health, msg_health = assert_no_tool_errors(ctx)
+    if not ok_health:
+        return False, msg_health
+
+    return True, "Web research synthesis verified: search executed, page fetched, facts grounded, and source URL cited."
+
+
+def build_task_live_web_research_synthesis(
+    model: str = "qwen3:8b",
+    base_url: str = "http://127.0.0.1:11434",
+) -> EvalTask:
+    """Level 2 task: Multi-step web research, document fetch, and cited synthesis."""
+    return EvalTask(
+        task_id="task_live_web_research_synthesis",
+        description="Multi-step web research: search topic, fetch candidate documentation, synthesize summary with citations.",
+        level=2,
+        allowed_tools=["web_search", "fetch_web_page", "write_file"],
+        custom_tools=_make_web_research_tools(),
+        tool_schemas=WEB_RESEARCH_TOOL_SCHEMAS,
+        max_steps=5,
+        timeout_seconds=60.0,
+        validator_fn=_validate_web_research_synthesis,
+        user_prompt=(
+            "Research the release date and core security features of 'Project Chimera v2'. "
+            "Search the web, fetch the official documentation page, and synthesize a concise "
+            "summary into 'research_summary.md' with explicit source URL citations."
+        ),
+        metadata={
+            "use_live_model": True,
+            "level": 2,
+            "model": model,
+            "base_url": base_url,
+        },
+    )
+
+
+task_live_web_research_synthesis = build_task_live_web_research_synthesis()
+
+
 def get_model_tasks_p3(
     model: str = "qwen3:8b",
     base_url: str = "http://127.0.0.1:11434",
@@ -225,4 +365,15 @@ def get_model_tasks_p3(
     return [
         build_task_live_workspace_diagnostic(model=model, base_url=base_url),
         build_task_live_metric_formatting(model=model, base_url=base_url),
+        build_task_live_web_research_synthesis(model=model, base_url=base_url),
     ]
+
+
+__all__ = [
+    "check_ollama_status",
+    "build_task_live_workspace_diagnostic",
+    "build_task_live_metric_formatting",
+    "build_task_live_web_research_synthesis",
+    "task_live_web_research_synthesis",
+    "get_model_tasks_p3",
+]

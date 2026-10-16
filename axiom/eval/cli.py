@@ -14,7 +14,7 @@ from axiom.eval.harness import EvalHarness
 from axiom.eval.metrics import EvalStatus, TaskResult, export_json_report, format_summary_table
 from axiom.eval.task import EvalTask
 from axiom.eval.tasks.deterministic_p1 import get_deterministic_p1_tasks
-from axiom.eval.tasks.model_tasks_p3 import get_model_tasks_p3
+from axiom.eval.tasks.model_tasks_p3 import get_model_tasks_p3, task_live_web_research_synthesis
 from axiom.eval.tasks.synthetic_workflows_p2 import get_synthetic_workflows_p2_tasks
 
 

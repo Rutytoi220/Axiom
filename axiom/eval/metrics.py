@@ -12,7 +12,9 @@ from typing import Any, Dict, List, Optional
 class EvalStatus(str, enum.Enum):
     """Categorical evaluation task statuses."""
     PASS = "PASS"
+    PASSED = "PASS"
     FAIL = "FAIL"
+    FAILED = "FAIL"
     FALSE_SUCCESS = "FALSE_SUCCESS"
     STEP_LIMIT_EXCEEDED = "STEP_LIMIT_EXCEEDED"
     TIMEOUT = "TIMEOUT"
@@ -36,7 +38,11 @@ class TaskResult:
 
     @property
     def is_success(self) -> bool:
-        return self.status == EvalStatus.PASS
+        return self.status in (EvalStatus.PASS, EvalStatus.PASSED)
+
+    @property
+    def score(self) -> float:
+        return 1.0 if self.is_success else 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert task result to a JSON-serializable dictionary."""

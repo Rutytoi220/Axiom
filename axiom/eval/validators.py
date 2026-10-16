@@ -13,10 +13,11 @@ from axiom.eval.types import ValidationResult
 
 # --- Low-level assertion helpers returning Tuple[bool, str] ---
 
-def assert_file_exists(workspace: Path, rel_path: str) -> Tuple[bool, str]:
+def assert_file_exists(workspace: Union[Path, Any], rel_path: str) -> Tuple[bool, str]:
     """Verify that a specific relative file exists inside the workspace directory."""
-    target = (workspace / rel_path).resolve()
-    if not str(target).startswith(str(workspace.resolve())):
+    ws = getattr(workspace, "workspace_dir", workspace)
+    target = (ws / rel_path).resolve()
+    if not str(target).startswith(str(ws.resolve())):
         return False, f"Path traversal error: '{rel_path}' escapes workspace"
     if target.is_file():
         return True, f"File '{rel_path}' exists on disk ({target.stat().st_size} bytes)."
@@ -24,21 +25,28 @@ def assert_file_exists(workspace: Path, rel_path: str) -> Tuple[bool, str]:
 
 
 def assert_file_content(
-    workspace: Path,
+    workspace: Union[Path, Any],
     rel_path: str,
-    expected_pattern: str,
+    expected_pattern: Union[str, List[str]],
     exact: bool = False,
 ) -> Tuple[bool, str]:
     """Verify that a workspace file exists and satisfies content matching rules."""
-    exists, reason = assert_file_exists(workspace, rel_path)
+    ws = getattr(workspace, "workspace_dir", workspace)
+    exists, reason = assert_file_exists(ws, rel_path)
     if not exists:
         return False, reason
 
-    target = (workspace / rel_path).resolve()
+    target = (ws / rel_path).resolve()
     try:
         content = target.read_text(encoding="utf-8")
     except Exception as exc:
         return False, f"Failed reading file '{rel_path}': {exc}"
+
+    if isinstance(expected_pattern, (list, tuple)):
+        for pat in expected_pattern:
+            if pat not in content and not re.search(pat, content):
+                return False, f"File '{rel_path}' does not contain expected pattern '{pat}'."
+        return True, f"File '{rel_path}' contains all {len(expected_pattern)} expected patterns."
 
     if exact:
         if content == expected_pattern:
@@ -48,6 +56,28 @@ def assert_file_content(
         if expected_pattern in content or re.search(expected_pattern, content):
             return True, f"File '{rel_path}' contains expected pattern '{expected_pattern}'."
         return False, f"File '{rel_path}' does not contain expected pattern '{expected_pattern}'."
+
+
+def assert_regex_match(
+    workspace: Union[Path, Any],
+    rel_path: str,
+    pattern: str,
+) -> Tuple[bool, str]:
+    """Verify that a workspace file exists and matches a regular expression pattern."""
+    ws = getattr(workspace, "workspace_dir", workspace)
+    exists, reason = assert_file_exists(ws, rel_path)
+    if not exists:
+        return False, reason
+
+    target = (ws / rel_path).resolve()
+    try:
+        content = target.read_text(encoding="utf-8")
+    except Exception as exc:
+        return False, f"Failed reading file '{rel_path}': {exc}"
+
+    if re.search(pattern, content):
+        return True, f"File '{rel_path}' matches regex pattern '{pattern}'."
+    return False, f"File '{rel_path}' does not match regex pattern '{pattern}'."
 
 
 def assert_memory_record(
@@ -83,15 +113,43 @@ def assert_memory_record(
 
 
 def assert_tool_called(
-    tool_calls: List[Dict[str, Any]],
+    tool_calls: Union[List[Dict[str, Any]], Any],
     tool_name: str,
     min_count: int = 1,
 ) -> Tuple[bool, str]:
     """Verify that a specific tool was dispatched at least min_count times."""
-    count = sum(1 for c in tool_calls if (c.get("name") or c.get("tool")) == tool_name)
+    calls = getattr(tool_calls, "tool_calls", tool_calls)
+    if not isinstance(calls, list):
+        calls = []
+    count = sum(1 for c in calls if (c.get("name") or c.get("tool")) == tool_name)
     if count >= min_count:
         return True, f"Tool '{tool_name}' was called {count} time(s) (>= {min_count})."
     return False, f"Tool '{tool_name}' was called {count} time(s), expected at least {min_count}."
+
+
+def assert_no_tool_errors(
+    tool_calls_or_ctx: Union[List[Dict[str, Any]], Any],
+) -> Tuple[bool, str]:
+    """Verify that no unhandled tool exceptions or execution failure envelopes occurred."""
+    if hasattr(tool_calls_or_ctx, "execution_error") and tool_calls_or_ctx.execution_error is not None:
+        return False, f"Execution exception occurred: {tool_calls_or_ctx.execution_error}"
+
+    calls = getattr(tool_calls_or_ctx, "tool_calls", tool_calls_or_ctx)
+    if not isinstance(calls, list):
+        calls = []
+
+    for c in calls:
+        res = c.get("result")
+        name = c.get("name") or c.get("tool", "unknown")
+        if isinstance(res, dict):
+            if res.get("success") is False:
+                err_msg = res.get("error") or res.get("remedy_hint") or "unknown error"
+                return False, f"Tool '{name}' failed: {err_msg}"
+        elif hasattr(res, "success") and not res.success:
+            err_msg = getattr(res, "error", "unknown error")
+            return False, f"Tool '{name}' failed: {err_msg}"
+
+    return True, "No tool execution errors detected."
 
 
 def assert_tool_sequence(

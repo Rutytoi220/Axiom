@@ -33,6 +33,10 @@ from axiom.eval.tasks.deterministic_p1 import (
     build_task_tool_dispatch,
     get_deterministic_p1_tasks,
 )
+from axiom.eval.tasks.model_tasks_p3 import (
+    build_task_live_web_research_synthesis,
+    task_live_web_research_synthesis,
+)
 from axiom.eval.types import ResultStatus
 
 
@@ -361,6 +365,256 @@ class TestEvalHarnessP1(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError) as cm2:
                 ctx.resolve_path("../other_folder")
             self.assertIn("Path traversal detected", str(cm2.exception))
+
+
+class TestEvalLevel2WebResearch(unittest.IsolatedAsyncioTestCase):
+    """Verifies Level 2 web search and page extraction workflow in offline deterministic mode."""
+
+    async def asyncSetUp(self) -> None:
+        self.harness = EvalHarness()
+
+    async def test_web_research_happy_path(self) -> None:
+        """Test 1: Happy path - search -> fetch -> grounded synthesis with source URL citation."""
+        task = build_task_live_web_research_synthesis()
+
+        def mock_web_search(query: str, num_results: int = 5) -> dict:
+            return {
+                "success": True,
+                "output": (
+                    "### Search Results for 'Project Chimera v2'\n"
+                    "1. [Project Chimera v2 Documentation](https://example.com/chimera-v2-docs)\n"
+                    "   Official release details and architecture specification for Chimera v2.\n"
+                ),
+            }
+
+        def mock_fetch_web_page(url: str, max_chars: int = 5000) -> dict:
+            return {
+                "success": True,
+                "output": (
+                    '<external_web_content url="https://example.com/chimera-v2-docs">\n'
+                    "Project Chimera v2 introduces Quantum-Safe Encryption, releasing 2026-11-15.\n"
+                    "Key security architecture revolves around post-quantum cryptographic primitives.\n"
+                    "</external_web_content>"
+                ),
+            }
+
+        def mock_write_file(path: str, content: str, context: EvalContext) -> dict:
+            target = context.resolve_path(path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+            return {"success": True, "path": path, "bytes_written": len(content)}
+
+        mock_responses = [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call_search_1",
+                        "function": {
+                            "name": "web_search",
+                            "arguments": {"query": "Project Chimera v2 release date security features"},
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call_fetch_1",
+                        "function": {
+                            "name": "fetch_web_page",
+                            "arguments": {"url": "https://example.com/chimera-v2-docs"},
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call_write_1",
+                        "function": {
+                            "name": "write_file",
+                            "arguments": {
+                                "path": "research_summary.md",
+                                "content": (
+                                    "# Project Chimera v2 Summary\n\n"
+                                    "- Release Date: 2026-11-15\n"
+                                    "- Core Security: Quantum-Safe Encryption\n\n"
+                                    "Source: https://example.com/chimera-v2-docs\n"
+                                ),
+                            },
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": "Completed research. Summary has been saved to research_summary.md with source URL citations.",
+            },
+        ]
+
+        custom_tools = {
+            "web_search": mock_web_search,
+            "fetch_web_page": mock_fetch_web_page,
+            "write_file": mock_write_file,
+        }
+
+        result = await self.harness.run_task(
+            task,
+            mock_responses=mock_responses,
+            custom_tools=custom_tools,
+        )
+
+        self.assertEqual(result.status, EvalStatus.PASS)
+        self.assertTrue(result.is_success)
+        self.assertEqual(result.score, 1.0)
+        self.assertIn("web_search", result.tool_calls)
+        self.assertIn("fetch_web_page", result.tool_calls)
+        self.assertIn("write_file", result.tool_calls)
+        self.assertIn("Web research synthesis verified", result.message)
+
+    async def test_web_research_empty_search_degradation(self) -> None:
+        """Test 2: Negative path - empty search results gracefully degrades without hallucination."""
+        task = build_task_live_web_research_synthesis()
+
+        def mock_web_search(query: str, num_results: int = 5) -> dict:
+            return {
+                "success": True,
+                "output": "No results found for query: 'Project Chimera v2'",
+            }
+
+        def mock_fetch_web_page(url: str, max_chars: int = 5000) -> dict:
+            return {"success": False, "error": "Should not be called"}
+
+        def mock_write_file(path: str, content: str, context: EvalContext) -> dict:
+            return {"success": True}
+
+        mock_responses = [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call_search_1",
+                        "function": {
+                            "name": "web_search",
+                            "arguments": {"query": "Project Chimera v2"},
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": "I searched for Project Chimera v2 but no results were found. Unable to fetch documentation or produce summary.",
+            },
+        ]
+
+        custom_tools = {
+            "web_search": mock_web_search,
+            "fetch_web_page": mock_fetch_web_page,
+            "write_file": mock_write_file,
+        }
+
+        result = await self.harness.run_task(
+            task,
+            mock_responses=mock_responses,
+            custom_tools=custom_tools,
+        )
+
+        self.assertNotEqual(result.status, EvalStatus.PASS)
+        self.assertFalse(result.is_success)
+        self.assertEqual(result.score, 0.0)
+        self.assertIn("web_search", result.tool_calls)
+        self.assertNotIn("fetch_web_page", result.tool_calls)
+
+    async def test_web_research_fetch_error_envelope(self) -> None:
+        """Test 3: Negative path - HTTP 404 on fetch stops pipeline and rejects false pass."""
+        task = build_task_live_web_research_synthesis()
+
+        def mock_web_search(query: str, num_results: int = 5) -> dict:
+            return {
+                "success": True,
+                "output": (
+                    "### Search Results\n"
+                    "1. [Broken Link](https://example.com/chimera-v2-docs)\n"
+                ),
+            }
+
+        def mock_fetch_web_page(url: str, max_chars: int = 5000) -> dict:
+            return {
+                "success": False,
+                "error": "Error: HTTP 404 fetching URL: https://example.com/chimera-v2-docs",
+            }
+
+        mock_responses = [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call_search_1",
+                        "function": {
+                            "name": "web_search",
+                            "arguments": {"query": "Project Chimera v2"},
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call_fetch_1",
+                        "function": {
+                            "name": "fetch_web_page",
+                            "arguments": {"url": "https://example.com/chimera-v2-docs"},
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": "The documentation page returned HTTP 404. I am unable to verify Project Chimera v2 release details.",
+            },
+        ]
+
+        custom_tools = {
+            "web_search": mock_web_search,
+            "fetch_web_page": mock_fetch_web_page,
+        }
+
+        result = await self.harness.run_task(
+            task,
+            mock_responses=mock_responses,
+            custom_tools=custom_tools,
+        )
+
+        self.assertNotEqual(result.status, EvalStatus.PASS)
+        self.assertFalse(result.is_success)
+        self.assertEqual(result.score, 0.0)
+        self.assertIn("fetch_web_page", result.tool_calls)
+
+    async def test_web_research_catches_false_success(self) -> None:
+        """Test 4: False-success detection gate rejects model claiming completion without artifact creation."""
+        task = build_task_live_web_research_synthesis()
+
+        mock_responses = [
+            {
+                "role": "assistant",
+                "content": "I have researched Project Chimera and completed the task! All results successfully saved.",
+            }
+        ]
+
+        result = await self.harness.run_task(
+            task,
+            mock_responses=mock_responses,
+        )
+
+        self.assertEqual(result.status, EvalStatus.FALSE_SUCCESS)
+        self.assertFalse(result.is_success)
+        self.assertEqual(result.failure_category, "FALSE_SUCCESS")
+        self.assertEqual(result.score, 0.0)
+        self.assertIn("Model claimed success in text without observable state change", result.message)
 
 
 if __name__ == "__main__":
