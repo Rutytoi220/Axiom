@@ -332,6 +332,28 @@ def load_plugins() -> None:
                 "    return json.dumps(res.to_dict(tool=_tool.name, arguments=params))\n"
             ),
         ),
+        (
+            TOOLS_DIR / "vision.py",
+            (
+                "import json\n"
+                "from axiom.tools.vision import InteractWithUITool\n\n"
+                "_tool = InteractWithUITool()\n\n"
+                "TOOL_SCHEMA = {\n"
+                '    "type": "function",\n'
+                '    "function": {\n'
+                '        "name": _tool.name,\n'
+                '        "description": _tool.description,\n'
+                '        "parameters": _tool.schema,\n'
+                "    }\n"
+                "}\n"
+                'TUI_HINT = "🎯 Interacting with UI..."\n'
+                "REQUIRED_RING = 0\n\n"
+                "async def execute(instruction: str, **kwargs) -> str:\n"
+                '    params = {"instruction": instruction, **kwargs}\n'
+                "    res = await _tool.execute(params)\n"
+                "    return json.dumps(res.to_dict(tool=_tool.name, arguments=params))\n"
+            ),
+        ),
     ]
     for target_file, code_content in provisions:
         if not target_file.exists():

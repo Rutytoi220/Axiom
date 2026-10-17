@@ -25,6 +25,7 @@ class SandboxRunner:
         self._has_bwrap = shutil.which("bwrap") is not None
 
     def _build_command(self, command: str, args: List[str]) -> List[str]:
+        os.makedirs(self.policy.workspace_dir, exist_ok=True)
         if not self._has_bwrap:
             logger.warning("DEGRADED_SECURITY: bwrap is missing. Falling back to native execution.")
             try:
@@ -33,8 +34,6 @@ class SandboxRunner:
             except ImportError:
                 pass
             return [command] + args
-
-        os.makedirs(self.policy.workspace_dir, exist_ok=True)
 
         bwrap_cmd = [
             "bwrap",
