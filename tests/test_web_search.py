@@ -8,6 +8,7 @@ import pytest
 import httpx
 
 from axiom.security.network import fetch_with_ssrf_guard, validate_safe_url
+import axiom.tools.web_search as web_search_mod
 from axiom.tools.web_search import (
     FetchWebPageTool,
     WebSearchTool,
@@ -137,8 +138,9 @@ class TestWebSearchAndExtraction:
             request=httpx.Request("GET", "https://html.duckduckgo.com/html/?q=test"),
         )
 
-        with unittest.mock.patch(
-            "axiom.tools.web_search.fetch_with_ssrf_guard",
+        with unittest.mock.patch.object(
+            web_search_mod,
+            "fetch_with_ssrf_guard",
             new=unittest.mock.AsyncMock(return_value=mock_resp),
         ):
             res = await web_search("ai programming", num_results=2)
@@ -177,8 +179,9 @@ class TestWebSearchAndExtraction:
             request=httpx.Request("GET", "https://searx.example.com/search?q=test&format=json"),
         )
 
-        with unittest.mock.patch(
-            "axiom.tools.web_search.fetch_with_ssrf_guard",
+        with unittest.mock.patch.object(
+            web_search_mod,
+            "fetch_with_ssrf_guard",
             new=unittest.mock.AsyncMock(return_value=mock_resp),
         ):
             res = await web_search("searxng privacy", num_results=2)
@@ -220,8 +223,8 @@ class TestWebSearchAndExtraction:
         )
 
         with unittest.mock.patch("axiom.security.network.validate_safe_url", return_value="https://example.com/article"), \
-             unittest.mock.patch("axiom.tools.web_search.validate_safe_url", return_value="https://example.com/article"), \
-             unittest.mock.patch("axiom.tools.web_search.fetch_with_ssrf_guard", new=unittest.mock.AsyncMock(return_value=mock_resp)):
+             unittest.mock.patch.object(web_search_mod, "validate_safe_url", return_value="https://example.com/article"), \
+             unittest.mock.patch.object(web_search_mod, "fetch_with_ssrf_guard", new=unittest.mock.AsyncMock(return_value=mock_resp)):
             res = await fetch_web_page("https://example.com/article")
 
         # Must be wrapped in safety boundaries
@@ -263,8 +266,8 @@ class TestWebSearchAndExtraction:
         )
 
         with unittest.mock.patch("axiom.security.network.validate_safe_url", return_value="https://example.com/long"), \
-             unittest.mock.patch("axiom.tools.web_search.validate_safe_url", return_value="https://example.com/long"), \
-             unittest.mock.patch("axiom.tools.web_search.fetch_with_ssrf_guard", new=unittest.mock.AsyncMock(return_value=mock_resp)):
+             unittest.mock.patch.object(web_search_mod, "validate_safe_url", return_value="https://example.com/long"), \
+             unittest.mock.patch.object(web_search_mod, "fetch_with_ssrf_guard", new=unittest.mock.AsyncMock(return_value=mock_resp)):
             res = await fetch_web_page("https://example.com/long", max_chars=3000)
 
         assert '<external_web_content url="https://example.com/long">' in res
@@ -298,8 +301,8 @@ class TestWebSearchAndExtraction:
         )
 
         with unittest.mock.patch("axiom.security.network.validate_safe_url", return_value="https://example.com/exploit"), \
-             unittest.mock.patch("axiom.tools.web_search.validate_safe_url", return_value="https://example.com/exploit"), \
-             unittest.mock.patch("axiom.tools.web_search.fetch_with_ssrf_guard", new=unittest.mock.AsyncMock(return_value=mock_resp)):
+             unittest.mock.patch.object(web_search_mod, "validate_safe_url", return_value="https://example.com/exploit"), \
+             unittest.mock.patch.object(web_search_mod, "fetch_with_ssrf_guard", new=unittest.mock.AsyncMock(return_value=mock_resp)):
             res = await fetch_web_page("https://example.com/exploit")
 
         # Escaped tag must appear in the body
@@ -317,8 +320,8 @@ class TestWebSearchAndExtraction:
         )
 
         with unittest.mock.patch("axiom.security.network.validate_safe_url", return_value="https://example.com/oversized"), \
-             unittest.mock.patch("axiom.tools.web_search.validate_safe_url", return_value="https://example.com/oversized"), \
-             unittest.mock.patch("axiom.tools.web_search.fetch_with_ssrf_guard", new=unittest.mock.AsyncMock(return_value=mock_resp)):
+             unittest.mock.patch.object(web_search_mod, "validate_safe_url", return_value="https://example.com/oversized"), \
+             unittest.mock.patch.object(web_search_mod, "fetch_with_ssrf_guard", new=unittest.mock.AsyncMock(return_value=mock_resp)):
             with pytest.raises(ValueError, match="Response body exceeded 2 MB limit"):
                 await fetch_web_page("https://example.com/oversized")
 

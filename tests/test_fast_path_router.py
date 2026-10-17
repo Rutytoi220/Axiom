@@ -41,7 +41,8 @@ def test_url_routing(mock_browser):
         assert plan.category == "browser"
 
 
-def test_app_launch_routing():
+@patch("shutil.which", return_value="/usr/bin/kitty")
+def test_app_launch_routing(mock_which):
     """Verify application launches prioritize CLI binaries or gtk-launch."""
     plan = FastestPathRouter.can_route_to_cli("open_app", {"name": "terminal"})
     assert plan is not None

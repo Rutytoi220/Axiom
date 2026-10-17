@@ -1,6 +1,7 @@
 """Tests for Shell authorization and safety boundaries in axiom.tools."""
 
 import os
+import shutil
 import sys
 import unittest
 from unittest.mock import patch
@@ -89,7 +90,8 @@ class TestShellAuthorization(unittest.TestCase):
     def test_sync_shell_command_tool_autopilot_allowed(self):
         """Sync ShellCommandTool execution proceeds when in autopilot mode."""
         os.environ["AXIOM_AUTOPILOT"] = "1"
-        with patch.object(sys.stdin, "isatty", return_value=False):
+        with patch.object(sys.stdin, "isatty", return_value=False), \
+             patch("shutil.which", side_effect=lambda x: None if x == "bwrap" else shutil.which(x)):
             tool = ShellCommandTool()
             res = tool.execute("echo 'hello from autopilot'")
             self.assertTrue(res.success)

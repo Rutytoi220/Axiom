@@ -60,7 +60,6 @@ __all__ = [
     'delete_dynamic_tool',
     'WebSearchTool',
     'FetchWebPageTool',
-    'web_search',
     'fetch_web_page',
 ]
 
@@ -80,7 +79,6 @@ from .web_search import (
     FetchWebPageTool,
     WebSearchTool,
     fetch_web_page,
-    web_search,
 )
 
 

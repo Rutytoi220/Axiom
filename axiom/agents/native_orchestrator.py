@@ -641,9 +641,12 @@ class NativeOrchestrator:
         except Exception:
             pass
 
-        import torch
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
 
         # Enforce 100% GPU layer offload and adequate context size in Ollama
         options = payload.setdefault("options", {})
