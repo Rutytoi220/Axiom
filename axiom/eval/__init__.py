@@ -13,6 +13,7 @@ from axiom.eval.tasks.model_tasks_p3 import (
     get_model_tasks_p3,
     task_live_web_research_synthesis,
 )
+from axiom.eval.tasks.self_repair_l3 import get_self_repair_l3_tasks
 from axiom.eval.tasks.synthetic_workflows_p2 import get_synthetic_workflows_p2_tasks
 from axiom.eval.types import EvaluationResult, ResultStatus, ValidationResult
 from axiom.eval.validators import (
@@ -45,6 +46,7 @@ __all__ = [
     "export_json_report",
     "get_deterministic_p1_tasks",
     "get_synthetic_workflows_p2_tasks",
+    "get_self_repair_l3_tasks",
     "get_model_tasks_p3",
     "task_live_web_research_synthesis",
     "check_ollama_status",

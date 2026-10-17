@@ -15,6 +15,7 @@ from axiom.eval.metrics import EvalStatus, TaskResult, export_json_report, forma
 from axiom.eval.task import EvalTask
 from axiom.eval.tasks.deterministic_p1 import get_deterministic_p1_tasks
 from axiom.eval.tasks.model_tasks_p3 import get_model_tasks_p3, task_live_web_research_synthesis
+from axiom.eval.tasks.self_repair_l3 import get_self_repair_l3_tasks
 from axiom.eval.tasks.synthetic_workflows_p2 import get_synthetic_workflows_p2_tasks
 
 
@@ -24,6 +25,7 @@ def get_all_available_tasks(model: str = "qwen3:8b", base_url: str = "http://127
     tasks.extend(get_deterministic_p1_tasks())
     tasks.extend(get_model_tasks_p3(model=model, base_url=base_url))
     tasks.extend(get_synthetic_workflows_p2_tasks())
+    tasks.extend(get_self_repair_l3_tasks())
     return tasks
 
 
