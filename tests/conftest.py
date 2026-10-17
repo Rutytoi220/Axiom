@@ -103,28 +103,43 @@ def block_external_io(request, monkeypatch):
 
 
 
-from PySide6.QtWidgets import QApplication
-
-@pytest.fixture(autouse=True)
-def qt_lifecycle_teardown(qapp):
-    yield
-    for widget in QApplication.topLevelWidgets():
-        widget.close()
-        widget.deleteLater()
-    QApplication.processEvents()
-
 import sys
-from PySide6.QtWidgets import QApplication
 
-@pytest.fixture(scope="session")
-def qapp_session():
-    app = QApplication.instance()
-    if not app:
-        app = QApplication(sys.argv)
-    yield app
-    app.processEvents()
+try:
+    from PySide6.QtWidgets import QApplication
+    _HAS_QT = True
+except (ImportError, OSError):
+    QApplication = None
+    _HAS_QT = False
 
-@pytest.fixture
-def qapp(qapp_session):
-    yield qapp_session
-    qapp_session.processEvents()
+
+if _HAS_QT:
+    @pytest.fixture(autouse=True)
+    def qt_lifecycle_teardown(qapp):
+        yield
+        if QApplication:
+            for widget in QApplication.topLevelWidgets():
+                widget.close()
+                widget.deleteLater()
+            QApplication.processEvents()
+
+    @pytest.fixture(scope="session")
+    def qapp_session():
+        app = QApplication.instance()
+        if not app:
+            app = QApplication(sys.argv)
+        yield app
+        app.processEvents()
+
+    @pytest.fixture
+    def qapp(qapp_session):
+        yield qapp_session
+        qapp_session.processEvents()
+else:
+    @pytest.fixture
+    def qapp():
+        pytest.skip("PySide6 / libEGL is not available in this environment")
+
+    @pytest.fixture
+    def qapp_session():
+        pytest.skip("PySide6 / libEGL is not available in this environment")
